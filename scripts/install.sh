@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${VENDING_AUTO_SETUP_REPO:-OWNER/vending-auto-setup}"
+REPO="${VENDING_AUTO_SETUP_REPO:-phanuphun/vending-auto-setup}"
 VERSION="${VENDING_AUTO_SETUP_VERSION:-latest}"
 INSTALL_ARGS="${VENDING_AUTO_SETUP_ARGS:-install}"
 
