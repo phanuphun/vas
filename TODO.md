@@ -37,6 +37,7 @@ Phase 2 ส่วน display/touchscreen เริ่มทำแล้ว:
 - ถอนติดตั้งเฉพาะ component ที่เลือกผ่าน `uninstall --component`
 - reset component ที่เลือกโดยถอน package/service และลบ config ที่โปรแกรมสร้าง
 - reset Docker โดยไม่ลบ `/var/lib/docker`
+- install preflight เช็กเวลาเครื่องกับ Ubuntu archive server และพยายามแก้ drift ก่อน `apt-get update`
 
 คำสั่งหลัก:
 
@@ -74,6 +75,10 @@ vending-auto-setup wireguard show --name wg0 --id <history-id>
 
 ```bash
 sudo vending-auto-setup wireguard unsync --name wg0
+```
+
+```bash
+sudo vending-auto-setup install --component all
 ```
 
 ```bash

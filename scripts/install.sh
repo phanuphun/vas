@@ -3,10 +3,21 @@ set -euo pipefail
 
 REPO="${VENDING_AUTO_SETUP_REPO:-phanuphun/vending-auto-setup}"
 VERSION="${VENDING_AUTO_SETUP_VERSION:-latest}"
-INSTALL_ARGS="${VENDING_AUTO_SETUP_ARGS:-install}"
+if [[ -n "${VENDING_AUTO_SETUP_ARGS:-}" ]]; then
+  INSTALL_ARGS="${VENDING_AUTO_SETUP_ARGS}"
+elif [[ "$#" -gt 0 ]]; then
+  INSTALL_ARGS="$*"
+else
+  INSTALL_ARGS="check"
+fi
 
 if [[ "$INSTALL_ARGS" == install* && "$(id -u)" -ne 0 ]]; then
-  echo "Run as root: curl -fsSL <install-url> | sudo bash"
+  echo "Install commands must run as root."
+  echo "Recommended flow:"
+  echo "  wget -O vending-auto-setup.tar.gz https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+  echo "  tar -xzf vending-auto-setup.tar.gz"
+  echo "  cd vending-auto-setup-main"
+  echo "  sudo PYTHONPATH=src python3 -m cli ${INSTALL_ARGS}"
   exit 1
 fi
 

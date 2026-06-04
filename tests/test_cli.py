@@ -45,6 +45,17 @@ def test_install_dry_run_can_install_selected_component(capsys: Any) -> None:
     assert "download.docker.com" not in output
 
 
+def test_install_all_dry_run_installs_wireguard(capsys: Any) -> None:
+    exit_code = main(["--dry-run", "install", "--component", "all"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "apt-get install -y wireguard" in output
+    assert "apt-get install -y git" in output
+    assert "apt-get install -y nodejs" in output
+    assert "docker-ce" in output
+
+
 def test_uninstall_docker_dry_run_preserves_docker_data(capsys: Any) -> None:
     exit_code = main(["--dry-run", "uninstall", "--component", "docker"])
 

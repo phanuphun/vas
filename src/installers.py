@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from clock import SystemClockPreflight
 from config import InstallConfig
 from runner import CommandRunner
 from system import detect_ubuntu_codename
@@ -38,6 +39,7 @@ class PhaseOneInstaller:
         self.install_components(("node", "docker", "git"))
 
     def install_components(self, components: tuple[str, ...]) -> None:
+        SystemClockPreflight(self.runner).ensure_reasonable_clock()
         self.prepare_apt()
         for component in components:
             if component == "node":

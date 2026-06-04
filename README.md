@@ -34,27 +34,51 @@ Phase 3 WireGuard ที่เริ่มทำแล้ว:
 
 ## Bootstrap บน Ubuntu ใหม่โดยไม่ต้องมี Git
 
-เครื่อง Ubuntu ใหม่อาจยังไม่มี Git ดังนั้น flow แรกจะใช้ `curl` หรือ `wget` เพื่อโหลด bootstrap script จาก GitHub
+เครื่อง Ubuntu ใหม่อาจยังไม่มี Git ดังนั้น flow แรกให้ใช้ `wget` ดาวน์โหลด source archive จาก GitHub แล้วสั่ง CLI เอง
+
+```bash
+sudo apt update
+sudo apt install -y wget tar python3
+```
+
+```bash
+wget -O vending-auto-setup.tar.gz https://github.com/phanuphun/vending-auto-setup/archive/refs/heads/main.tar.gz
+tar -xzf vending-auto-setup.tar.gz
+mv vending-auto-setup-main vending-auto-setup
+cd vending-auto-setup
+```
 
 ตรวจ OS อย่างเดียว:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/phanuphun/vending-auto-setup/main/scripts/install.sh | VENDING_AUTO_SETUP_ARGS=about-os bash
+PYTHONPATH=src python3 -m cli about-os
 ```
 
 ตรวจสถานะทั้งหมด:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/phanuphun/vending-auto-setup/main/scripts/install.sh | VENDING_AUTO_SETUP_ARGS=check bash
+PYTHONPATH=src python3 -m cli check
 ```
 
-ติดตั้ง Git, Node.js, npm, Docker จริง:
+ติดตั้งทุก component ที่โปรแกรมรองรับ:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/phanuphun/vending-auto-setup/main/scripts/install.sh | sudo bash
+sudo PYTHONPATH=src python3 -m cli install --component all
 ```
 
 แนะนำให้ snapshot VM ก่อนรัน install จริง เพราะคำสั่งนี้จะแก้ apt repository และติดตั้ง package ลงเครื่อง
+
+ถ้าต้องการใช้ bootstrap script ชั่วคราวแบบไม่เก็บ source ไว้ในเครื่อง คำสั่ง default จะเป็น `check` เท่านั้น ไม่ได้ติดตั้งจริง:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/phanuphun/vending-auto-setup/main/scripts/install.sh | bash
+```
+
+หรือส่ง command ให้ script แบบชัดเจน:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/phanuphun/vending-auto-setup/main/scripts/install.sh | bash -s -- check
+```
 
 ## ติดตั้งแบบ local development
 
@@ -83,12 +107,17 @@ vending-status
 ติดตั้งเฉพาะบางรายการ:
 
 ```bash
+sudo vending-auto-setup install --component all
 sudo vending-auto-setup install --component git
 sudo vending-auto-setup install --component node --component docker
 sudo vending-auto-setup install --component wireguard
 ```
 
 ถ้าไม่ระบุ `--component` คำสั่ง `install` จะติดตั้ง phase 1 ตามค่าเดิม คือ Node.js, Docker และ Git
+
+`install --component all` คือคำสั่งติดตั้งทุก component ที่รองรับ เป็น flow ตรงข้ามกับ `reset --component all`
+
+ก่อนรัน `apt-get update` โปรแกรมจะเช็กเวลาเครื่องกับ Ubuntu archive server ถ้าเวลาเครื่องเพี้ยนเกิน 5 นาที โปรแกรมจะพยายามตั้งเวลา UTC ให้ตรงก่อน เพื่อลดปัญหา apt error แบบ `Release file ... is not valid yet`
 
 ## ตรวจสถานะเครื่อง
 

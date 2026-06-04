@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, cast
 
+from clock import SystemClockPreflight
 from runner import CommandRunner
 
 try:
@@ -44,6 +45,7 @@ class WireGuardManager:
         self.wireguard_dir = wireguard_dir
 
     def install(self) -> None:
+        SystemClockPreflight(self.runner).ensure_reasonable_clock()
         self.runner.run(["apt-get", "update"])
         self.runner.run(["apt-get", "install", "-y", "wireguard"])
 
