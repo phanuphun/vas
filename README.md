@@ -87,6 +87,37 @@ Local POC without publishing:
 PYTHONPATH=src python3 -m vending_auto_setup about-os
 ```
 
+## Virtual Touchscreen POC
+
+If no real touchscreen is available, use Linux `uinput` inside the Ubuntu VM to create a virtual touchscreen for X11/xinput mapping tests.
+
+Install the optional dependency:
+
+```bash
+sudo apt update
+sudo apt install -y python3-evdev
+```
+
+Create a virtual touchscreen and keep it alive:
+
+```bash
+sudo python3 scripts/dev/virtual_touchscreen.py --width 1920 --height 1080
+```
+
+In another terminal, verify that X11 sees the device:
+
+```bash
+xinput list
+```
+
+Emit one test tap:
+
+```bash
+sudo python3 scripts/dev/virtual_touchscreen.py --tap 960 540
+```
+
+This does not attach a fake USB device through VirtualBox. It creates a virtual Linux input device inside the guest OS, which is enough for testing `xinput` detection and mapping logic.
+
 ## Configuration
 
 Default target versions live in `src/vending_auto_setup/config.py`.
