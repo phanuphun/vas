@@ -97,11 +97,11 @@ def collect_vpn_status(interface_name: str = "wg0") -> VpnStatus:
         wg_installed=wg_path is not None,
         wg_version=_read_version((wg_path, "--version")) if wg_path is not None else None,
         app_config_path=app_config_path,
-        app_config_exists=app_config_path.exists(),
+        app_config_exists=_path_exists(app_config_path),
         active_config_path=active_config_path,
-        active_config_exists=active_config_path.exists(),
+        active_config_exists=_path_exists(active_config_path),
         history_dir=history_dir,
-        history_exists=history_dir.exists(),
+        history_exists=_path_exists(history_dir),
         service_enabled=_read_command_first_line(("systemctl", "is-enabled", service)),
         service_active=_read_command_first_line(("systemctl", "is-active", service)),
         interface_exists=_command_succeeds(("wg", "show", interface_name)),
@@ -133,7 +133,7 @@ def collect_display_session_status() -> DisplaySessionStatus:
 def collect_xorg_touchscreen_config_status(
     path: Path = XORG_TOUCHSCREEN_CONFIG_PATH,
 ) -> XorgTouchscreenConfigStatus:
-    if not path.exists():
+    if not _path_exists(path):
         return XorgTouchscreenConfigStatus(path=path, exists=False, has_signature=False)
 
     try:
@@ -151,7 +151,7 @@ def collect_xorg_touchscreen_config_status(
 def collect_display_session_config_status(
     path: Path = DISPLAY_SESSION_CONFIG_PATH,
 ) -> DisplaySessionConfigStatus:
-    if not path.exists():
+    if not _path_exists(path):
         return DisplaySessionConfigStatus(path=path, exists=False, has_signature=False)
 
     try:
@@ -169,7 +169,7 @@ def collect_display_session_config_status(
 def collect_display_session_script_status(
     path: Path = DISPLAY_SESSION_SCRIPT_PATH,
 ) -> DisplaySessionScriptStatus:
-    if not path.exists():
+    if not _path_exists(path):
         return DisplaySessionScriptStatus(path=path, exists=False, has_signature=False, executable=False)
 
     try:
@@ -281,6 +281,13 @@ def _run_command(args: Sequence[str]) -> subprocess.CompletedProcess[str] | None
         )
     except OSError:
         return None
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
 
 
 def _first_output_line(output: str) -> str | None:

@@ -12,6 +12,7 @@ from runner import CommandRunner
 DEFAULT_REPO = "phanuphun/vending-auto-setup"
 DEFAULT_INSTALL_DIR = Path("/opt/vending-auto-setup")
 WRAPPER_NAMES = ("vending-auto-setup", "vas", "vending-status")
+RUNTIME_PACKAGES = ("python3-flask",)
 
 
 class SelfUpdater:
@@ -32,6 +33,7 @@ class SelfUpdater:
     def update(self) -> None:
         archive_url = self.archive_url()
         print(f"download {archive_url}")
+        self.ensure_runtime_packages()
         print(f"replace {self.install_dir}")
         for wrapper_name in WRAPPER_NAMES:
             print(f"write {self.bin_dir / wrapper_name}")
@@ -54,6 +56,15 @@ class SelfUpdater:
         if self.version == "latest":
             return f"https://github.com/{self.repo}/archive/refs/heads/main.tar.gz"
         return f"https://github.com/{self.repo}/archive/refs/tags/{self.version}.tar.gz"
+
+    def ensure_runtime_packages(self) -> None:
+        for package in RUNTIME_PACKAGES:
+            print(f"ensure {package}")
+        if self.runner.dry_run:
+            return
+        if not _can_import_flask():
+            self.runner.run(["apt-get", "update"])
+            self.runner.run(["apt-get", "install", "-y", *RUNTIME_PACKAGES])
 
 
 def extract_source_archive(archive_path: Path, work_path: Path) -> Path:
@@ -84,3 +95,11 @@ def _write_wrapper(path: Path, install_dir: Path, module: str) -> None:
     )
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
+
+
+def _can_import_flask() -> bool:
+    try:
+        import flask  # noqa: F401
+    except ImportError:
+        return False
+    return True

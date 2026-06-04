@@ -216,7 +216,15 @@ def main(argv: list[str] | None = None) -> int:
             if args.dry_run:
                 print(f"start Flask server {url}")
                 return 0
-            from server import run_server
+            try:
+                from server import run_server
+            except ImportError as error:
+                if error.name != "flask":
+                    raise
+                raise RuntimeError(
+                    "Flask is not installed. Run: sudo apt-get update && "
+                    "sudo apt-get install -y python3-flask"
+                ) from error
 
             print(f"Starting vending-auto-setup dashboard at {url}")
             run_server(host=args.host, port=args.port, debug=args.debug)

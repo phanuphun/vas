@@ -47,6 +47,7 @@ def test_update_dry_run_prints_download_and_wrappers(capsys: Any, tmp_path: Path
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "download https://github.com/phanuphun/vending-auto-setup/archive/refs/heads/main.tar.gz" in output
+    assert "ensure python3-flask" in output
     assert "vending-auto-setup" in output
     assert "vas" in output
     assert "vending-status" in output

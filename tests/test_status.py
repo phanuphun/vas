@@ -137,6 +137,22 @@ def test_vpn_status_collects_config_paths_and_connection_state(tmp_path) -> None
     assert status.handshake_peers == 1
 
 
+def test_vpn_status_handles_permission_denied_paths(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    with patch("status.default_store_dir", return_value=tmp_path / "store"):
+        with patch("status.WIREGUARD_CONFIG_DIR", Path("/etc/wireguard")):
+            with patch("status.shutil.which", return_value="/usr/bin/wg"):
+                with patch("pathlib.Path.exists", side_effect=PermissionError("permission denied")):
+                    with patch("status._read_version", return_value="wireguard-tools v1.0.0"):
+                        with patch("status._read_command_first_line", return_value="unknown"):
+                            with patch("status._command_succeeds", return_value=False):
+                                with patch("status._count_handshake_peers", return_value=None):
+                                    status = collect_vpn_status("wg0")
+
+    assert status.app_config_exists is False
+    assert status.active_config_exists is False
+    assert status.history_exists is False
+
+
 def test_print_status_includes_vpn_section(capsys: Any) -> None:
     with patch("status.collect_status", return_value=()):
         with patch("status.collect_vpn_status") as collect_vpn:
