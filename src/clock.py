@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,7 +10,12 @@ from email.utils import parsedate_to_datetime
 from runner import CommandRunner
 
 
-DEFAULT_TIME_URL = "http://archive.ubuntu.com/ubuntu/"
+DEFAULT_TIME_URLS = (
+    "http://us.archive.ubuntu.com/ubuntu/dists/jammy-updates/InRelease",
+    "http://archive.ubuntu.com/ubuntu/dists/jammy-updates/InRelease",
+    "http://security.ubuntu.com/ubuntu/dists/jammy-security/InRelease",
+    "https://github.com",
+)
 MAX_CLOCK_DRIFT_SECONDS = 300
 
 
@@ -28,12 +34,12 @@ class ClockDrift:
 
 
 class SystemClockPreflight:
-    def __init__(self, runner: CommandRunner, time_url: str = DEFAULT_TIME_URL) -> None:
+    def __init__(self, runner: CommandRunner, time_urls: tuple[str, ...] = DEFAULT_TIME_URLS) -> None:
         self.runner = runner
-        self.time_url = time_url
+        self.time_urls = time_urls
 
     def ensure_reasonable_clock(self) -> None:
-        print(f"check system clock ({self.time_url})")
+        print("check system clock")
         if self.runner.dry_run:
             return
 
@@ -52,17 +58,28 @@ class SystemClockPreflight:
         self.runner.run(["timedatectl", "set-ntp", "true"], check=False)
 
     def read_clock_drift(self) -> ClockDrift | None:
-        network_epoch = read_network_epoch(self.time_url)
+        network_epoch = read_network_epoch_from_any(self.time_urls)
         if network_epoch is None:
             return None
         return ClockDrift(local_epoch=int(time.time()), network_epoch=network_epoch)
 
 
+def read_network_epoch_from_any(urls: tuple[str, ...]) -> int | None:
+    for url in urls:
+        network_epoch = read_network_epoch(url)
+        if network_epoch is not None:
+            print(f"OK      Clock      read network time from {url}")
+            return network_epoch
+    return None
+
+
 def read_network_epoch(url: str) -> int | None:
-    request = urllib.request.Request(url, method="HEAD")
+    request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "vending-auto-setup"})
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             raw_date = response.headers.get("Date")
+    except urllib.error.HTTPError as error:
+        raw_date = error.headers.get("Date")
     except OSError:
         return None
 

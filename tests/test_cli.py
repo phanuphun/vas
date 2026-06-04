@@ -14,6 +14,44 @@ def test_check_command_runs_in_dry_run_mode(capsys: Any) -> None:
     assert "Docker" in output
 
 
+def test_version_flag_prints_version(capsys: Any) -> None:
+    try:
+        main(["--version"])
+    except SystemExit as error:
+        assert error.code == 0
+
+    output = capsys.readouterr().out
+    assert "vending-auto-setup 0.1.0" in output
+
+
+def test_version_command_prints_plain_version(capsys: Any) -> None:
+    exit_code = main(["version"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert output.strip() == "0.1.0"
+
+
+def test_update_dry_run_prints_download_and_wrappers(capsys: Any, tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "--dry-run",
+            "update",
+            "--install-dir",
+            str(tmp_path / "opt" / "vending-auto-setup"),
+            "--bin-dir",
+            str(tmp_path / "bin"),
+        ]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "download https://github.com/phanuphun/vending-auto-setup/archive/refs/heads/main.tar.gz" in output
+    assert "vending-auto-setup" in output
+    assert "vas" in output
+    assert "vending-status" in output
+
+
 def test_install_dry_run_uses_requested_versions(capsys: Any) -> None:
     exit_code = main(
         [

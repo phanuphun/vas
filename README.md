@@ -45,9 +45,11 @@ wget -qO- https://raw.githubusercontent.com/phanuphun/vending-auto-setup/main/sc
 หลังจากคำสั่งนี้จบ จะใช้คำสั่งเหล่านี้ได้:
 
 ```bash
-vending-auto-setup check
-sudo vending-auto-setup install --component all
-sudo vending-auto-setup reset --component all
+vas check
+vas --version
+sudo vas install --component all
+sudo vas update
+sudo vas reset --component all
 ```
 
 ถ้าต้องการติดตั้ง CLI wrapper อย่างเดียว แต่ยังไม่ติดตั้ง package:
@@ -123,6 +125,7 @@ python -m pip install -e ".[dev]"
 
 ```bash
 vending-auto-setup check
+vas check
 vending-status
 ```
 
@@ -130,6 +133,7 @@ vending-status
 
 ```bash
 sudo vending-auto-setup install --component all
+sudo vas install --component all
 sudo vending-auto-setup install --component git
 sudo vending-auto-setup install --component node --component docker
 sudo vending-auto-setup install --component wireguard
@@ -140,6 +144,15 @@ sudo vending-auto-setup install --component wireguard
 `install --component all` คือคำสั่งติดตั้งทุก component ที่รองรับ เป็น flow ตรงข้ามกับ `reset --component all`
 
 ก่อนรัน `apt-get update` โปรแกรมจะเช็กเวลาเครื่องกับ Ubuntu archive server ถ้าเวลาเครื่องเพี้ยนเกิน 5 นาที โปรแกรมจะพยายามตั้งเวลา UTC ให้ตรงก่อน เพื่อลดปัญหา apt error แบบ `Release file ... is not valid yet`
+
+ตรวจ version และอัปเดต CLI ที่ติดตั้งด้วย `--install-cli`:
+
+```bash
+vas --version
+sudo vas update
+```
+
+`update` จะดาวน์โหลด source ล่าสุดจาก GitHub แล้วแทนที่ `/opt/vending-auto-setup` พร้อมเขียน wrapper ใน `/usr/local/bin` ใหม่ โดยไม่ต้องใช้ `pip`
 
 ## ตรวจสถานะเครื่อง
 

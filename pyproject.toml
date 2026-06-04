@@ -20,6 +20,7 @@ dev = [
 
 [project.scripts]
 vending-auto-setup = "cli:main"
+vas = "cli:main"
 vending-status = "status:main"
 
 [tool.hatch.build.targets.wheel]

@@ -97,6 +97,12 @@ PYTHONPATH=/opt/vending-auto-setup/src exec python3 -m cli "$@"
 EOF
   chmod +x "${bin_dir}/vending-auto-setup"
 
+  cat >"${bin_dir}/vas" <<'EOF'
+#!/usr/bin/env bash
+PYTHONPATH=/opt/vending-auto-setup/src exec python3 -m cli "$@"
+EOF
+  chmod +x "${bin_dir}/vas"
+
   cat >"${bin_dir}/vending-status" <<'EOF'
 #!/usr/bin/env bash
 PYTHONPATH=/opt/vending-auto-setup/src exec python3 -m status "$@"
@@ -105,6 +111,7 @@ EOF
 
   echo "Installed CLI wrappers:"
   echo "  ${bin_dir}/vending-auto-setup"
+  echo "  ${bin_dir}/vas"
   echo "  ${bin_dir}/vending-status"
 }
 

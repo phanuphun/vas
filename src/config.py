@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 
 
+APP_VERSION = "0.1.0"
+
+
 @dataclass(frozen=True)
 class InstallConfig:
     node_major: int = 22

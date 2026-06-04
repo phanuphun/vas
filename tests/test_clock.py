@@ -1,6 +1,9 @@
 from typing import Any
+from unittest.mock import patch
+from urllib.error import HTTPError
+from email.message import Message
 
-from clock import ClockDrift, SystemClockPreflight
+from clock import ClockDrift, SystemClockPreflight, read_network_epoch
 from runner import CommandRunner
 
 
@@ -16,4 +19,14 @@ def test_clock_preflight_dry_run_prints_check(capsys: Any) -> None:
 
     output = capsys.readouterr().out
     assert "check system clock" in output
-    assert "archive.ubuntu.com" in output
+
+
+def test_read_network_epoch_uses_http_error_date_header() -> None:
+    headers = Message()
+    headers["Date"] = "Thu, 04 Jun 2026 15:00:00 GMT"
+    error = HTTPError("http://example.test", 403, "Forbidden", headers, None)
+
+    with patch("clock.urllib.request.urlopen", side_effect=error):
+        epoch = read_network_epoch("http://example.test")
+
+    assert epoch == 1780585200

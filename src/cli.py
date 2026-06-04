@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from config import DEFAULT_CONFIG, InstallConfig
+from config import APP_VERSION, DEFAULT_CONFIG, InstallConfig
 from display import ROTATION_MATRICES, DisplayConfigurator
 from installers import PhaseOneInstaller
 from os_info import print_os_info
@@ -11,6 +11,7 @@ from reset import INSTALL_COMPONENTS, RESET_COMPONENTS, LifecycleManager
 from runner import CommandRunner
 from status import print_status
 from system import require_linux, require_root
+from updater import DEFAULT_INSTALL_DIR, DEFAULT_REPO, SelfUpdater
 from wireguard import WireGuardManager
 
 
@@ -20,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Prepare Ubuntu 22.04 LTS vending machines.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing them.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
 
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -36,6 +38,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subcommands.add_parser("check", help="Show whether phase 1 tools are present.")
     subcommands.add_parser("about-os", help="Print OS information for bootstrap POC.")
+    subcommands.add_parser("version", help="Print CLI version.")
+
+    update = subcommands.add_parser("update", help="Update the installed CLI wrapper source from GitHub.")
+    update.add_argument("--repo", default=DEFAULT_REPO)
+    update.add_argument("--version", default="latest", help="Git tag to install, or latest for main.")
+    update.add_argument("--install-dir", type=Path, default=DEFAULT_INSTALL_DIR, help=argparse.SUPPRESS)
+    update.add_argument("--bin-dir", type=Path, default=Path("/usr/local/bin"), help=argparse.SUPPRESS)
 
     display = subcommands.add_parser("display", help="Inspect and configure X11 display/touchscreen settings.")
     display_subcommands = display.add_subparsers(dest="display_command", required=True)
@@ -169,6 +178,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "about-os":
         print_os_info()
+        return 0
+
+    if args.command == "version":
+        print(APP_VERSION)
+        return 0
+
+    if args.command == "update":
+        if not args.dry_run:
+            require_linux()
+            require_root()
+        SelfUpdater(
+            runner,
+            repo=args.repo,
+            version=args.version,
+            install_dir=args.install_dir,
+            bin_dir=args.bin_dir,
+        ).update()
         return 0
 
     if args.command == "install":
