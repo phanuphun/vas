@@ -26,6 +26,16 @@ from status import (
     collect_web_server_status,
     collect_xorg_touchscreen_config_status,
 )
+from wireguard import (
+    WireGuardValidationResult,
+    WireGuardManager,
+    chmod_private,
+    mask_secrets,
+    render_template as render_wireguard_template,
+    sanitize_history_id,
+    sanitize_interface_name,
+    validate_config_content,
+)
 
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -62,6 +72,15 @@ class CommandPreview:
     requires_root: bool
 
 
+@dataclass(frozen=True)
+class WireGuardHistoryEntry:
+    id: str
+    path: str
+    valid: bool
+    errors: tuple[str, ...]
+    warnings: tuple[str, ...]
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
@@ -94,7 +113,131 @@ def create_app() -> Flask:
 
     @app.get("/wireguard")
     def wireguard() -> str:
-        return render_template("wireguard.html", vpn=collect_vpn_status())
+        vpn = collect_vpn_status()
+        return render_template(
+            "wireguard.html",
+            vpn=vpn,
+            config_content=_read_wireguard_config(vpn.app_config_path),
+            config_validation=_validate_wireguard_path(vpn.app_config_path),
+            history_entries=collect_wireguard_history(vpn.interface_name),
+        )
+
+    @app.get("/api/wireguard/config")
+    def wireguard_config() -> dict[str, object]:
+        name = _wireguard_name_from_request()
+        manager = WireGuardManager(CommandRunner())
+        path = manager.saved_config_path(name)
+        return {
+            "name": name,
+            "path": path.as_posix(),
+            "exists": path.exists(),
+            "content": _read_wireguard_config(path),
+            "validation": _validation_payload(_validate_wireguard_path(path)),
+        }
+
+    @app.post("/api/wireguard/template")
+    def wireguard_template_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        try:
+            name = _wireguard_name_from_payload()
+            content = render_wireguard_template(name)
+        except ValueError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        return {"status": "ok", "name": name, "content": content, "validation": _validation_payload(validate_config_content(content))}
+
+    @app.post("/api/wireguard/validate")
+    def wireguard_validate_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        content = str(payload.get("content", ""))
+        result = validate_config_content(content)
+        return {"status": "ok" if result.valid else "invalid", "validation": _validation_payload(result)}
+
+    @app.post("/api/wireguard/config")
+    def wireguard_save_config_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        content = str(payload.get("content", ""))
+        try:
+            name = _wireguard_name_from_payload()
+            result = validate_config_content(content)
+            if not result.valid:
+                return {"status": "invalid", "validation": _validation_payload(result)}, 400
+            path = WireGuardManager(CommandRunner()).saved_config_path(name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            chmod_private(path)
+        except (OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        return {
+            "status": "ok",
+            "name": name,
+            "path": path.as_posix(),
+            "validation": _validation_payload(result),
+        }
+
+    @app.delete("/api/wireguard/config")
+    def wireguard_delete_config_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        try:
+            name = _wireguard_name_from_request()
+            path = WireGuardManager(CommandRunner()).saved_config_path(name)
+            if path.exists():
+                path.unlink()
+        except (OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        return {"status": "ok", "name": name, "path": path.as_posix(), "exists": path.exists()}
+
+    @app.post("/api/wireguard/action")
+    def wireguard_action_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action", "")).strip()
+        try:
+            name = _wireguard_name_from_payload()
+            manager = WireGuardManager(CommandRunner())
+            if action == "sync":
+                manager.sync(name=name)
+            elif action == "unsync":
+                manager.unsync(name=name)
+            else:
+                return {"status": "error", "errors": [f"Unknown WireGuard action: {action}"]}, 400
+        except (CommandExecutionError, OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        return {"status": "ok", "action": action, "name": name}
+
+    @app.get("/api/wireguard/history")
+    def wireguard_history_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        try:
+            name = _wireguard_name_from_request()
+        except ValueError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        return {"status": "ok", "name": name, "entries": [entry.__dict__ for entry in collect_wireguard_history(name)]}
+
+    @app.get("/api/wireguard/history/<history_id>")
+    def wireguard_history_show_api(history_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        try:
+            name = _wireguard_name_from_request()
+            path = _wireguard_history_path(name, history_id)
+            if not path.exists():
+                return {"status": "error", "errors": [f"History entry not found: {history_id}"]}, 404
+            content = path.read_text(encoding="utf-8")
+            validation = validate_config_content(content)
+        except (OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        return {
+            "status": "ok",
+            "id": sanitize_history_id(history_id),
+            "path": path.as_posix(),
+            "content": mask_secrets(content),
+            "validation": _validation_payload(validation),
+        }
+
+    @app.delete("/api/wireguard/history/<history_id>")
+    def wireguard_history_delete_api(history_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        try:
+            name = _wireguard_name_from_request()
+            path = _wireguard_history_path(name, history_id)
+            if path.exists():
+                path.unlink()
+        except (OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        return {"status": "ok", "id": sanitize_history_id(history_id), "deleted": not path.exists()}
 
     @app.get("/commands")
     def commands() -> str:
@@ -226,6 +369,65 @@ def build_wireguard_commands() -> tuple[CommandPreview, ...]:
     )
 
 
+def collect_wireguard_history(name: str = "wg0") -> tuple[WireGuardHistoryEntry, ...]:
+    manager = WireGuardManager(CommandRunner())
+    history_dir = manager.history_dir(name)
+    if not history_dir.exists():
+        return ()
+
+    entries: list[WireGuardHistoryEntry] = []
+    for path in sorted(history_dir.glob("*.conf"), reverse=True):
+        result = _validate_wireguard_path(path)
+        entries.append(
+            WireGuardHistoryEntry(
+                id=path.stem,
+                path=path.as_posix(),
+                valid=result.valid,
+                errors=result.errors,
+                warnings=result.warnings,
+            )
+        )
+    return tuple(entries)
+
+
+def _read_wireguard_config(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+    except OSError:
+        return ""
+
+
+def _validate_wireguard_path(path: Path) -> WireGuardValidationResult:
+    try:
+        if not path.exists():
+            return validate_config_content("")
+        return validate_config_content(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        return validate_config_content(f"# read error: {error}")
+
+
+def _validation_payload(result: WireGuardValidationResult) -> dict[str, object]:
+    return {
+        "valid": result.valid,
+        "errors": result.errors,
+        "warnings": result.warnings,
+    }
+
+
+def _wireguard_name_from_request() -> str:
+    return sanitize_interface_name((request.args.get("name") or "wg0").strip() or "wg0")
+
+
+def _wireguard_name_from_payload() -> str:
+    payload = request.get_json(silent=True) or {}
+    return sanitize_interface_name(str(payload.get("name") or "wg0").strip() or "wg0")
+
+
+def _wireguard_history_path(name: str, history_id: str) -> Path:
+    manager = WireGuardManager(CommandRunner())
+    return manager.history_dir(name) / f"{sanitize_history_id(history_id)}.conf"
+
+
 def build_server_commands() -> tuple[CommandPreview, ...]:
     return tuple(
         CommandPreview(label=label, command=command, requires_root=command.startswith("sudo "))
@@ -313,11 +515,10 @@ def validate_display_apply(output: str, touch: str, rotate: str, devices: Displa
     return errors
 
 
-def _allowed_config_paths() -> "dict[str, object]":
+def _allowed_config_paths() -> dict[str, Path]:
     """Allowlist ของ config files ที่อ่านได้ผ่าน API"""
-    from display import _effective_home_config_path, _effective_home_script_path
+    from display import _effective_home_config_path, _effective_home_script_path  # type: ignore[attr-defined]
     from status import XORG_TOUCHSCREEN_CONFIG_PATH
-    from pathlib import Path
     return {
         "xprofile": _effective_home_config_path(),
         "display_script": _effective_home_script_path(),

@@ -252,6 +252,8 @@ code {
 }
 
 .primary-action,
+.secondary-action,
+.danger-action,
 .rotation-button {
   border: 1px solid var(--text);
   border-radius: 4px;
@@ -266,6 +268,136 @@ code {
   background: var(--accent);
   color: #ffffff;
   border-color: var(--accent);
+}
+
+.secondary-action,
+.danger-action {
+  min-height: 38px;
+  padding: 7px 12px;
+  border-color: var(--line);
+}
+
+.secondary-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.danger-action {
+  border-color: #fecaca;
+  color: var(--missing);
+}
+
+.danger-action:hover {
+  border-color: var(--missing);
+  background: #fff5f5;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.action-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.wireguard-page {
+  display: grid;
+  gap: 16px;
+}
+
+.wireguard-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+}
+
+.wireguard-editor textarea {
+  width: 100%;
+  min-height: 360px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfe;
+  color: var(--text);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.wireguard-actions {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.validation-panel {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+
+.validation-panel.valid {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.validation-panel.invalid {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.validation-panel ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfe;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.history-item:hover {
+  border-color: var(--accent);
+}
+
+.history-item small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.history-viewer {
+  min-width: 0;
 }
 
 .display-layout {
@@ -466,6 +598,18 @@ code {
 
   .display-layout {
     grid-template-columns: 1fr;
+  }
+
+  .wireguard-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .section-header {
+    flex-direction: column;
+  }
+
+  .action-row {
+    justify-content: flex-start;
   }
 
   .monitor-frame {

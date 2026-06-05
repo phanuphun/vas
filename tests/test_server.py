@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
+
+from pytest import MonkeyPatch
 
 from display import TouchDevice, parse_xinput_device_map
 from server import (
@@ -26,6 +28,18 @@ from status import (
     WebServerStatus,
     XorgTouchscreenConfigStatus,
 )
+
+VALID_WIREGUARD_CONFIG = """\
+[Interface]
+PrivateKey = interface-secret
+Address = 10.8.0.13/24
+
+[Peer]
+PublicKey = peer-public
+PresharedKey = peer-secret
+AllowedIPs = 10.8.0.0/24
+Endpoint = vpn.example.com:51820
+"""
 
 
 def test_command_previews_are_allowlisted_vas_commands() -> None:
@@ -94,6 +108,66 @@ def test_command_docs_route_renders_command_sections() -> None:
     assert "sudo vas reset --component docker" in body
     assert "sudo vas wireguard sync --name wg0" in body
     assert "sudo vas server start --host 0.0.0.0 --port 8888" in body
+
+
+def test_wireguard_config_api_validates_saves_and_deletes_config(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config-home"))
+    app = create_app()
+    client = app.test_client()
+
+    validate_response = client.post(
+        "/api/wireguard/validate",
+        json={"name": "wg0", "content": VALID_WIREGUARD_CONFIG},
+    )
+    assert validate_response.status_code == 200
+    validate_json = cast(dict[str, Any], validate_response.json)
+    assert validate_json["validation"]["valid"] is True
+
+    save_response = client.post(
+        "/api/wireguard/config",
+        json={"name": "wg0", "content": VALID_WIREGUARD_CONFIG},
+    )
+    assert save_response.status_code == 200
+    save_json = cast(dict[str, Any], save_response.json)
+    saved_path = Path(save_json["path"])
+    assert saved_path.read_text(encoding="utf-8") == VALID_WIREGUARD_CONFIG
+
+    get_response = client.get("/api/wireguard/config?name=wg0")
+    assert get_response.status_code == 200
+    get_json = cast(dict[str, Any], get_response.json)
+    assert get_json["exists"] is True
+    assert get_json["content"] == VALID_WIREGUARD_CONFIG
+
+    delete_response = client.delete("/api/wireguard/config?name=wg0")
+    assert delete_response.status_code == 200
+    assert not saved_path.exists()
+
+
+def test_wireguard_history_api_masks_and_validates_entries(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config-home"))
+    history = tmp_path / "config-home" / "vending-auto-setup" / "wireguard" / "history" / "wg0"
+    history.mkdir(parents=True)
+    snapshot = history / "20260604T120000Z-sync.conf"
+    snapshot.write_text(VALID_WIREGUARD_CONFIG, encoding="utf-8")
+
+    client = create_app().test_client()
+    response = client.get("/api/wireguard/history?name=wg0")
+
+    assert response.status_code == 200
+    history_json = cast(dict[str, Any], response.json)
+    assert history_json["entries"][0]["id"] == "20260604T120000Z-sync"
+    assert history_json["entries"][0]["valid"] is True
+
+    show_response = client.get("/api/wireguard/history/20260604T120000Z-sync?name=wg0")
+    assert show_response.status_code == 200
+    show_json = cast(dict[str, Any], show_response.json)
+    assert "PrivateKey = <hidden>" in show_json["content"]
+    assert "PresharedKey = <hidden>" in show_json["content"]
+    assert "interface-secret" not in show_json["content"]
+
+    delete_response = client.delete("/api/wireguard/history/20260604T120000Z-sync?name=wg0")
+    assert delete_response.status_code == 200
+    assert not snapshot.exists()
 
 
 def test_display_devices_api_uses_requested_x_display() -> None:

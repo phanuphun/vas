@@ -2,23 +2,287 @@
 {% set title = "WireGuard" %}
 
 {% block content %}
-<section class="status-grid">
-  <article class="panel">
-    <h2>WireGuard Status</h2>
-    <dl>
-      <dt>Tool</dt>
-      <dd><span class="badge {{ 'ok' if vpn.wg_installed else 'missing' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</dd>
-      <dt>App config</dt>
-      <dd>{{ vpn.app_config_path.as_posix() }}</dd>
-      <dt>Active config</dt>
-      <dd>{{ vpn.active_config_path.as_posix() }}</dd>
-      <dt>History</dt>
-      <dd>{{ vpn.history_dir.as_posix() }}</dd>
-      <dt>Service</dt>
-      <dd>{{ vpn.service_enabled }} / {{ vpn.service_active }}</dd>
-      <dt>Connection</dt>
-      <dd>{{ vpn_connection_label(vpn) }}</dd>
-    </dl>
-  </article>
+<section class="wireguard-page" data-interface="{{ vpn.interface_name }}">
+  <section class="status-grid">
+    <article class="panel">
+      <h2>WireGuard Status</h2>
+      <dl>
+        <dt>Tool</dt>
+        <dd><span class="badge {{ 'ok' if vpn.wg_installed else 'missing' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</dd>
+        <dt>App config</dt>
+        <dd><span class="badge {{ 'ok' if vpn.app_config_exists else 'warn' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>{{ vpn.app_config_path.as_posix() }}</dd>
+        <dt>Active config</dt>
+        <dd><span class="badge {{ 'ok' if vpn.active_config_exists else 'warn' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>{{ vpn.active_config_path.as_posix() }}</dd>
+        <dt>History</dt>
+        <dd><span class="badge {{ 'ok' if vpn.history_exists else 'warn' }}">{{ 'OK' if vpn.history_exists else 'WARN' }}</span>{{ vpn.history_dir.as_posix() }}</dd>
+        <dt>Service</dt>
+        <dd>{{ vpn.service_enabled }} / {{ vpn.service_active }}</dd>
+        <dt>Connection</dt>
+        <dd>{{ vpn_connection_label(vpn) }}</dd>
+      </dl>
+    </article>
+  </section>
+
+  <section class="wireguard-layout">
+    <article class="panel wireguard-editor">
+      <div class="section-header">
+        <div>
+          <h2>App Config</h2>
+          <p class="muted">{{ vpn.app_config_path.as_posix() }}</p>
+        </div>
+        <div class="action-row">
+          <button class="secondary-action" id="loadTemplate" type="button">New template</button>
+          <button class="secondary-action" id="validateConfig" type="button">Validate</button>
+          <button class="primary-action" id="saveConfig" type="button">Save</button>
+          <button class="danger-action" id="deleteConfig" type="button">Delete</button>
+        </div>
+      </div>
+
+      <textarea id="wireguardConfig" spellcheck="false">{{ config_content }}</textarea>
+      <div class="validation-panel {{ 'valid' if config_validation.valid else 'invalid' }}" id="configValidation">
+        <strong>{{ 'Valid config' if config_validation.valid else 'Config needs attention' }}</strong>
+        <ul>
+          {% for error in config_validation.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+          {% for warning in config_validation.warnings %}
+          <li>{{ warning }}</li>
+          {% endfor %}
+          {% if config_validation.valid and not config_validation.warnings %}
+          <li>No validation issues.</li>
+          {% endif %}
+        </ul>
+      </div>
+    </article>
+
+    <aside class="panel wireguard-actions">
+      <h2>Actions</h2>
+      <div class="action-stack">
+        <button class="primary-action" data-wireguard-action="sync" type="button">Sync active config</button>
+        <button class="secondary-action" data-wireguard-action="unsync" type="button">Unsync active config</button>
+      </div>
+      <p class="field-hint">Sync writes the saved app config to the active WireGuard config and restarts the interface. Unsync disables the service and backs up the active config.</p>
+      <div class="apply-result" id="wireguardResult" aria-live="polite"></div>
+    </aside>
+  </section>
+
+  <section class="wireguard-layout">
+    <article class="panel">
+      <div class="section-header">
+        <div>
+          <h2>Config History</h2>
+          <p class="muted">{{ vpn.history_dir.as_posix() }}</p>
+        </div>
+        <button class="secondary-action" id="refreshHistory" type="button">Refresh</button>
+      </div>
+
+      <div class="history-list" id="historyList">
+        {% for entry in history_entries %}
+        <button class="history-item" data-history-id="{{ entry.id }}" type="button">
+          <span>
+            <strong>{{ entry.id }}</strong>
+            <small>{{ entry.path }}</small>
+          </span>
+          <span class="badge {{ 'ok' if entry.valid else 'warn' }}">{{ 'OK' if entry.valid else 'WARN' }}</span>
+        </button>
+        {% else %}
+        <p class="muted" id="historyEmpty">No history snapshots found.</p>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="panel history-viewer" id="historyViewer" hidden>
+      <div class="section-header">
+        <div>
+          <h2 id="historyTitle">History Snapshot</h2>
+          <p class="muted" id="historyPath"></p>
+        </div>
+        <button class="danger-action" id="deleteHistory" type="button">Delete</button>
+      </div>
+      <div class="validation-panel" id="historyValidation"></div>
+      <pre class="config-file-content" id="historyContent"></pre>
+    </article>
+  </section>
 </section>
+
+<script>
+const wireguardPage = document.querySelector(".wireguard-page");
+const interfaceName = wireguardPage.dataset.interface || "wg0";
+const configText = document.getElementById("wireguardConfig");
+const configValidation = document.getElementById("configValidation");
+const resultEl = document.getElementById("wireguardResult");
+const historyList = document.getElementById("historyList");
+const historyViewer = document.getElementById("historyViewer");
+const historyTitle = document.getElementById("historyTitle");
+const historyPath = document.getElementById("historyPath");
+const historyValidation = document.getElementById("historyValidation");
+const historyContent = document.getElementById("historyContent");
+let selectedHistoryId = "";
+
+function renderValidation(target, validation) {
+  target.className = `validation-panel ${validation.valid ? "valid" : "invalid"}`;
+  const items = [...(validation.errors || []), ...(validation.warnings || [])];
+  target.innerHTML = "";
+  const title = document.createElement("strong");
+  title.textContent = validation.valid ? "Valid config" : "Config needs attention";
+  target.appendChild(title);
+  const list = document.createElement("ul");
+  (items.length ? items : ["No validation issues."]).forEach((message) => {
+    const item = document.createElement("li");
+    item.textContent = message;
+    list.appendChild(item);
+  });
+  target.appendChild(list);
+}
+
+function setResult(message, status = "") {
+  resultEl.className = `apply-result ${status}`;
+  resultEl.textContent = message;
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error((data.errors || ["Request failed."]).join(" "));
+  }
+  return data;
+}
+
+async function validateConfig() {
+  const data = await postJson("{{ url_for('wireguard_validate_api') }}", {
+    name: interfaceName,
+    content: configText.value,
+  });
+  renderValidation(configValidation, data.validation);
+  return data.validation;
+}
+
+document.getElementById("loadTemplate").addEventListener("click", async () => {
+  const data = await postJson("{{ url_for('wireguard_template_api') }}", { name: interfaceName });
+  configText.value = data.content;
+  renderValidation(configValidation, data.validation);
+  setResult("Template loaded.", "success");
+});
+
+document.getElementById("validateConfig").addEventListener("click", async () => {
+  const validation = await validateConfig();
+  setResult(validation.valid ? "Config is valid." : "Config has validation issues.", validation.valid ? "success" : "error");
+});
+
+document.getElementById("saveConfig").addEventListener("click", async () => {
+  try {
+    const data = await postJson("{{ url_for('wireguard_save_config_api') }}", {
+      name: interfaceName,
+      content: configText.value,
+    });
+    renderValidation(configValidation, data.validation);
+    setResult(`Saved ${data.path}.`, "success");
+  } catch (error) {
+    setResult(error.message, "error");
+  }
+});
+
+document.getElementById("deleteConfig").addEventListener("click", async () => {
+  if (!confirm("Delete the saved WireGuard app config?")) {
+    return;
+  }
+  const response = await fetch(`{{ url_for('wireguard_delete_config_api') }}?name=${encodeURIComponent(interfaceName)}`, { method: "DELETE" });
+  const data = await response.json();
+  if (!response.ok) {
+    setResult((data.errors || ["Delete failed."]).join(" "), "error");
+    return;
+  }
+  configText.value = "";
+  renderValidation(configValidation, { valid: false, errors: ["missing [Interface] section", "missing [Peer] section"], warnings: [] });
+  setResult(`Deleted ${data.path}.`, "success");
+});
+
+document.querySelectorAll("[data-wireguard-action]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const action = button.dataset.wireguardAction;
+    setResult(`${action} running...`);
+    try {
+      await postJson("{{ url_for('wireguard_action_api') }}", { name: interfaceName, action });
+      setResult(`${action} completed.`, "success");
+      await refreshHistory();
+    } catch (error) {
+      setResult(error.message, "error");
+    }
+  });
+});
+
+function renderHistory(entries) {
+  historyList.innerHTML = "";
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No history snapshots found.";
+    historyList.appendChild(empty);
+    return;
+  }
+  entries.forEach((entry) => {
+    const button = document.createElement("button");
+    button.className = "history-item";
+    button.type = "button";
+    button.dataset.historyId = entry.id;
+    button.innerHTML = `<span><strong></strong><small></small></span><span class="badge ${entry.valid ? "ok" : "warn"}">${entry.valid ? "OK" : "WARN"}</span>`;
+    button.querySelector("strong").textContent = entry.id;
+    button.querySelector("small").textContent = entry.path;
+    button.addEventListener("click", () => loadHistory(entry.id));
+    historyList.appendChild(button);
+  });
+}
+
+async function refreshHistory() {
+  const response = await fetch(`{{ url_for('wireguard_history_api') }}?name=${encodeURIComponent(interfaceName)}`);
+  const data = await response.json();
+  if (!response.ok) {
+    setResult((data.errors || ["History refresh failed."]).join(" "), "error");
+    return;
+  }
+  renderHistory(data.entries || []);
+}
+
+async function loadHistory(historyId) {
+  selectedHistoryId = historyId;
+  const response = await fetch(`/api/wireguard/history/${encodeURIComponent(historyId)}?name=${encodeURIComponent(interfaceName)}`);
+  const data = await response.json();
+  if (!response.ok) {
+    setResult((data.errors || ["History load failed."]).join(" "), "error");
+    return;
+  }
+  historyViewer.hidden = false;
+  historyTitle.textContent = data.id;
+  historyPath.textContent = data.path;
+  historyContent.textContent = data.content;
+  renderValidation(historyValidation, data.validation);
+}
+
+document.querySelectorAll(".history-item").forEach((button) => {
+  button.addEventListener("click", () => loadHistory(button.dataset.historyId));
+});
+
+document.getElementById("refreshHistory").addEventListener("click", refreshHistory);
+
+document.getElementById("deleteHistory").addEventListener("click", async () => {
+  if (!selectedHistoryId || !confirm("Delete this WireGuard history snapshot?")) {
+    return;
+  }
+  const response = await fetch(`/api/wireguard/history/${encodeURIComponent(selectedHistoryId)}?name=${encodeURIComponent(interfaceName)}`, { method: "DELETE" });
+  const data = await response.json();
+  if (!response.ok) {
+    setResult((data.errors || ["History delete failed."]).join(" "), "error");
+    return;
+  }
+  historyViewer.hidden = true;
+  selectedHistoryId = "";
+  setResult(`Deleted history ${data.id}.`, "success");
+  await refreshHistory();
+});
+</script>
 {% endblock %}
