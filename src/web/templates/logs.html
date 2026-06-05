@@ -4,29 +4,6 @@
   <article class="panel">
     <div class="section-header">
       <div>
-        <h2>Program Usage Logs</h2>
-        <p class="muted">{{ program_log_path }}</p>
-      </div>
-      <button class="secondary-action" id="refreshProgramLogs" type="button">Refresh</button>
-    </div>
-    <div class="log-list" id="programLogList">
-      {% for event in program_events %}
-      <div class="log-entry">
-        <div>
-          <strong>{{ event.action }}</strong>
-          <small>{{ event.timestamp }} | {{ event.source }} | {{ event.status }}</small>
-        </div>
-        <pre class="log-details">{{ event.details | tojson(indent=2) }}</pre>
-      </div>
-      {% else %}
-      <p class="muted">No program events recorded yet.</p>
-      {% endfor %}
-    </div>
-  </article>
-
-  <article class="panel">
-    <div class="section-header">
-      <div>
         <h2>System Log Snapshots</h2>
         <p class="muted">{{ system_snapshot_dir }}</p>
       </div>
@@ -60,27 +37,10 @@
 </section>
 
 <script>
-const programList = document.getElementById("programLogList");
 const systemList = document.getElementById("systemSnapshotList");
 const systemTitle = document.getElementById("systemLogTitle");
 const systemPath = document.getElementById("systemLogPath");
 const systemContent = document.getElementById("systemLogContent");
-
-function renderProgramEvents(events) {
-  if (!events.length) {
-    programList.innerHTML = '<p class="muted">No program events recorded yet.</p>';
-    return;
-  }
-  programList.innerHTML = events.map((event) => `
-    <div class="log-entry">
-      <div>
-        <strong>${escapeHtml(event.action || "")}</strong>
-        <small>${escapeHtml(event.timestamp || "")} | ${escapeHtml(event.source || "")} | ${escapeHtml(event.status || "")}</small>
-      </div>
-      <pre class="log-details">${escapeHtml(JSON.stringify(event.details || {}, null, 2))}</pre>
-    </div>
-  `).join("");
-}
 
 function renderSystemSnapshots(snapshots) {
   if (!snapshots.length) {
@@ -95,12 +55,6 @@ function renderSystemSnapshots(snapshots) {
       </span>
     </button>
   `).join("");
-}
-
-async function refreshProgramLogs() {
-  const response = await fetch("{{ url_for('logs_program_api') }}");
-  const data = await response.json();
-  renderProgramEvents(data.events || []);
 }
 
 async function refreshSystemLogs() {
@@ -144,7 +98,6 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-document.getElementById("refreshProgramLogs").addEventListener("click", refreshProgramLogs);
 document.getElementById("refreshSystemLogs").addEventListener("click", refreshSystemLogs);
 document.getElementById("collectSystemLog").addEventListener("click", collectSystemLog);
 systemList.addEventListener("click", (event) => {

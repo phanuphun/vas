@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 from pytest import MonkeyPatch
 
-from audit_log import read_program_events
 from display import TouchDevice, parse_xinput_device_map
 from server import (
     DisplayDevices,
@@ -119,16 +118,15 @@ def test_command_docs_route_renders_command_sections() -> None:
     assert "sudo vas server start --host 0.0.0.0 --port 8888" in body
 
 
-def test_logs_route_renders_program_and_system_sections(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+def test_logs_route_renders_system_snapshot_section(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config-home"))
 
     response = create_app().test_client().get("/logs")
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "Program Usage Logs" in body
     assert "System Log Snapshots" in body
-    assert "events.jsonl" in body
+    assert "Program Usage Logs" not in body
 
 
 def test_wireguard_config_api_validates_saves_and_deletes_config(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -162,21 +160,6 @@ def test_wireguard_config_api_validates_saves_and_deletes_config(tmp_path: Path,
     delete_response = client.delete("/api/wireguard/config?name=wg0")
     assert delete_response.status_code == 200
     assert not saved_path.exists()
-
-
-def test_wireguard_web_actions_log_event_without_runner_command(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config-home"))
-    client = create_app().test_client()
-
-    response = client.post(
-        "/api/wireguard/config",
-        json={"name": "wg0", "content": VALID_WIREGUARD_CONFIG},
-    )
-
-    assert response.status_code == 200
-    events = read_program_events(log_dir=tmp_path / "config-home" / "vending-auto-setup" / "logs")
-    assert any(event["source"] == "web" and event["action"] == "wireguard.config.save" for event in events)
-    assert not any(event["action"] == "runner.command" for event in events)
 
 
 def test_wireguard_history_api_masks_and_validates_entries(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

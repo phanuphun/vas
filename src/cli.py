@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
-from audit_log import log_cli_invocation, log_program_event
 from config import APP_VERSION, DEFAULT_CONFIG, InstallConfig
 from display import ROTATION_MATRICES, DisplayConfigurator
 from installers import PhaseOneInstaller, count_install_operations
@@ -204,27 +202,8 @@ def add_lifecycle_arguments(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    argv_tuple = tuple(argv if argv is not None else sys.argv[1:])
-
-    runner = CommandRunner(dry_run=args.dry_run, audit_source="cli")
-    log_cli_invocation(argv=argv_tuple, command=args.command, dry_run=args.dry_run)
-    try:
-        exit_code = _run_parsed_command(args, runner, parser)
-    except Exception as error:
-        log_program_event(
-            source="cli",
-            action="cli.invoke",
-            status="error",
-            details={
-                "argv": argv_tuple,
-                "command": args.command,
-                "dry_run": args.dry_run,
-                "error": str(error),
-            },
-        )
-        raise
-    log_cli_invocation(argv=argv_tuple, command=args.command, dry_run=args.dry_run, status="finished", exit_code=exit_code)
-    return exit_code
+    runner = CommandRunner(dry_run=args.dry_run)
+    return _run_parsed_command(args, runner, parser)
 
 
 def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser: argparse.ArgumentParser) -> int:

@@ -9,9 +9,6 @@ from flask import Flask, render_template, request
 from audit_log import (
     create_system_log_snapshot,
     list_system_snapshots,
-    log_web_event,
-    program_log_path,
-    read_program_events,
     read_system_snapshot,
     system_snapshot_dir,
 )
@@ -151,20 +148,12 @@ def create_app() -> Flask:
     def logs() -> str:
         return render_template(
             "logs.html",
-            program_events=read_program_events(),
-            program_log_path=_program_log_path_label(),
             system_snapshots=list_system_snapshots(),
             system_snapshot_dir=_system_snapshot_dir_label(),
         )
 
-    @app.get("/api/logs/program")
-    def logs_program_api() -> dict[str, object]:
-        log_web_event(action="logs.program.read")
-        return {"status": "ok", "events": list(read_program_events())}
-
     @app.get("/api/logs/system")
     def logs_system_api() -> dict[str, object]:
-        log_web_event(action="logs.system.list")
         return {"status": "ok", "snapshots": list(list_system_snapshots())}
 
     @app.post("/api/logs/system/snapshot")
@@ -172,9 +161,7 @@ def create_app() -> Flask:
         try:
             snapshot = create_system_log_snapshot()
         except OSError as error:
-            log_web_event(action="logs.system.snapshot", status="error", details={"error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 500
-        log_web_event(action="logs.system.snapshot", details={"id": snapshot["id"], "path": snapshot["path"]})
         return {"status": "ok", "snapshot": snapshot}
 
     @app.get("/api/logs/system/<snapshot_id>")
@@ -182,9 +169,7 @@ def create_app() -> Flask:
         try:
             snapshot = read_system_snapshot(snapshot_id)
         except (FileNotFoundError, OSError, ValueError) as error:
-            log_web_event(action="logs.system.read", status="error", details={"id": snapshot_id, "error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 404
-        log_web_event(action="logs.system.read", details={"id": snapshot["id"], "path": snapshot["path"]})
         return {"status": "ok", "snapshot": snapshot}
 
     @app.get("/api/wireguard/config")
@@ -192,7 +177,6 @@ def create_app() -> Flask:
         name = _wireguard_name_from_request()
         manager = WireGuardManager(CommandRunner())
         path = manager.saved_config_path(name)
-        log_web_event(action="wireguard.config.read", details={"name": name, "path": path.as_posix()})
         return {
             "name": name,
             "path": path.as_posix(),
@@ -207,22 +191,14 @@ def create_app() -> Flask:
             name = _wireguard_name_from_payload()
             content = render_wireguard_template(name)
         except ValueError as error:
-            log_web_event(action="wireguard.template", status="error", details={"error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 400
-        log_web_event(action="wireguard.template", details={"name": name})
         return {"status": "ok", "name": name, "content": content, "validation": _validation_payload(validate_config_content(content))}
 
     @app.post("/api/wireguard/validate")
     def wireguard_validate_api() -> tuple[dict[str, object], int] | dict[str, object]:
         payload = request.get_json(silent=True) or {}
         content = str(payload.get("content", ""))
-        name = str(payload.get("name") or "wg0")
         result = validate_config_content(content)
-        log_web_event(
-            action="wireguard.validate",
-            status="ok" if result.valid else "invalid",
-            details={"name": name, "errors": len(result.errors), "warnings": len(result.warnings)},
-        )
         return {"status": "ok" if result.valid else "invalid", "validation": _validation_payload(result)}
 
     @app.post("/api/wireguard/config")
@@ -233,20 +209,13 @@ def create_app() -> Flask:
             name = _wireguard_name_from_payload()
             result = validate_config_content(content)
             if not result.valid:
-                log_web_event(
-                    action="wireguard.config.save",
-                    status="invalid",
-                    details={"name": name, "errors": len(result.errors), "warnings": len(result.warnings)},
-                )
                 return {"status": "invalid", "validation": _validation_payload(result)}, 400
             path = WireGuardManager(CommandRunner()).saved_config_path(name)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             chmod_private(path)
         except (OSError, ValueError) as error:
-            log_web_event(action="wireguard.config.save", status="error", details={"error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 400
-        log_web_event(action="wireguard.config.save", details={"name": name, "path": path.as_posix()})
         return {
             "status": "ok",
             "name": name,
@@ -259,13 +228,10 @@ def create_app() -> Flask:
         try:
             name = _wireguard_name_from_request()
             path = WireGuardManager(CommandRunner()).saved_config_path(name)
-            existed = path.exists()
             if path.exists():
                 path.unlink()
         except (OSError, ValueError) as error:
-            log_web_event(action="wireguard.config.delete", status="error", details={"error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 400
-        log_web_event(action="wireguard.config.delete", details={"name": name, "path": path.as_posix(), "existed": existed})
         return {"status": "ok", "name": name, "path": path.as_posix(), "exists": path.exists()}
 
     @app.post("/api/wireguard/action")
@@ -280,12 +246,9 @@ def create_app() -> Flask:
             elif action == "unsync":
                 manager.unsync(name=name)
             else:
-                log_web_event(action="wireguard.action", status="error", details={"name": name, "action": action})
                 return {"status": "error", "errors": [f"Unknown WireGuard action: {action}"]}, 400
         except (CommandExecutionError, OSError, ValueError) as error:
-            log_web_event(action="wireguard.action", status="error", details={"action": action, "error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 500
-        log_web_event(action="wireguard.action", details={"name": name, "action": action})
         return {"status": "ok", "action": action, "name": name}
 
     @app.get("/api/wireguard/history")
@@ -293,9 +256,7 @@ def create_app() -> Flask:
         try:
             name = _wireguard_name_from_request()
         except ValueError as error:
-            log_web_event(action="wireguard.history.list", status="error", details={"error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 400
-        log_web_event(action="wireguard.history.list", details={"name": name})
         return {"status": "ok", "name": name, "entries": [entry.__dict__ for entry in collect_wireguard_history(name)]}
 
     @app.get("/api/wireguard/history/<history_id>")
@@ -304,18 +265,11 @@ def create_app() -> Flask:
             name = _wireguard_name_from_request()
             path = _wireguard_history_path(name, history_id)
             if not path.exists():
-                log_web_event(
-                    action="wireguard.history.read",
-                    status="error",
-                    details={"name": name, "id": sanitize_history_id(history_id), "reason": "not-found"},
-                )
                 return {"status": "error", "errors": [f"History entry not found: {history_id}"]}, 404
             content = path.read_text(encoding="utf-8")
             validation = validate_config_content(content)
         except (OSError, ValueError) as error:
-            log_web_event(action="wireguard.history.read", status="error", details={"id": history_id, "error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 400
-        log_web_event(action="wireguard.history.read", details={"name": name, "id": sanitize_history_id(history_id), "path": path.as_posix()})
         return {
             "status": "ok",
             "id": sanitize_history_id(history_id),
@@ -329,16 +283,10 @@ def create_app() -> Flask:
         try:
             name = _wireguard_name_from_request()
             path = _wireguard_history_path(name, history_id)
-            existed = path.exists()
             if path.exists():
                 path.unlink()
         except (OSError, ValueError) as error:
-            log_web_event(action="wireguard.history.delete", status="error", details={"id": history_id, "error": str(error)})
             return {"status": "error", "errors": [str(error)]}, 400
-        log_web_event(
-            action="wireguard.history.delete",
-            details={"name": name, "id": sanitize_history_id(history_id), "path": path.as_posix(), "existed": existed},
-        )
         return {"status": "ok", "id": sanitize_history_id(history_id), "deleted": not path.exists()}
 
     @app.get("/commands")
@@ -373,27 +321,20 @@ def create_app() -> Flask:
         key = request.args.get("key", "").strip()
         allowed = _allowed_config_paths()
         if key not in allowed:
-            log_web_event(action="display.config.read", status="error", details={"key": key})
             return {"error": f"Unknown config key: {key}"}, 400
         path = allowed[key]
-        log_web_event(action="display.config.read", details={"key": key, "path": path.as_posix(), "exists": path.exists()})
         if not path.exists():
             return {"exists": False, "content": None, "path": path.as_posix()}
         try:
             content = path.read_text(encoding="utf-8")
             return {"exists": True, "content": content, "path": path.as_posix()}
         except OSError as e:
-            log_web_event(action="display.config.read", status="error", details={"key": key, "error": str(e)})
             return {"error": str(e)}, 500
 
     @app.get("/api/display/devices")
     def display_devices() -> dict[str, object]:
         x_display = request.args.get("display") or _default_x_display()
         devices = collect_display_devices(x_display=x_display)
-        log_web_event(
-            action="display.devices.refresh",
-            details={"display": x_display, "outputs": len(devices.outputs), "touch_devices": len(devices.touch_devices)},
-        )
         return {
             "outputs": devices.outputs,
             "touchDevices": [{"name": d.name, "id": d.xinput_id} for d in devices.touch_devices],
@@ -413,11 +354,6 @@ def create_app() -> Flask:
         devices = collect_display_devices(x_display=x_display)
         errors = validate_display_apply(output, touch, rotate, devices)
         if errors:
-            log_web_event(
-                action="display.apply",
-                status="error",
-                details={"output": output, "touch": touch, "rotate": rotate, "errors": errors},
-            )
             return {"status": "error", "errors": errors}, 400
 
         runner = DisplayCommandRunner()
@@ -429,24 +365,8 @@ def create_app() -> Flask:
             if persist_xorg:
                 configurator.persist_xorg(touch=touch, rotate=rotate)
         except (CommandExecutionError, OSError, ValueError) as error:
-            log_web_event(
-                action="display.apply",
-                status="error",
-                details={"output": output, "touch": touch, "rotate": rotate, "error": str(error)},
-            )
             return {"status": "error", "errors": [str(error)]}, 500
 
-        log_web_event(
-            action="display.apply",
-            details={
-                "output": output,
-                "touch": touch,
-                "rotate": rotate,
-                "display": x_display,
-                "persist_session": persist_session,
-                "persist_xorg": persist_xorg,
-            },
-        )
         return {
             "status": "ok",
             "output": output,
@@ -662,10 +582,6 @@ def _allowed_config_paths() -> dict[str, Path]:
         "display_script": _effective_home_script_path(),
         "xorg_touchscreen": Path(XORG_TOUCHSCREEN_CONFIG_PATH),
     }
-
-
-def _program_log_path_label() -> str:
-    return program_log_path().as_posix()
 
 
 def _system_snapshot_dir_label() -> str:

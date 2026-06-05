@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping, Sequence
 
 
-PROGRAM_LOG_NAME = "events.jsonl"
 SYSTEM_SOURCE_PATHS = (
     Path("/var/log/auth.log"),
     Path("/var/log/syslog"),
@@ -24,118 +21,8 @@ def default_log_dir() -> Path:
     return root / "vending-auto-setup" / "logs"
 
 
-def program_log_path(log_dir: Path | None = None) -> Path:
-    return (log_dir or default_log_dir()) / "program" / PROGRAM_LOG_NAME
-
-
 def system_snapshot_dir(log_dir: Path | None = None) -> Path:
     return (log_dir or default_log_dir()) / "system" / "snapshots"
-
-
-def log_program_event(
-    *,
-    source: str,
-    action: str,
-    status: str = "ok",
-    details: Mapping[str, object] | None = None,
-    log_dir: Path | None = None,
-) -> None:
-    path = program_log_path(log_dir)
-    event = {
-        "timestamp": _utc_timestamp(),
-        "source": source,
-        "action": action,
-        "status": status,
-        "details": dict(details or {}),
-    }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-    except OSError:
-        return
-
-
-def log_cli_invocation(
-    *,
-    argv: Sequence[str],
-    command: str,
-    dry_run: bool,
-    status: str = "started",
-    exit_code: int | None = None,
-    log_dir: Path | None = None,
-) -> None:
-    details: dict[str, object] = {
-        "argv": tuple(argv),
-        "command": command,
-        "dry_run": dry_run,
-    }
-    if exit_code is not None:
-        details["exit_code"] = exit_code
-    log_program_event(
-        source="cli",
-        action="cli.invoke",
-        status=status,
-        details=details,
-        log_dir=log_dir,
-    )
-
-
-def log_runner_command(
-    *,
-    args: Sequence[str],
-    dry_run: bool,
-    returncode: int,
-    status: str = "ok",
-    log_dir: Path | None = None,
-) -> None:
-    log_program_event(
-        source="cli",
-        action="runner.command",
-        status=status,
-        details={
-            "args": tuple(args),
-            "dry_run": dry_run,
-            "returncode": returncode,
-        },
-        log_dir=log_dir,
-    )
-
-
-def log_web_event(
-    *,
-    action: str,
-    status: str = "ok",
-    details: Mapping[str, object] | None = None,
-    log_dir: Path | None = None,
-) -> None:
-    log_program_event(
-        source="web",
-        action=action,
-        status=status,
-        details=details,
-        log_dir=log_dir,
-    )
-
-
-def read_program_events(limit: int = 100, log_dir: Path | None = None) -> tuple[dict[str, object], ...]:
-    path = program_log_path(log_dir)
-    if not path.exists():
-        return ()
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return ()
-
-    events: list[dict[str, object]] = []
-    for line in lines[-limit:]:
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            parsed = {"timestamp": "", "source": "program", "action": "unreadable", "status": "error", "details": {"raw": line}}
-        if isinstance(parsed, dict):
-            events.append(parsed)
-    return tuple(reversed(events))
 
 
 def create_system_log_snapshot(log_dir: Path | None = None) -> dict[str, object]:
