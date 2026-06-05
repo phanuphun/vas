@@ -50,6 +50,20 @@
   </article>
 
   <article class="panel">
+    <h2>Remote</h2>
+    <dl>
+      <dt>AnyDesk</dt>
+      <dd><span class="badge {{ 'ok' if remote.anydesk_installed else 'missing' }}">{{ 'OK' if remote.anydesk_installed else 'MISSING' }}</span>{{ remote.anydesk_version or "not installed" }}</dd>
+      <dt>ID</dt>
+      <dd><span class="badge {{ 'ok' if remote.anydesk_id else 'warn' }}">{{ 'OK' if remote.anydesk_id else 'WARN' }}</span>{{ remote.anydesk_id or "not available" }}</dd>
+      <dt>Status</dt>
+      <dd><span class="badge {{ 'ok' if remote.anydesk_status|lower == 'online' else 'warn' }}">{{ 'OK' if remote.anydesk_status|lower == 'online' else 'WARN' }}</span>{{ remote.anydesk_status }}</dd>
+      <dt>Service</dt>
+      <dd><span class="badge {{ 'ok' if remote.service_active == 'active' else 'warn' }}">{{ 'OK' if remote.service_active == 'active' else 'WARN' }}</span>{{ remote.service_enabled }} / {{ remote.service_active }}</dd>
+    </dl>
+  </article>
+
+  <article class="panel">
     <h2>Web Server</h2>
     <dl>
       <dt>Service</dt>

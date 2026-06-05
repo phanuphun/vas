@@ -75,6 +75,16 @@ class WebServerStatus:
     service_active: str
 
 
+@dataclass(frozen=True)
+class RemoteAccessStatus:
+    anydesk_installed: bool
+    anydesk_version: str | None
+    anydesk_id: str | None
+    anydesk_status: str
+    service_enabled: str
+    service_active: str
+
+
 XORG_TOUCHSCREEN_CONFIG_PATH = Path("/etc/X11/xorg.conf.d/99-vending-touchscreen.conf")
 XORG_TOUCHSCREEN_SIGNATURE = "# vending-auto-config: touchscreen-xorg"
 DISPLAY_SESSION_CONFIG_PATH = Path.home() / ".xprofile"
@@ -94,6 +104,18 @@ TOOLS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 
 def collect_status() -> tuple[ToolStatus, ...]:
     return tuple(_check_tool(name, command, version_args) for name, command, version_args in TOOLS)
+
+
+def collect_remote_access_status() -> RemoteAccessStatus:
+    anydesk_path = shutil.which("anydesk")
+    return RemoteAccessStatus(
+        anydesk_installed=anydesk_path is not None,
+        anydesk_version=_read_version((anydesk_path, "--version")) if anydesk_path is not None else None,
+        anydesk_id=_read_command_first_line_or_none((anydesk_path, "--get-id")) if anydesk_path is not None else None,
+        anydesk_status=_read_command_first_line((anydesk_path, "--get-status")) if anydesk_path is not None else "not installed",
+        service_enabled=_read_command_first_line(("systemctl", "is-enabled", "anydesk")),
+        service_active=_read_command_first_line(("systemctl", "is-active", "anydesk")),
+    )
 
 
 def collect_vpn_status(interface_name: str = "wg0") -> VpnStatus:
@@ -227,6 +249,8 @@ def print_status() -> None:
     for status in collect_status():
         _print_tool_status(status)
     print()
+    _print_remote_access_status(collect_remote_access_status())
+    print()
     _print_vpn_status(collect_vpn_status())
     print()
     _print_web_server_status(collect_web_server_status())
@@ -246,6 +270,8 @@ def main() -> int:
     print("[Core Tools]")
     for status in statuses:
         _print_tool_status(status)
+    print()
+    _print_remote_access_status(collect_remote_access_status())
     print()
     _print_vpn_status(collect_vpn_status())
     print()
@@ -277,6 +303,13 @@ def _read_command_first_line(args: Sequence[str]) -> str:
     if completed is None:
         return "unknown"
     return _first_output_line(completed.stdout) or _first_output_line(completed.stderr) or "unknown"
+
+
+def _read_command_first_line_or_none(args: Sequence[str]) -> str | None:
+    completed = _run_command(args)
+    if completed is None or completed.returncode != 0:
+        return None
+    return _first_output_line(completed.stdout) or _first_output_line(completed.stderr)
 
 
 def _command_succeeds(args: Sequence[str]) -> bool:
@@ -453,6 +486,25 @@ def _print_web_server_status(status: WebServerStatus) -> None:
     print(f"{enabled_marker:7} {'Service':10} {SERVICE_UNIT} enabled={status.service_enabled}")
     print(f"{active_marker:7} {'Connection':10} service {status.service_active}")
     print(f"{'OK':7} {'Address':10} {status.url}")
+
+
+def _print_remote_access_status(status: RemoteAccessStatus) -> None:
+    print("[Remote]")
+    installed_marker = "OK" if status.anydesk_installed else "MISSING"
+    version = status.anydesk_version or "not installed"
+    print(f"{installed_marker:7} {'AnyDesk':10} {version}")
+
+    id_marker = "OK" if status.anydesk_id else "WARN"
+    anydesk_id = status.anydesk_id or "not available"
+    print(f"{id_marker:7} {'ID':10} {anydesk_id}")
+
+    status_marker = "OK" if status.anydesk_status.lower() == "online" else "WARN"
+    print(f"{status_marker:7} {'Status':10} {status.anydesk_status}")
+
+    enabled_marker = "OK" if status.service_enabled == "enabled" else "WARN"
+    active_marker = "OK" if status.service_active == "active" else "WARN"
+    print(f"{enabled_marker:7} {'Service':10} anydesk enabled={status.service_enabled}")
+    print(f"{active_marker:7} {'Connection':10} service {status.service_active}")
 
 
 def _print_path_status(label: str, exists: bool, path: Path, ok_text: str, missing_text: str) -> None:

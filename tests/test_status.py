@@ -5,8 +5,10 @@ from unittest.mock import patch
 from status import (
     DISPLAY_SESSION_SCRIPT_SIGNATURE,
     DISPLAY_SESSION_SIGNATURE,
+    RemoteAccessStatus,
     VpnStatus,
     XORG_TOUCHSCREEN_SIGNATURE,
+    collect_remote_access_status,
     collect_vpn_status,
     collect_display_session_status,
     collect_display_session_config_status,
@@ -153,27 +155,55 @@ def test_vpn_status_handles_permission_denied_paths(tmp_path) -> None:  # type: 
     assert status.history_exists is False
 
 
+def test_remote_access_status_collects_anydesk_id_and_status() -> None:
+    with patch("status.shutil.which", return_value="/usr/bin/anydesk"):
+        with patch("status._read_version", return_value="anydesk version 7.1.0"):
+            with patch("status._read_command_first_line_or_none", return_value="123456789"):
+                with patch("status._read_command_first_line", side_effect=("online", "enabled", "active")):
+                    status = collect_remote_access_status()
+
+    assert status.anydesk_installed is True
+    assert status.anydesk_version == "anydesk version 7.1.0"
+    assert status.anydesk_id == "123456789"
+    assert status.anydesk_status == "online"
+    assert status.service_enabled == "enabled"
+    assert status.service_active == "active"
+
+
 def test_print_status_includes_vpn_section(capsys: Any) -> None:
     with patch("status.collect_status", return_value=()):
-        with patch("status.collect_vpn_status") as collect_vpn:
-            collect_vpn.return_value = VpnStatus(
-                interface_name="wg0",
-                wg_installed=True,
-                wg_version="wireguard-tools v1.0.0",
-                app_config_path=Path("/home/first/.config/vending-auto-setup/wireguard/configs/wg0.conf"),
-                app_config_exists=True,
-                active_config_path=Path("/etc/wireguard/wg0.conf"),
-                active_config_exists=True,
-                history_dir=Path("/home/first/.config/vending-auto-setup/wireguard/history/wg0"),
-                history_exists=True,
+        with patch(
+            "status.collect_remote_access_status",
+            return_value=RemoteAccessStatus(
+                anydesk_installed=True,
+                anydesk_version="anydesk version 7.1.0",
+                anydesk_id="123456789",
+                anydesk_status="online",
                 service_enabled="enabled",
                 service_active="active",
-                interface_exists=True,
-                handshake_peers=1,
-            )
-            print_status()
+            ),
+        ):
+            with patch("status.collect_vpn_status") as collect_vpn:
+                collect_vpn.return_value = VpnStatus(
+                    interface_name="wg0",
+                    wg_installed=True,
+                    wg_version="wireguard-tools v1.0.0",
+                    app_config_path=Path("/home/first/.config/vending-auto-setup/wireguard/configs/wg0.conf"),
+                    app_config_exists=True,
+                    active_config_path=Path("/etc/wireguard/wg0.conf"),
+                    active_config_exists=True,
+                    history_dir=Path("/home/first/.config/vending-auto-setup/wireguard/history/wg0"),
+                    history_exists=True,
+                    service_enabled="enabled",
+                    service_active="active",
+                    interface_exists=True,
+                    handshake_peers=1,
+                )
+                print_status()
 
     output = capsys.readouterr().out
+    assert "[Remote]" in output
+    assert "123456789" in output
     assert "[VPN]" in output
     assert "App Config" in output
     assert "Connection" in output

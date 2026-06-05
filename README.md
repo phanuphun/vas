@@ -214,6 +214,13 @@ OK      npm        10.9.8
 OK      PM2        6.0.13
 OK      Docker     Docker version 29.5.3, build d1c06ef
 OK      AnyDesk    anydesk version 7.1.0
+
+[Remote]
+OK      AnyDesk    anydesk version 7.1.0
+OK      ID         123456789
+OK      Status     online
+OK      Service    anydesk enabled=enabled
+OK      Connection service active
 ```
 
 ความหมาย:
@@ -223,6 +230,7 @@ OK      AnyDesk    anydesk version 7.1.0
 - `[Display Config] Script` ตรวจว่า retry script มีอยู่และ executable หรือยัง
 - `[Touchscreen] Xorg` ตรวจว่า `/etc/X11/xorg.conf.d/99-vending-touchscreen.conf` มี signature หรือยัง
 - `[Core Tools]` ตรวจ Git, Node.js, npm, PM2, Docker, AnyDesk
+- `[Remote]` ตรวจ AnyDesk ด้วย `anydesk --version`, `anydesk --get-id`, `anydesk --get-status` และ service `anydesk`
 
 ## ตรวจ X11, xrandr, xinput
 

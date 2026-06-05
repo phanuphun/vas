@@ -9,6 +9,7 @@ from status import (
     DisplaySessionConfigStatus,
     DisplaySessionScriptStatus,
     DisplaySessionStatus,
+    RemoteAccessStatus,
     ToolStatus,
     VpnStatus,
     WebServerStatus,
@@ -41,6 +42,8 @@ def test_dashboard_route_renders_status_and_command_preview() -> None:
     body = response.get_data(as_text=True)
     assert "Core Tools" in body
     assert "VPN" in body
+    assert "Remote" in body
+    assert "123456789" in body
     assert "Web Server" in body
     assert "sudo vas install --component all" in body
     assert "sudo vas wireguard sync --name wg0" in body
@@ -73,6 +76,14 @@ def _patched_status_collectors() -> Any:
             Path("/etc/X11/xorg.conf.d/99-vending-touchscreen.conf"),
             True,
             True,
+        ),
+        collect_remote_access_status=lambda: RemoteAccessStatus(
+            anydesk_installed=True,
+            anydesk_version="anydesk version 7.1.0",
+            anydesk_id="123456789",
+            anydesk_status="online",
+            service_enabled="enabled",
+            service_active="active",
         ),
         collect_vpn_status=lambda: VpnStatus(
             interface_name="wg0",
