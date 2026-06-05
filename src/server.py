@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from flask import Flask, render_template
+from flask import Flask, jsonify, render_template, request
 
+from display import DisplayConfigurator, ROTATION_MATRICES
+from runner import CommandExecutionError, CommandRunner
 from status import (
     ToolStatus,
     VpnStatus,
@@ -37,6 +39,12 @@ SERVER_ACTIONS = (
     ("Show service status", "vas server status"),
     ("Run foreground", "vas server run --host 0.0.0.0 --port 8888"),
     ("Stop service", "sudo vas server stop"),
+)
+ROTATION_LABELS = (
+    ("normal", "Normal"),
+    ("left", "Left"),
+    ("right", "Right"),
+    ("inverted", "Revert"),
 )
 
 
@@ -84,6 +92,62 @@ def create_app() -> Flask:
     @app.get("/wireguard")
     def wireguard() -> str:
         return render_template("wireguard.html", vpn=collect_vpn_status(), commands=build_wireguard_commands())
+
+    @app.get("/display")
+    def display_settings() -> str:
+        devices = collect_display_devices()
+        return render_template(
+            "display.html",
+            outputs=devices.outputs,
+            touch_devices=devices.touch_devices,
+            rotations=ROTATION_LABELS,
+            default_display=_default_x_display(),
+        )
+
+    @app.get("/api/display/devices")
+    def display_devices() -> dict[str, object]:
+        devices = collect_display_devices()
+        return {
+            "outputs": devices.outputs,
+            "touchDevices": devices.touch_devices,
+            "defaultDisplay": _default_x_display(),
+        }
+
+    @app.post("/api/display/apply")
+    def display_apply() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        output = str(payload.get("output", "")).strip()
+        touch = str(payload.get("touch", "")).strip()
+        rotate = str(payload.get("rotate", "normal")).strip()
+        x_display = str(payload.get("display", "")).strip() or None
+        persist_session = bool(payload.get("persistSession", True))
+        persist_xorg = bool(payload.get("persistXorg", False))
+
+        devices = collect_display_devices(x_display=x_display)
+        errors = validate_display_apply(output, touch, rotate, devices)
+        if errors:
+            return {"status": "error", "errors": errors}, 400
+
+        runner = CommandRunner()
+        configurator = DisplayConfigurator(runner)
+        try:
+            configurator.apply_runtime(output=output, touch=touch, rotate=rotate, x_display=x_display)
+            if persist_session:
+                configurator.persist_session(output=output, touch=touch, rotate=rotate, x_display=x_display)
+            if persist_xorg:
+                configurator.persist_xorg(touch=touch, rotate=rotate)
+        except (CommandExecutionError, OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        return {
+            "status": "ok",
+            "output": output,
+            "touch": touch,
+            "rotate": rotate,
+            "display": x_display,
+            "persistSession": persist_session,
+            "persistXorg": persist_xorg,
+        }
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -133,6 +197,57 @@ def build_server_commands() -> tuple[CommandPreview, ...]:
         CommandPreview(label=label, command=command, requires_root=command.startswith("sudo "))
         for label, command in SERVER_ACTIONS
     )
+
+
+@dataclass(frozen=True)
+class DisplayDevices:
+    outputs: tuple[str, ...]
+    touch_devices: tuple[str, ...]
+
+
+def collect_display_devices(x_display: str | None = None) -> DisplayDevices:
+    runner = CommandRunner()
+    configurator = DisplayConfigurator(runner)
+    xrandr = runner.run(configurator._with_x_env(["xrandr", "--query"], x_display, None), check=False)
+    xinput = runner.run(configurator._with_x_env(["xinput", "list", "--name-only"], x_display, None), check=False)
+
+    outputs = parse_xrandr_outputs(xrandr.stdout)
+    touch_devices = parse_xinput_touch_devices(xinput.stdout)
+    return DisplayDevices(outputs=outputs, touch_devices=touch_devices)
+
+
+def parse_xrandr_outputs(output: str) -> tuple[str, ...]:
+    outputs = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "connected":
+            outputs.append(parts[0])
+    return tuple(outputs)
+
+
+def parse_xinput_touch_devices(output: str) -> tuple[str, ...]:
+    names = tuple(line.strip() for line in output.splitlines() if line.strip())
+    touch_names = tuple(name for name in names if "touch" in name.lower())
+    return touch_names or names
+
+
+def validate_display_apply(output: str, touch: str, rotate: str, devices: DisplayDevices) -> list[str]:
+    errors = []
+    if rotate not in ROTATION_MATRICES:
+        errors.append(f"Unsupported rotation: {rotate}")
+    if not output:
+        errors.append("Display output is required.")
+    elif output not in devices.outputs:
+        errors.append(f"Display output is not connected: {output}")
+    if not touch:
+        errors.append("Touchscreen device is required.")
+    elif touch not in devices.touch_devices:
+        errors.append(f"Touchscreen device is not available: {touch}")
+    return errors
+
+
+def _default_x_display() -> str:
+    return ":0"
 
 
 def tool_marker(status: ToolStatus) -> str:

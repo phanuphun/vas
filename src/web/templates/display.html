@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% set title = "Display" %}
+
+{% block content %}
+<section class="display-tool" data-default-display="{{ default_display }}">
+  <div class="display-header">
+    <h2>Monitor Setting</h2>
+    <button class="primary-action" id="applyDisplay" type="button">Apply</button>
+  </div>
+
+  <div class="display-layout">
+    <div class="monitor-workspace">
+      <div class="monitor-frame">
+        <div class="monitor-preview" id="monitorPreview" data-rotation="normal">
+          <div class="corner top-left"></div>
+          <div class="corner top-right"></div>
+          <div class="corner bottom-left"></div>
+          <div class="corner bottom-right"></div>
+          <div class="preview-label" id="previewLabel">Normal</div>
+        </div>
+      </div>
+
+      <div class="rotation-controls" role="group" aria-label="Rotation">
+        {% for value, label in rotations %}
+        <button class="rotation-button {{ 'selected' if value == 'normal' else '' }}" type="button" data-rotation="{{ value }}">{{ label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <aside class="display-options">
+      <label for="displayOutput">Display</label>
+      <select id="displayOutput">
+        {% for output in outputs %}
+        <option value="{{ output }}">{{ output }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="touchDevice">Touchscreen</label>
+      <select id="touchDevice">
+        {% for touch in touch_devices %}
+        <option value="{{ touch }}">{{ touch }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="xDisplay">X display</label>
+      <input id="xDisplay" value="{{ default_display }}" autocomplete="off">
+
+      <label class="check-row">
+        <input id="persistSession" type="checkbox" checked>
+        Persist at login
+      </label>
+
+      <label class="check-row">
+        <input id="persistXorg" type="checkbox">
+        Persist touch in Xorg
+      </label>
+    </aside>
+  </div>
+
+  <div class="command-preview">
+    <h3>Command Preview</h3>
+    <code id="commandPreview">Select display and touchscreen.</code>
+  </div>
+
+  <div class="apply-result" id="applyResult" aria-live="polite"></div>
+</section>
+
+<script>
+const rotationLabels = {
+  normal: "Normal",
+  left: "Left",
+  right: "Right",
+  inverted: "Revert",
+};
+
+const rotationDegrees = {
+  normal: "0deg",
+  left: "-90deg",
+  right: "90deg",
+  inverted: "180deg",
+};
+
+const preview = document.getElementById("monitorPreview");
+const previewLabel = document.getElementById("previewLabel");
+const commandPreview = document.getElementById("commandPreview");
+const applyResult = document.getElementById("applyResult");
+const outputSelect = document.getElementById("displayOutput");
+const touchSelect = document.getElementById("touchDevice");
+const xDisplayInput = document.getElementById("xDisplay");
+const persistSessionInput = document.getElementById("persistSession");
+const persistXorgInput = document.getElementById("persistXorg");
+let selectedRotation = "normal";
+
+function shellQuote(value) {
+  return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
+}
+
+function selectedConfig() {
+  return {
+    output: outputSelect.value,
+    touch: touchSelect.value,
+    rotate: selectedRotation,
+    display: xDisplayInput.value.trim(),
+    persistSession: persistSessionInput.checked,
+    persistXorg: persistXorgInput.checked,
+  };
+}
+
+function updatePreview() {
+  const config = selectedConfig();
+  preview.style.transform = `rotate(${rotationDegrees[config.rotate]})`;
+  preview.dataset.rotation = config.rotate;
+  previewLabel.textContent = rotationLabels[config.rotate];
+
+  const displayArg = config.display ? ` --display ${shellQuote(config.display)}` : "";
+  const applyCommand = `vas display apply${displayArg} --output ${shellQuote(config.output)} --touch ${shellQuote(config.touch)} --rotate ${config.rotate}`;
+  const persistSession = config.persistSession
+    ? `\nvas display persist-session${displayArg} --output ${shellQuote(config.output)} --touch ${shellQuote(config.touch)} --rotate ${config.rotate}`
+    : "";
+  const persistXorg = config.persistXorg
+    ? `\nsudo vas display persist-xorg --touch ${shellQuote(config.touch)} --rotate ${config.rotate}`
+    : "";
+  commandPreview.textContent = applyCommand + persistSession + persistXorg;
+}
+
+document.querySelectorAll(".rotation-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    selectedRotation = button.dataset.rotation;
+    document.querySelectorAll(".rotation-button").forEach((item) => item.classList.remove("selected"));
+    button.classList.add("selected");
+    applyResult.textContent = "";
+    updatePreview();
+  });
+});
+
+[outputSelect, touchSelect, xDisplayInput, persistSessionInput, persistXorgInput].forEach((control) => {
+  control.addEventListener("change", updatePreview);
+  control.addEventListener("input", updatePreview);
+});
+
+document.getElementById("applyDisplay").addEventListener("click", async () => {
+  applyResult.textContent = "Applying...";
+  applyResult.className = "apply-result";
+  const response = await fetch("{{ url_for('display_apply') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(selectedConfig()),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    applyResult.className = "apply-result error";
+    applyResult.textContent = (result.errors || ["Apply failed."]).join(" ");
+    return;
+  }
+  applyResult.className = "apply-result success";
+  applyResult.textContent = "Applied.";
+});
+
+updatePreview();
+</script>
+{% endblock %}

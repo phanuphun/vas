@@ -4,7 +4,17 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from server import build_install_commands, build_reset_commands, build_server_commands, build_wireguard_commands, create_app
+from server import (
+    DisplayDevices,
+    build_install_commands,
+    build_reset_commands,
+    build_server_commands,
+    build_wireguard_commands,
+    create_app,
+    parse_xinput_touch_devices,
+    parse_xrandr_outputs,
+    validate_display_apply,
+)
 from status import (
     DisplaySessionConfigStatus,
     DisplaySessionScriptStatus,
@@ -55,6 +65,42 @@ def test_health_route_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
+
+
+def test_display_route_renders_monitor_controls() -> None:
+    app = create_app()
+
+    with patch("server.collect_display_devices", return_value=DisplayDevices(("HDMI-1",), ("Vending Touchscreen",))):
+        response = app.test_client().get("/display")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Monitor Setting" in body
+    assert "HDMI-1" in body
+    assert "Vending Touchscreen" in body
+    assert "Command Preview" in body
+
+
+def test_display_device_parsers_extract_outputs_and_touchscreens() -> None:
+    outputs = parse_xrandr_outputs(
+        "HDMI-1 connected primary 1920x1080+0+0\n"
+        "DP-1 disconnected\n"
+        "Virtual1 connected 1280x720+0+0\n"
+    )
+    touches = parse_xinput_touch_devices("Virtual core keyboard\nVending Touchscreen\nUSB Mouse\n")
+
+    assert outputs == ("HDMI-1", "Virtual1")
+    assert touches == ("Vending Touchscreen",)
+
+
+def test_display_apply_validation_rejects_unknown_values() -> None:
+    devices = DisplayDevices(outputs=("HDMI-1",), touch_devices=("Vending Touchscreen",))
+
+    errors = validate_display_apply("DP-1", "Mouse", "sideways", devices)
+
+    assert "Unsupported rotation: sideways" in errors
+    assert "Display output is not connected: DP-1" in errors
+    assert "Touchscreen device is not available: Mouse" in errors
 
 
 def _patched_status_collectors() -> Any:
