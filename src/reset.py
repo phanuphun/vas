@@ -5,11 +5,11 @@ from pathlib import Path
 from display import remove_managed_block
 from runner import CommandRunner
 from status import (
-    DISPLAY_SESSION_CONFIG_PATH,
-    DISPLAY_SESSION_SCRIPT_PATH,
     DISPLAY_SESSION_SCRIPT_SIGNATURE,
     XORG_TOUCHSCREEN_CONFIG_PATH,
     XORG_TOUCHSCREEN_SIGNATURE,
+    _effective_home_config_path,
+    _effective_home_script_path,
 )
 from wireguard import WIREGUARD_CONFIG_DIR, default_store_dir, sanitize_interface_name, service_name
 
@@ -131,8 +131,8 @@ class LifecycleManager:
 
     def reset_display_config(self) -> None:
         self._remove_file_if_has_signature(XORG_TOUCHSCREEN_CONFIG_PATH, XORG_TOUCHSCREEN_SIGNATURE)
-        self._remove_file_if_has_signature(DISPLAY_SESSION_SCRIPT_PATH, DISPLAY_SESSION_SCRIPT_SIGNATURE)
-        self._remove_display_session_block(DISPLAY_SESSION_CONFIG_PATH)
+        self._remove_file_if_has_signature(_effective_home_script_path(), DISPLAY_SESSION_SCRIPT_SIGNATURE)
+        self._remove_display_session_block(_effective_home_config_path())
 
     def _remove_display_session_block(self, path: Path) -> None:
         self.runner.print_operation(f"remove managed block {_format_path(path)}")

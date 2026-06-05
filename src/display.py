@@ -7,12 +7,12 @@ from pathlib import Path
 
 from runner import CommandRunner
 from status import (
-    DISPLAY_SESSION_CONFIG_PATH,
-    DISPLAY_SESSION_SCRIPT_PATH,
     DISPLAY_SESSION_SCRIPT_SIGNATURE,
     DISPLAY_SESSION_SIGNATURE,
     XORG_TOUCHSCREEN_CONFIG_PATH,
     XORG_TOUCHSCREEN_SIGNATURE,
+    _effective_home_config_path,
+    _effective_home_script_path,
 )
 
 ROTATION_MATRICES: dict[str, tuple[str, ...]] = {
@@ -91,11 +91,15 @@ class DisplayConfigurator:
         touch: str,
         rotate: str,
         x_display: str | None = None,
-        path: Path = DISPLAY_SESSION_CONFIG_PATH,
-        script_path: Path = DISPLAY_SESSION_SCRIPT_PATH,
+        path: Path | None = None,
+        script_path: Path | None = None,
         delay_seconds: int = 5,
         retries: int = 30,
     ) -> None:
+        if path is None:
+            path = _effective_home_config_path()
+        if script_path is None:
+            script_path = _effective_home_script_path()
         matrix = " ".join(matrix_for_rotation(rotate))
         script_content = build_display_session_script(
             output=output,
@@ -116,10 +120,14 @@ class DisplayConfigurator:
 
         script_path.parent.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content, encoding="utf-8")
-        script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
+        # ใช้ 755 เพื่อให้ executable ได้ทั้ง owner และ others
+        # (จำเป็นเมื่อ server รันเป็น root แต่เขียนไฟล์ไปที่ home ของ user จริง)
+        script_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        _chown_to_effective_user(script_path)
 
         existing_content = path.read_text(encoding="utf-8") if path.exists() else ""
         path.write_text(upsert_managed_block(existing_content, content), encoding="utf-8")
+        _chown_to_effective_user(path)
 
     def _with_x_env(
         self,
@@ -136,6 +144,22 @@ class DisplayConfigurator:
         if not env_args:
             return args
         return ["env", *env_args, *args]
+
+
+def _chown_to_effective_user(path: Path) -> None:
+    """chown ไฟล์ไปให้ SUDO_USER เมื่อ process รันเป็น root (เพื่อแก้ ownership หลังเขียนไฟล์ใน home ของ user จริง)"""
+    if not (hasattr(os, "geteuid") and os.geteuid() == 0):
+        return
+    sudo_user = os.environ.get("SUDO_USER", "").strip()
+    if not sudo_user or sudo_user == "root":
+        return
+    try:
+        import pwd
+
+        pw = pwd.getpwnam(sudo_user)
+        os.chown(path, pw.pw_uid, pw.pw_gid)
+    except (ImportError, KeyError, OSError):
+        pass
 
 
 def matrix_for_rotation(rotate: str) -> tuple[str, ...]:

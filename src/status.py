@@ -87,10 +87,37 @@ class RemoteAccessStatus:
 
 XORG_TOUCHSCREEN_CONFIG_PATH = Path("/etc/X11/xorg.conf.d/99-vending-touchscreen.conf")
 XORG_TOUCHSCREEN_SIGNATURE = "# vending-auto-config: touchscreen-xorg"
-DISPLAY_SESSION_CONFIG_PATH = Path.home() / ".xprofile"
 DISPLAY_SESSION_SIGNATURE = "# vending-auto-config: display-session"
-DISPLAY_SESSION_SCRIPT_PATH = Path.home() / ".config/vending-auto-setup/display-session.sh"
 DISPLAY_SESSION_SCRIPT_SIGNATURE = "# vending-auto-config: display-session-script"
+
+# NOTE: อย่าใช้ Path.home() ใน module-level — ให้เรียก _effective_home() ที่ call time เสมอ
+# เพราะ Path.home() resolve เป็น /root เมื่อรัน sudo (env_reset ลบ HOME ออก)
+
+
+def _effective_home() -> Path:
+    """Return home directory ของ user จริง แม้ว่าจะรัน sudo"""
+    sudo_user = os.environ.get("SUDO_USER", "").strip()
+    if sudo_user and sudo_user != "root":
+        try:
+            import pwd
+
+            return Path(pwd.getpwnam(sudo_user).pw_dir)
+        except (ImportError, KeyError):
+            pass
+    return Path.home()
+
+
+def _effective_home_config_path() -> Path:
+    return _effective_home() / ".xprofile"
+
+
+def _effective_home_script_path() -> Path:
+    return _effective_home() / ".config/vending-auto-setup/display-session.sh"
+
+
+# Legacy constants สำหรับ backward compat (ใช้ได้เฉพาะ non-sudo context)
+DISPLAY_SESSION_CONFIG_PATH = _effective_home_config_path()
+DISPLAY_SESSION_SCRIPT_PATH = _effective_home_script_path()
 
 TOOLS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("Git", "git", ("git", "--version")),
@@ -194,8 +221,10 @@ def collect_xorg_touchscreen_config_status(
 
 
 def collect_display_session_config_status(
-    path: Path = DISPLAY_SESSION_CONFIG_PATH,
+    path: Path | None = None,
 ) -> DisplaySessionConfigStatus:
+    if path is None:
+        path = _effective_home_config_path()
     if not _path_exists(path):
         return DisplaySessionConfigStatus(path=path, exists=False, has_signature=False)
 
@@ -212,8 +241,10 @@ def collect_display_session_config_status(
 
 
 def collect_display_session_script_status(
-    path: Path = DISPLAY_SESSION_SCRIPT_PATH,
+    path: Path | None = None,
 ) -> DisplaySessionScriptStatus:
+    if path is None:
+        path = _effective_home_script_path()
     if not _path_exists(path):
         return DisplaySessionScriptStatus(path=path, exists=False, has_signature=False, executable=False)
 
@@ -381,15 +412,36 @@ def _first_output_line(output: str) -> str | None:
 
 def _read_loginctl_session_type() -> str | None:
     session_id = os.environ.get("XDG_SESSION_ID", "").strip()
-    if not session_id:
+    if session_id:
+        completed = _run_command(("loginctl", "show-session", session_id, "-p", "Type", "--value"))
+        if completed is not None and completed.returncode == 0:
+            result = _first_output_line(completed.stdout)
+            if result:
+                return result
+
+    # Fallback: scan all sessions (ใช้เมื่อรัน sudo และ XDG_SESSION_ID ถูกลบออกจาก env)
+    return _scan_loginctl_sessions()
+
+
+def _scan_loginctl_sessions() -> str | None:
+    """ค้นหา session type จาก loginctl list-sessions โดยไม่พึ่ง XDG_SESSION_ID"""
+    completed = _run_command(("loginctl", "list-sessions", "--no-legend"))
+    if completed is None or completed.returncode != 0:
         return None
 
-    completed = _run_command(("loginctl", "show-session", session_id, "-p", "Type", "--value"))
-    if completed is None:
-        return None
-    if completed.returncode != 0:
-        return None
-    return _first_output_line(completed.stdout)
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        session_id = parts[0]
+        type_result = _run_command(("loginctl", "show-session", session_id, "-p", "Type", "--value"))
+        if type_result is None or type_result.returncode != 0:
+            continue
+        session_type = _first_output_line(type_result.stdout)
+        if session_type in ("x11", "wayland", "mir"):
+            return session_type
+
+    return None
 
 
 def _print_display_session_status(status: DisplaySessionStatus) -> None:
