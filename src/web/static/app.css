@@ -178,6 +178,128 @@ code {
   gap: 16px;
 }
 
+.display-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 1.2fr);
+  gap: 16px;
+}
+
+.display-summary-card {
+  min-width: 0;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.soft-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.soft-chip.ok {
+  border-color: #bbf7d0;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.soft-chip.warn {
+  border-color: #fde68a;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.config-file-list {
+  display: grid;
+  gap: 8px;
+}
+
+.config-file-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+
+.config-file-item .muted {
+  margin-top: 2px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.config-view-btn,
+.config-close-btn {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.config-view-btn:hover,
+.config-close-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.config-file-viewer {
+  padding: 0;
+  overflow: hidden;
+}
+
+.config-file-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfe;
+}
+
+.config-file-header h2 {
+  margin-bottom: 4px;
+}
+
+.config-file-path {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.config-file-content {
+  display: block;
+  max-height: 300px;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 0;
+  background: #111827;
+  color: #f9fafb;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .display-header {
   display: flex;
   justify-content: space-between;
@@ -300,7 +422,8 @@ code {
   align-content: start;
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: #ffffff;
 }
 
@@ -354,8 +477,10 @@ code {
 }
 
 .command-preview {
-  border: 1px solid var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: #ffffff;
+  overflow: hidden;
 }
 
 .command-preview h3 {
@@ -397,6 +522,24 @@ code {
 
   .display-layout {
     grid-template-columns: 1fr;
+  }
+
+  .display-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .config-file-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .config-file-item .badge {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .config-view-btn {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 
   .monitor-frame {

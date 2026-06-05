@@ -2,170 +2,79 @@
 {% set title = "Display" %}
 
 {% block content %}
-<style>
-.display-status-bar {
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 6px);
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  background: var(--surface-2, var(--surface));
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.status-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-.status-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.status-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted, #888);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-right: 2px;
-}
-.status-chip {
-  font-size: 0.78rem;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.status-chip.ok {
-  background: var(--ok-bg, #dcfce7);
-  color: var(--ok-text, #166534);
-}
-.status-chip.warn {
-  background: var(--warn-bg, #fef9c3);
-  color: var(--warn-text, #854d0e);
-}
-.config-row { border-top: 1px solid var(--border); padding-top: 8px; }
-.config-view-btn {
-  font-size: 0.72rem;
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  color: var(--text-muted, #888);
-}
-.config-view-btn:hover { background: var(--surface-2, #f0f0f0); }
-.config-file-viewer {
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 6px);
-  margin-bottom: 16px;
-  overflow: hidden;
-}
-.config-file-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 12px;
-  background: var(--surface-2, #f5f5f5);
-  border-bottom: 1px solid var(--border);
-}
-.config-file-path {
-  font-size: 0.78rem;
-  font-family: monospace;
-  color: var(--text-muted, #666);
-}
-.config-close-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: var(--text-muted, #888);
-  padding: 0 4px;
-}
-.config-file-content {
-  margin: 0;
-  padding: 12px;
-  font-size: 0.78rem;
-  font-family: monospace;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 260px;
-  overflow-y: auto;
-  background: var(--surface, #fff);
-}
-</style>
-
 <section class="display-tool" data-default-display="{{ default_display }}">
-<div class="display-status-bar">
-  <div class="status-row">
-    <div class="status-group">
-      <span class="status-label">Session</span>
-      <span class="status-chip {{ 'ok' if session.is_x11 else 'warn' }}">
-        {{ session.session_type }} ({{ session.source }})
-      </span>
-    </div>
+  <div class="display-summary">
+    <article class="panel display-summary-card">
+      <h2>Display Status</h2>
+      <dl>
+        <dt>Session</dt>
+        <dd><span class="badge {{ 'ok' if session.is_x11 else 'warn' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>{{ session.session_type }} via {{ session.source }}</dd>
+        <dt>Monitors</dt>
+        <dd class="chip-list">
+          {% if outputs %}
+            {% for output in outputs %}
+            <span class="soft-chip ok">{{ output }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="soft-chip warn">none detected</span>
+          {% endif %}
+        </dd>
+        <dt>Touchscreens</dt>
+        <dd class="chip-list">
+          {% if touch_devices %}
+            {% for t in touch_devices %}
+            <span class="soft-chip ok">{{ t.name }}{% if t.xinput_id is not none %} (id: {{ t.xinput_id }}){% endif %}</span>
+            {% endfor %}
+          {% else %}
+            <span class="soft-chip warn">none detected</span>
+          {% endif %}
+        </dd>
+      </dl>
+    </article>
 
-    <div class="status-group">
-      <span class="status-label">Monitors</span>
-      {% if outputs %}
-        {% for output in outputs %}
-        <span class="status-chip ok">{{ output }}</span>
-        {% endfor %}
-      {% else %}
-        <span class="status-chip warn">none detected</span>
-      {% endif %}
-    </div>
+    <article class="panel display-summary-card">
+      <h2>Config Files</h2>
+      <div class="config-file-list">
+        <div class="config-file-item">
+          <div>
+            <strong>.xprofile</strong>
+            <p class="muted">{{ display_config.path.as_posix() }}</p>
+          </div>
+          <span class="badge {{ 'ok' if display_config.has_signature else 'warn' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>
+          <button class="config-view-btn" data-config-key="xprofile" type="button">View</button>
+        </div>
 
-    <div class="status-group">
-      <span class="status-label">Touchscreens</span>
-      {% if touch_devices %}
-        {% for t in touch_devices %}
-        <span class="status-chip ok">{{ t.name }}{% if t.xinput_id is not none %} (id:{{ t.xinput_id }}){% endif %}</span>
-        {% endfor %}
-      {% else %}
-        <span class="status-chip warn">none detected</span>
-      {% endif %}
-    </div>
+        <div class="config-file-item">
+          <div>
+            <strong>display-session.sh</strong>
+            <p class="muted">{{ display_script.path.as_posix() }}</p>
+          </div>
+          <span class="badge {{ 'ok' if display_script.has_signature and display_script.executable else 'warn' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>
+          <button class="config-view-btn" data-config-key="display_script" type="button">View</button>
+        </div>
+
+        <div class="config-file-item">
+          <div>
+            <strong>Xorg touchscreen</strong>
+            <p class="muted">{{ xorg_touchscreen.path.as_posix() }}</p>
+          </div>
+          <span class="badge {{ 'ok' if xorg_touchscreen.has_signature else 'warn' }}">{{ 'OK' if xorg_touchscreen.has_signature else 'WARN' }}</span>
+          <button class="config-view-btn" data-config-key="xorg_touchscreen" type="button">View</button>
+        </div>
+      </div>
+    </article>
   </div>
 
-  <div class="status-row config-row">
-    <div class="status-group">
-      <span class="status-label">Config</span>
-      <span class="status-chip {{ 'ok' if display_config.has_signature else 'warn' }}">
-        .xprofile{% if not display_config.has_signature %} (not set){% endif %}
-      </span>
-      <button class="config-view-btn" data-config-key="xprofile" type="button">View</button>
+  <div class="panel config-file-viewer" id="configFileViewer" hidden>
+    <div class="config-file-header">
+      <div>
+        <h2 id="configFileTitle">Config file</h2>
+        <p class="config-file-path" id="configFilePath"></p>
+      </div>
+      <button class="config-close-btn" id="configViewerClose" type="button" aria-label="Close config viewer">Close</button>
     </div>
-
-    <div class="status-group">
-      <span class="status-chip {{ 'ok' if display_script.has_signature and display_script.executable else 'warn' }}">
-        display-session.sh
-        {% if not display_script.has_signature %} (not set)
-        {% elif not display_script.executable %} (not executable)
-        {% endif %}
-      </span>
-      <button class="config-view-btn" data-config-key="display_script" type="button">View</button>
-    </div>
-
-    <div class="status-group">
-      <span class="status-chip {{ 'ok' if xorg_touchscreen.has_signature else 'warn' }}">
-        Xorg touchscreen{% if not xorg_touchscreen.has_signature %} (not set){% endif %}
-      </span>
-      <button class="config-view-btn" data-config-key="xorg_touchscreen" type="button">View</button>
-    </div>
+    <pre class="config-file-content" id="configFileContent"></pre>
   </div>
-</div>
-
-<div class="config-file-viewer" id="configFileViewer" hidden>
-  <div class="config-file-header">
-    <span class="config-file-path" id="configFilePath"></span>
-    <button class="config-close-btn" id="configViewerClose" type="button">✕</button>
-  </div>
-  <pre class="config-file-content" id="configFileContent"></pre>
-</div>
 
   <div class="display-header">
     <h2>Monitor Setting</h2>
@@ -384,14 +293,16 @@ document.getElementById("applyDisplay").addEventListener("click", async () => {
 
 updatePreview();
 
-// Config file viewer
 document.querySelectorAll(".config-view-btn").forEach((btn) => {
   btn.addEventListener("click", async () => {
     const key = btn.dataset.configKey;
     const viewer = document.getElementById("configFileViewer");
+    const titleEl = document.getElementById("configFileTitle");
     const pathEl = document.getElementById("configFilePath");
     const contentEl = document.getElementById("configFileContent");
+    const title = btn.closest(".config-file-item").querySelector("strong").textContent;
 
+    titleEl.textContent = title;
     pathEl.textContent = "Loading...";
     contentEl.textContent = "";
     viewer.hidden = false;
@@ -413,6 +324,5 @@ document.querySelectorAll(".config-view-btn").forEach((btn) => {
 document.getElementById("configViewerClose").addEventListener("click", () => {
   document.getElementById("configFileViewer").hidden = true;
 });
-
 </script>
 {% endblock %}
