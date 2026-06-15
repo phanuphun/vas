@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VAS Mockups — HomeOffice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;500;600;700&family=Anuphan:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/homeoffice.css" />
+</head>
+<body>
+<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+
+<div class="app-root">
+  <!-- Sidebar -->
+  <aside class="sidebar hair-r" id="sidebar">
+    <div class="sidebar-brand hair-b">
+      <div class="brand-mark">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name font-display">VAS</div>
+        <div class="brand-sub">ตั้งค่าเครื่อง Vending Auto Setup</div>
+      </div>
+      <button class="sidebar-close" onclick="closeSidebar()" aria-label="ปิดเมนู">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <span class="cf-eyebrow nav-heading">เมนูหลัก</span>
+        <a class="nav-item active" href="index.html">
+          <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
+          <span class="nav-label">ภาพรวม</span>
+        </a>
+        <a class="nav-item" href="dashboard.html">
+          <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+          <span class="nav-label">แดชบอร์ด</span>
+        </a>
+        <a class="nav-item" href="display.html">
+          <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>
+          <span class="nav-label">จอแสดงผล</span>
+        </a>
+        <a class="nav-item" href="wireguard.html">
+          <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+          <span class="nav-label">VPN</span>
+        </a>
+        <a class="nav-item" href="logs.html">
+          <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span>
+          <span class="nav-label">บันทึกระบบ</span>
+        </a>
+        <a class="nav-item" href="commands.html">
+          <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>
+          <span class="nav-label">คำสั่ง CLI</span>
+        </a>
+      </div>
+    </nav>
+    <div class="sidebar-footer hair-t">
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <div class="cf-ava" style="background:rgb(var(--c-accent)/0.10);color:rgb(var(--c-accent))">VM</div>
+        <div>
+          <div style="font-size:0.78rem;font-weight:600;color:rgb(var(--c-ink))">vas-machine-01</div>
+          <div style="font-size:0.62rem;color:rgb(var(--c-faint))">VAS v1.4.2</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main column -->
+  <div class="app-column">
+    <header class="app-header hair-b">
+      <div class="header-inner">
+        <button class="menu-btn" onclick="openSidebar()" aria-label="เปิดเมนู">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <span class="page-title">Mockup Hub</span>
+        <div style="flex:1;"></div>
+        <span class="cf-chip cf-chip-accent">MOCK</span>
+      </div>
+    </header>
+
+    <!-- Mock banner -->
+    <div class="mock-banner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Mockup only — ข้อมูลทั้งหมดเป็นข้อมูลจำลอง ไม่ได้เชื่อมต่อกับระบบจริง
+    </div>
+
+    <main class="ho-main">
+      <div class="content-inner">
+
+        <!-- Page heading -->
+        <div class="page-head">
+          <p class="cf-eyebrow">VAS · ภาพรวม</p>
+          <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">Mockup Hub</h1>
+          <p style="color:rgb(var(--c-muted));font-size:0.875rem;margin-top:0.3rem">
+            HomeOffice Design System mockups สำหรับ VAS — เลือกหน้าที่ต้องการดู
+          </p>
+        </div>
+
+        <!-- Info tip -->
+        <div class="cf-info" style="margin-bottom:0.5rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span>Mockup ชุดนี้ใช้ HomeOffice Design System — ไม่ได้แตะ src/web/templates/ หรือ src/web/static/</span>
+        </div>
+
+        <!-- Hub cards -->
+        <div class="hub-grid">
+
+          <a class="hub-card" href="dashboard.html">
+            <div class="cf-iconbox" style="border-color:rgb(var(--c-accent)/0.28);background:rgb(var(--c-accent)/0.06);color:rgb(var(--c-accent))">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            </div>
+            <div class="hub-card-body">
+              <div class="hub-card-title">Dashboard</div>
+              <div class="hub-card-desc">Session, Core Tools, VPN, Remote, Web Server status</div>
+            </div>
+          </a>
+
+          <a class="hub-card" href="display.html">
+            <div class="cf-iconbox" style="border-color:rgb(var(--c-safe)/0.28);background:rgb(var(--c-safe)/0.06);color:rgb(var(--c-safe))">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
+            <div class="hub-card-body">
+              <div class="hub-card-title">Display</div>
+              <div class="hub-card-desc">Display Details, GDM Wayland, Monitor rotation, Command preview</div>
+            </div>
+          </a>
+
+          <a class="hub-card" href="wireguard.html">
+            <div class="cf-iconbox" style="border-color:rgb(var(--c-info)/0.28);background:rgb(var(--c-info)/0.06);color:rgb(var(--c-accent))">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div class="hub-card-body">
+              <div class="hub-card-title">VPN — WireGuard</div>
+              <div class="hub-card-desc">Status, App Config editor, Sync/Unsync actions, Config History</div>
+            </div>
+          </a>
+
+          <a class="hub-card" href="logs.html">
+            <div class="cf-iconbox" style="border-color:rgb(var(--c-caution)/0.28);background:rgb(var(--c-caution)/0.06);color:#92660b">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <div class="hub-card-body">
+              <div class="hub-card-title">Logs</div>
+              <div class="hub-card-desc">System Log Snapshots split-pane viewer</div>
+            </div>
+          </a>
+
+          <a class="hub-card" href="commands.html">
+            <div class="cf-iconbox">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            </div>
+            <div class="hub-card-body">
+              <div class="hub-card-title">Commands</div>
+              <div class="hub-card-desc">Install, Reset, Display, VPN, Server commands — preview only</div>
+            </div>
+          </a>
+
+        </div>
+
+        <!-- Design system note -->
+        <div class="cf-card" style="padding:1.25rem;margin-top:0.5rem;">
+          <p class="cf-eyebrow" style="margin-bottom:0.5rem">Design System</p>
+          <p style="font-size:0.82rem;color:rgb(var(--c-muted));line-height:1.6;">
+            ใช้ HomeOffice Design System — <code class="cf-mark">cf-card</code>, <code class="cf-mark">cf-btn</code>,
+            <code class="cf-mark">cf-zone</code>, <code class="cf-mark">cf-stat</code>,
+            <code class="cf-mark">cf-eyebrow</code> · Bai Jamjuree + Anuphan · Lucide icons
+          </p>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
