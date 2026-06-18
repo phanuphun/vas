@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vas": {
+      "type": "sse",
+      "url": "http://<KIOSK_IP>:8899/sse"
+    }
+  }
+}
