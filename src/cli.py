@@ -15,6 +15,7 @@ from reset import (
     count_uninstall_operations,
 )
 from runner import CommandRunner
+from mcp_service import McpConfig, McpServiceManager, default_mcp_config
 from server_service import ServerConfig, ServerServiceManager
 from status import print_status
 from system import require_linux, require_root
@@ -67,6 +68,23 @@ def build_parser() -> argparse.ArgumentParser:
     add_server_bind_arguments(server_install)
     server_subcommands.add_parser("stop", help="Stop and disable the dashboard service.")
     server_subcommands.add_parser("status", help="Show the dashboard service status.")
+
+    _default_mcp = default_mcp_config()
+    mcp_cmd = subcommands.add_parser("mcp", help="Manage the MCP server (AI diagnostic interface).")
+    mcp_subcommands = mcp_cmd.add_subparsers(dest="mcp_command", required=True)
+
+    mcp_run = mcp_subcommands.add_parser("run", help="Run the MCP server in the current process.")
+    add_mcp_bind_arguments(mcp_run, _default_mcp)
+
+    mcp_start = mcp_subcommands.add_parser("start", help="Install and start the MCP server as a background service.")
+    add_mcp_bind_arguments(mcp_start, _default_mcp)
+    mcp_start.add_argument("--foreground", action="store_true", help="Run in the current terminal instead of systemd.")
+
+    mcp_install = mcp_subcommands.add_parser("install-service", help="Install the MCP server systemd service.")
+    add_mcp_bind_arguments(mcp_install, _default_mcp)
+
+    mcp_subcommands.add_parser("stop", help="Stop and disable the MCP server service.")
+    mcp_subcommands.add_parser("status", help="Show the MCP server service status.")
 
     display = subcommands.add_parser("display", help="Inspect and configure display/touchscreen settings.")
     display_subcommands = display.add_subparsers(dest="display_command", required=True)
@@ -186,6 +204,11 @@ def add_server_bind_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--port", type=int, default=8080)
 
 
+def add_mcp_bind_arguments(parser: argparse.ArgumentParser, defaults: McpConfig) -> None:
+    parser.add_argument("--host", default=defaults.host)
+    parser.add_argument("--port", type=int, default=defaults.port)
+
+
 def add_component_arguments(parser: argparse.ArgumentParser, choices: tuple[str, ...]) -> None:
     parser.add_argument(
         "--component",
@@ -282,6 +305,52 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
 
         if args.server_command == "status":
             service_manager.status()
+            return 0
+
+    if args.command == "mcp":
+        if args.mcp_command == "run" or (args.mcp_command == "start" and args.foreground):
+            url = f"http://{args.host}:{args.port}"
+            if args.dry_run:
+                print(f"start MCP server {url}")
+                return 0
+            try:
+                from mcp_server import run_server
+            except ImportError as error:
+                if error.name != "fastmcp":
+                    raise
+                raise RuntimeError(
+                    "fastmcp is not installed. Run: uv pip install -e '.[mcp]'"
+                ) from error
+            run_server(host=args.host, port=args.port)
+            return 0
+
+        mcp_service_manager = McpServiceManager(runner)
+
+        if args.mcp_command == "install-service":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            mcp_service_manager.install(McpConfig(host=args.host, port=args.port))
+            return 0
+
+        if args.mcp_command == "start":
+            if args.dry_run:
+                print(f"start MCP service http://{args.host}:{args.port}")
+                return 0
+            require_linux()
+            require_root()
+            mcp_service_manager.start(McpConfig(host=args.host, port=args.port))
+            return 0
+
+        if args.mcp_command == "stop":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            mcp_service_manager.stop()
+            return 0
+
+        if args.mcp_command == "status":
+            mcp_service_manager.status()
             return 0
 
     if args.command == "install":

@@ -39,6 +39,38 @@
 
 ---
 
+## Phase 4 — MCP Server (AI Diagnostic Interface)
+
+Goal: expose read-only system inspection tools as an MCP server so AI agents (Claude Code, Claude.ai, custom agents) can diagnose the vending machine remotely.
+
+Full spec: `docs/mcp-server.md`
+
+### Must Have
+- [ ] `src/mcp_server.py` — FastMCP app entry point (HTTP/SSE, port 8899)
+- [ ] Tool: `get_system_status` — wrap `status.collect_status()`
+- [ ] Tool: `get_vpn_status` — wrap `status.collect_vpn_status()`
+- [ ] Tool: `get_display_status` — wrap display + touchscreen status
+- [ ] Tool: `get_web_server_status` — wrap `status.collect_web_server_status()`
+- [ ] Tool: `get_remote_access_status` — wrap `status.collect_remote_access_status()`
+- [ ] Tool: `get_os_info` — wrap `os_info.collect_os_info()`
+- [ ] Tool: `get_logs` — wrap `audit_log` (list snapshots + read snapshot)
+- [ ] Tool: `get_journal_logs` — journalctl with `--since` / `--until` filter
+- [ ] Tool: `get_docker_status` — `docker ps`, container logs, restart count
+- [ ] Tool: `get_usb_devices` — `lsusb` + udevadm (detect touchscreen USB)
+- [ ] Tool: `get_logged_in_users` — `who`, `last`, `loginctl` (ใครใช้งานเมื่อเที่ยงคืน)
+- [ ] Tool: `get_network_status` — `ip addr`, `ip route`, ping gateway
+- [ ] systemd unit: `vas-mcp.service` (รันคู่กับ `vas-server.service`)
+- [ ] บันทึก port ใน `server_service.py` หรือ `config.py`
+
+### Nice to Have
+- [ ] Tool: `get_disk_usage` — `df -h`, inode usage
+- [ ] Tool: `get_process_list` — top CPU/RAM consumers (`ps aux`)
+- [ ] Tool: `get_hardware_info` — CPU temp (`sensors`), RAM (`free -h`)
+- [ ] MCP resource: expose `vas://status` as MCP Resource (ไม่ใช่แค่ tool)
+- [ ] stdio transport mode สำหรับ Claude Code local (dual transport)
+
+---
+
 ## Improvements to Consider
 
 ### Display / Touchscreen
