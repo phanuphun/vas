@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,7 +42,7 @@ class McpServiceManager:
             return
         missing = [p for p in MCP_RUNTIME_PACKAGES if not _can_import(p)]
         if missing:
-            self.runner.run(["pip3", "install", *missing])
+            self.runner.run([sys.executable, "-m", "pip", "install", *missing])
 
     def install(self, config: McpConfig) -> None:
         self.ensure_runtime_packages()
