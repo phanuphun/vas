@@ -9,11 +9,11 @@ from mcp_tools import display, docker, logs, network, system
 
 mcp = FastMCP("vas-mcp")
 
-mcp.import_server(system.mcp)
-mcp.import_server(network.mcp)
-mcp.import_server(display.mcp)
-mcp.import_server(docker.mcp)
-mcp.import_server(logs.mcp)
+mcp.mount(system.mcp)
+mcp.mount(network.mcp)
+mcp.mount(display.mcp)
+mcp.mount(docker.mcp)
+mcp.mount(logs.mcp)
 
 
 def run_server(host: str, port: int) -> None:
