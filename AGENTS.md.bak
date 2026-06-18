@@ -8,16 +8,22 @@ vas — VPN and system automation service (Python CLI/server)
 
 ## Agent & Skill Resolution
 
-See `.agents/README.md` for agent definitions, skills, and workflow pipelines.
+**All AI tools (Claude Code, Cursor, Codex, and others) — read this section first.**
 
-### Workflow Spawning Rules
+Full protocol is in `.agents/README.md` → section **"Agent Loading Protocol (All Tools)"**.
 
-Before spawning any multi-agent workflow:
+### Loading Order (required for every tool)
 
-1. Read `.agents/README.md` to see available workflows
-2. Read the relevant workflow file from `.agents/workflows/`
-3. Follow the workflow steps in order
-4. Read agent definitions from `.agents/agents/<name>.md` before spawning each agent
+1. Read `.agents/README.md` — this is the single source of truth for agent rules and loading protocol
+2. Read `.agents/config.json` → get `agentsPath` (directory of agent definitions) and `wikiPath`
+3. List and read all `.md` files under `agentsPath` — interpret each as an agent definition using your tool's own conventions
+4. Read the relevant workflow file from `.agents/workflows/` before running any pipeline:
+   - Feature development → `.agents/workflows/code-factory.md`
+   - Wiki ingestion → `.agents/workflows/wiki-ingest.md`
+   - Project documentation → `.agents/workflows/project-doc.md`
+5. Follow workflow steps in order — for each step, re-read the agent's `.md` file and apply in-context
+
+❌ Do not hardcode agent paths. Always resolve `agentsPath` from `.agents/config.json` at runtime.
 
 ## Before Any Code Task
 
@@ -36,7 +42,7 @@ Before writing any document, ingesting files, or creating new files in the works
 
 ## Wiki
 
-Project wiki: `C:\Users\User\First\notes\claude-vault\wiki`
+Project wiki: see `.agents/config.json` → `wikiPath`
 
 Consult the wiki for architecture references, flow documentation, DB schema, and retrospectives before implementing features.
 
@@ -59,7 +65,7 @@ Pass the subagent:
 
 Expected wiki updates:
 
-- Create or update the relevant structured wiki page under `C:\Users\User\First\notes\claude-vault\wiki`.
+- Create or update the relevant structured wiki page under the path from `.agents/config.json` → `wikiPath`.
 - Add links to related architecture, flow, DB schema, operating procedure, or retrospective pages where appropriate.
 - Update relevant index pages so the new material is discoverable.
 - Add an ingestion/log entry with the source file, date, summary, and resulting wiki page path.
@@ -73,10 +79,15 @@ Constraints:
 
 ## CHANGELOG
 
-Before every commit, update `CHANGELOG.md`:
-- Add a new entry at the top of the file
+ก่อน commit ทุกครั้ง ให้อัปเดต `CHANGELOG.md` เป็น **ภาษาไทย**:
+- หากวันที่ยังไม่มี → สร้าง `## [YYYY-MM-DD]` ใหม่ที่ด้านบนสุด
+- หากวันที่ซ้ำกับ entry ล่าสุด → ต่อท้าย entry เดิม ห้ามสร้างหัวข้อวันที่ซ้ำ
 - Format:
 
-  ## [YYYY-MM-DD] <brief title>
+  ## [YYYY-MM-DD]
 
-  <detailed description of what changed and why>
+  ### <หัวข้อสั้นๆ>
+  - รายละเอียดสิ่งที่เปลี่ยนและเหตุผล
+
+  ### <หัวข้อถัดไป (ถ้ามี)>
+  - รายละเอียด
