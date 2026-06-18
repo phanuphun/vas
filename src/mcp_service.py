@@ -40,6 +40,7 @@ class McpServiceManager:
             print(f"ensure {package}")
         if self.runner.dry_run:
             return
+        _ensure_pip(self.runner)
         missing = [p for p in MCP_RUNTIME_PACKAGES if not _can_import(p)]
         if missing:
             self.runner.run([sys.executable, "-m", "pip", "install", *missing])
@@ -91,6 +92,19 @@ def render_mcp_service_file(config: McpConfig | None = None) -> str:
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
+
+
+def _ensure_pip(runner: CommandRunner) -> None:
+    """Bootstrap pip if it is not available as a module."""
+    result = runner.run([sys.executable, "-m", "pip", "--version"], check=False)
+    if result.returncode == 0:
+        return
+    # Try ensurepip first (no network required)
+    result = runner.run([sys.executable, "-m", "ensurepip", "--upgrade"], check=False)
+    if result.returncode == 0:
+        return
+    # Fall back to apt-get
+    runner.run(["apt-get", "install", "-y", "python3-pip"])
 
 
 def _can_import(package: str) -> bool:
