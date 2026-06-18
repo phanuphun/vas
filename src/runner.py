@@ -31,25 +31,29 @@ class CommandRunner:
     def print_operation(self, operation: str) -> None:
         print(self._format_operation(operation))
 
-    def run(self, args: Sequence[str], check: bool = True) -> CommandResult:
+    def run(self, args: Sequence[str], check: bool = True, stream: bool = False) -> CommandResult:
         normalized_args = tuple(args)
         self.print_operation(format_command(normalized_args))
         if self.dry_run:
             return CommandResult(normalized_args, 0, "", "")
 
-        completed = subprocess.run(
-            normalized_args,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        result = CommandResult(
-            normalized_args,
-            completed.returncode,
-            completed.stdout,
-            completed.stderr,
-        )
+        if stream:
+            completed = subprocess.run(normalized_args, check=False)
+            result = CommandResult(normalized_args, completed.returncode, "", "")
+        else:
+            completed = subprocess.run(
+                normalized_args,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            result = CommandResult(
+                normalized_args,
+                completed.returncode,
+                completed.stdout,
+                completed.stderr,
+            )
         if check and completed.returncode != 0:
             raise CommandExecutionError(result)
         return result

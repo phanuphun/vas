@@ -43,7 +43,7 @@ class McpServiceManager:
         _ensure_pip(self.runner)
         missing = [p for p in MCP_RUNTIME_PACKAGES if not _can_import(p)]
         if missing:
-            self.runner.run([sys.executable, "-m", "pip", "install", *missing])
+            self.runner.run([sys.executable, "-m", "pip", "install", *missing], stream=True)
 
     def install(self, config: McpConfig) -> None:
         self.ensure_runtime_packages()
@@ -104,7 +104,7 @@ def _ensure_pip(runner: CommandRunner) -> None:
     if result.returncode == 0:
         return
     # Fall back to apt-get
-    runner.run(["apt-get", "install", "-y", "python3-pip"])
+    runner.run(["apt-get", "install", "-y", "python3-pip"], stream=True)
 
 
 def _can_import(package: str) -> bool:
