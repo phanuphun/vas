@@ -1,5 +1,14 @@
 # Changelog
 
+## [2026-06-20]
+
+### เพิ่ม MCP tool specs และปรับปรุง TODO
+- เพิ่ม spec สำหรับ MCP tool `diagnose_touchscreen` — วิเคราะห์ปัญหา touchscreen แบบ step-by-step (kernel → xinput → xorg → session)
+- เพิ่ม spec สำหรับ MCP tool `diagnose_remote_access` — วิเคราะห์ปัญหา AnyDesk เข้าไม่ได้ (service → network → logs)
+- เพิ่ม spec สำหรับ MCP tool `diagnose_display` — วิเคราะห์ปัญหาหน้าจอไม่แสดงผลหรือ rotation ผิด
+- เพิ่ม improvement notes สำหรับ production server (gunicorn), Basic Auth dashboard, และ pytest-cov
+- เพิ่ม retrospective: MCP server startup และ mount() fix
+
 ## [2026-06-18]
 
 ### ปรับปรุง agentflow และโครงสร้างโปรเจกต์

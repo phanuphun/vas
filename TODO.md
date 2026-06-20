@@ -69,6 +69,85 @@ Full spec: `docs/mcp-server.md`
 - [ ] MCP resource: expose `vas://status` as MCP Resource (ไม่ใช่แค่ tool)
 - [ ] stdio transport mode สำหรับ Claude Code local (dual transport)
 
+### Tool: `diagnose_touchscreen`
+
+MCP tool สำหรับ AI agent วิเคราะห์ปัญหา touchscreen ไม่ติดแบบ step-by-step คืน structured result ต่อ step เพื่อให้ agent pinpoint สาเหตุได้โดยไม่ต้องรัน command เอง
+
+**Input:** ไม่มี (หรือ optional `display: str = ":0"`)
+
+**Output:** dict ของแต่ละ step พร้อม `status: ok | warn | fail` และ `detail`
+
+**Steps ที่ต้องรัน:**
+
+1. **kernel_usb** — `lsusb` ดูว่า OS เห็น USB device ที่มี "touch" ใน description ไหม
+2. **kernel_input** — `/proc/bus/input/devices` ดูว่ามี input device ที่เป็น touchscreen (EV=b หรือ ABS flags)
+3. **udevadm_detect** — `udevadm info --export-db` กรอง `ID_INPUT_TOUCHSCREEN=1` ดูว่า kernel classify เป็น touchscreen จริงไหม และได้ชื่อ device อะไร
+4. **xinput_list** — `DISPLAY=:0 xinput list` ดูว่า X session เห็น device ไหม และ cross-ref กับชื่อจาก udevadm
+5. **xinput_matrix** — `xinput list-props <ID>` ดู `Coordinate Transformation Matrix` ว่าถูก set ไหม (ไม่ใช่ identity matrix = มีการ apply แล้ว)
+6. **xorg_config** — อ่าน `/etc/X11/xorg.conf.d/99-vending-touchscreen.conf` ดูว่า VAS เขียน config ไว้ถูกต้องไหม
+7. **session_script** — ตรวจ `~/.config/vending-auto-setup/display-session.sh` ว่ามี, executable, และมี signature ของ VAS
+8. **xprofile** — ตรวจ `~/.xprofile` ว่า script ถูก hook ไว้ใน session start
+9. **session_type** — `loginctl show-session` ดูว่าเป็น X11 หรือ Wayland (Wayland = xinput ใช้ไม่ได้)
+
+**Diagnosis logic:**
+- ถ้า step 1–3 fail → แจ้ง "hardware/driver issue — kernel ไม่เห็น device"
+- ถ้า step 4 fail แต่ 1–3 pass → แจ้ง "X session ไม่เห็น device — ตรวจ DISPLAY env หรือ Xorg permission"
+- ถ้า step 5 fail (identity matrix) → แจ้ง "touch ยังไม่ถูก map — ให้รัน `vas display apply`"
+- ถ้า step 9 เป็น Wayland → แจ้ง "session เป็น Wayland ซึ่ง xinput ไม่รองรับ — ให้รัน `sudo vas display disable-wayland` แล้ว reboot"
+
+**ไฟล์ที่ควร implement:** `src/mcp_tools/display.py` เพิ่ม function `diagnose_touchscreen()` แล้ว register ใน `src/mcp_server.py`
+
+### Tool: `diagnose_remote_access`
+
+MCP tool สำหรับ AI agent วิเคราะห์ปัญหา AnyDesk เข้าไม่ได้ คืน structured result ต่อ step
+
+**Input:** ไม่มี
+
+**Output:** dict ของแต่ละ step พร้อม `status: ok | warn | fail` และ `detail`
+
+**Steps:**
+
+1. **service_active** — `systemctl is-active anydesk` — service ขึ้นไหม
+2. **anydesk_id** — `anydesk --get-id` — อ่าน AnyDesk ID ได้ไหม
+3. **socket_active** — `ss -tnp | grep anydesk` — port/socket active ไหม
+4. **internet_reachable** — `ping -c 3 -W 2 8.8.8.8` — internet ออกได้ไหม
+5. **default_route** — `ip route show default` — default route มีไหม
+6. **recent_logs** — `journalctl -u anydesk -n 30 --no-pager` — log ล่าสุดมี error ไหม
+
+**Diagnosis logic:**
+- step 1 fail → แจ้ง "AnyDesk service ไม่ทำงาน — ให้รัน `sudo systemctl restart anydesk`"
+- step 2 fail → แจ้ง "อ่าน ID ไม่ได้ — service อาจยังไม่พร้อม หรือ license มีปัญหา"
+- step 4–5 fail → แจ้ง "internet ออกไม่ได้ — ตรวจ network/VPN ก่อน AnyDesk จะเชื่อมต่อไม่ได้"
+
+**ไฟล์ที่ควร implement:** `src/mcp_tools/system.py` เพิ่ม function `diagnose_remote_access()` แล้ว register ใน `src/mcp_server.py`
+
+### Tool: `diagnose_display`
+
+MCP tool สำหรับ AI agent วิเคราะห์ปัญหาหน้าจอไม่แสดงผลหรือ rotation ผิด (แยกจาก `diagnose_touchscreen` ที่เน้น input mapping)
+
+**Input:** ไม่มี (หรือ optional `display: str = ":0"`)
+
+**Output:** dict ของแต่ละ step พร้อม `status: ok | warn | fail` และ `detail`
+
+**Steps:**
+
+1. **session_type** — `loginctl show-session ... -p Type --value` — X11 หรือ Wayland
+2. **gdm_active** — `systemctl is-active gdm` — GDM ขึ้นไหม
+3. **wayland_disabled** — `cat /etc/gdm3/custom.conf` — Wayland ถูก disable ไหม
+4. **xrandr_outputs** — `DISPLAY=:0 xrandr --query` — output connected ไหม และ resolution ถูกต้องไหม
+5. **xprofile_hook** — `cat ~/.xprofile` — session script ถูก hook ไหม
+6. **session_script** — ตรวจ `~/.config/vending-auto-setup/display-session.sh` ว่ามี, executable, และมี VAS signature
+7. **xorg_config** — `cat /etc/X11/xorg.conf.d/99-vending-touchscreen.conf` — Xorg config ของ VAS ถูกต้องไหม
+8. **gdm_boot_logs** — `journalctl -b -u gdm --no-pager -n 30` — GDM boot errors
+
+**Diagnosis logic:**
+- step 1 เป็น Wayland → แจ้ง "session เป็น Wayland — ให้รัน `sudo vas display disable-wayland` แล้ว reboot"
+- step 2 fail → แจ้ง "GDM ไม่ทำงาน — display manager ไม่ขึ้น ให้ตรวจ `journalctl -u gdm`"
+- step 4 ไม่มี connected output → แจ้ง "xrandr ไม่เห็น display — ตรวจสาย HDMI/DisplayPort หรือ driver"
+- step 5–6 fail → แจ้ง "session script ไม่ถูก hook — ให้รัน `vas display persist-session` ใหม่"
+
+**ไฟล์ที่ควร implement:** `src/mcp_tools/display.py` เพิ่ม function `diagnose_display()` แล้ว register ใน `src/mcp_server.py`
+
 ---
 
 ## Improvements to Consider
@@ -101,6 +180,11 @@ Full spec: `docs/mcp-server.md`
 ### Web Dashboard
 - Real-time touchscreen event stream (SSE + evdev) in the display test panel
 - Dark mode support
+
+### Server & Testing
+- ใช้ `gunicorn` แทน Flask dev server สำหรับ production (`gunicorn "server:create_app()" --bind 0.0.0.0:8888`) — Flask dev server เป็น single-threaded และไม่ graceful บน crash
+- เพิ่ม Basic Auth ให้ web dashboard (port 8888) — ปัจจุบันไม่มี auth ใดๆ เลย ใครใน network เดียวกันเข้าได้ทันที
+- เพิ่ม `pytest-cov` ใน dev deps เพื่อดู test coverage (`pytest --cov=src --cov-report=term-missing`)
 
 ---
 
