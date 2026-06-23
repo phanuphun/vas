@@ -20,3 +20,20 @@ class InstallConfig:
 
 
 DEFAULT_CONFIG = InstallConfig()
+
+
+from pathlib import Path as _Path
+
+QR_UDEV_RULE_PATH = _Path("/etc/udev/rules.d/99-qr500-bm.rules")
+QR_UDEV_SIGNATURE = "# managed by vas"
+
+
+def qr_config_dir() -> _Path:
+    """Return ~/.config/vas/ ของ user จริง (รองรับ sudo)"""
+    from status import _effective_home  # import late เพื่อหลีกเลี่ยง circular
+    return _effective_home() / ".config" / "vas"
+
+
+def qr_config_path() -> _Path:
+    """Return ~/.config/vas/qr_config.json ของ user จริง"""
+    return qr_config_dir() / "qr_config.json"

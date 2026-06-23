@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% block page_title %}QR Reader — VAS{% endblock %}
+{% block header_title %}QR Reader{% endblock %}
+
+{% block header_actions %}
+<span class="cf-zone {{ 'cf-zone-safe' if qr_reader.reader_running else 'cf-zone-neutral' }}" id="header-reader-badge">
+  {{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}
+</span>
+<button class="cf-btn cf-btn-primary" id="btn-start" onclick="qrStart()" {{ 'style=display:none' if qr_reader.reader_running else '' }}>
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polygon points="5 3 19 12 5 21 5 3"/>
+  </svg>
+  เริ่ม
+</button>
+<button class="cf-btn" id="btn-stop" onclick="qrStop()" {{ '' if qr_reader.reader_running else 'style=display:none' }}>
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6" y="6" width="12" height="12"/>
+  </svg>
+  หยุด
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="content-inner">
+
+  <!-- Page heading -->
+  <div class="page-head">
+    <p class="cf-eyebrow">VAS · Hardware · ZKTeco QR500-BM</p>
+    <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">QR Code Reader</h1>
+    <p style="color:rgb(var(--c-muted));font-size:0.875rem;margin-top:0.3rem">
+      อ่าน QR Code ผ่าน USB HID (hidraw) — vendor: 0416, product: 5020
+    </p>
+  </div>
+
+  <!-- Stat row -->
+  <div class="stat-row-3">
+    <div class="cf-stat">
+      <span class="cf-stat-val num" style="font-size:1.2rem;{{ 'color:rgb(var(--c-safe))' if qr_reader.udev_rule_has_signature else 'color:rgb(var(--c-caution))' }}">
+        {{ 'OK' if qr_reader.udev_rule_has_signature else 'WARN' }}
+      </span>
+      <span class="cf-stat-label">udev Rule</span>
+    </div>
+    <div class="cf-stat">
+      <span class="cf-stat-val num" style="font-size:1.2rem;{{ 'color:rgb(var(--c-safe))' if qr_reader.detected_devices else 'color:rgb(var(--c-caution))' }}">
+        {{ qr_reader.detected_devices | length }}
+      </span>
+      <span class="cf-stat-label">อุปกรณ์ที่พบ</span>
+    </div>
+    <div class="cf-stat">
+      <span class="cf-stat-val num" style="font-size:1.2rem;{{ 'color:rgb(var(--c-safe))' if qr_reader.reader_running else 'color:rgb(var(--c-faint))' }}">
+        {{ 'ON' if qr_reader.reader_running else 'OFF' }}
+      </span>
+      <span class="cf-stat-label">Reader</span>
+    </div>
+  </div>
+
+  <!-- Live scan card -->
+  <div class="cf-card">
+    <div class="card-head hair-b" style="padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;gap:0.75rem;">
+      <div style="display:flex;align-items:center;gap:0.6rem;">
+        <div class="cf-iconbox" style="border-color:rgb(var(--c-accent)/0.28);background:rgb(var(--c-accent)/0.06);color:rgb(var(--c-accent))">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+          </svg>
+        </div>
+        <div>
+          <h2 style="font-size:0.9rem;font-weight:600">สแกนล่าสุด</h2>
+          <p style="font-size:0.7rem;color:rgb(var(--c-faint));margin-top:1px" id="sse-status-text">กำลังเชื่อมต่อ SSE...</p>
+        </div>
+      </div>
+      <span class="cf-zone cf-zone-neutral" id="sse-badge">ออฟไลน์</span>
+    </div>
+    <div style="padding:1.5rem 1.25rem;">
+      <div id="qr-scan-display"
+           style="font-family:'Bai Jamjuree',monospace;font-size:1.6rem;font-weight:700;
+                  min-height:2.5rem;letter-spacing:0.04em;color:rgb(var(--c-ink));
+                  word-break:break-all;transition:color 0.2s;">
+        {{ qr_reader.last_scan or '—' }}
+      </div>
+      {% if qr_reader.last_scan %}
+      <p style="margin-top:0.4rem;font-size:0.72rem;color:rgb(var(--c-faint))">
+        ค่าล่าสุดจาก server (อาจไม่ใช่ real-time)
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Status card -->
+  <div class="cf-card">
+    <div class="card-head hair-b" style="padding:1rem 1.25rem;">
+      <h2 style="font-size:0.9rem;font-weight:600">สถานะอุปกรณ์</h2>
+    </div>
+    <div class="status-dl">
+      <div class="status-dl-row">
+        <span class="status-dl-key">udev rule</span>
+        <span class="status-dl-val">
+          <span class="cf-zone {{ 'cf-zone-safe' if qr_reader.udev_rule_has_signature else 'cf-zone-caution' }}">
+            {{ 'OK' if qr_reader.udev_rule_has_signature else 'WARN' }}
+          </span>
+          <code style="font-size:0.78rem;color:rgb(var(--c-muted))">{{ qr_reader.udev_rule_path.as_posix() }}</code>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">อุปกรณ์ที่พบ</span>
+        <span class="status-dl-val">
+          {% if qr_reader.detected_devices %}
+            {% for dev in qr_reader.detected_devices %}
+              <span class="cf-chip" style="background:rgb(var(--c-safe)/0.08);color:#0f766e;border-color:rgb(var(--c-safe)/0.20);font-family:'Bai Jamjuree',monospace;">{{ dev }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="cf-zone cf-zone-caution">ไม่พบอุปกรณ์</span>
+            <span style="font-size:0.78rem;color:rgb(var(--c-faint))"> — ตรวจสอบการเชื่อมต่อ USB</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Reader thread</span>
+        <span class="status-dl-val">
+          <span class="cf-zone {{ 'cf-zone-safe' if qr_reader.reader_running else 'cf-zone-mute' }}">
+            {{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}
+          </span>
+          {% if qr_reader.active_device %}
+            <code style="font-size:0.78rem;color:rgb(var(--c-muted))">{{ qr_reader.active_device }}</code>
+          {% endif %}
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Config file</span>
+        <span class="status-dl-val">
+          <span class="cf-zone {{ 'cf-zone-safe' if qr_reader.config_exists else 'cf-zone-neutral' }}">
+            {{ 'OK' if qr_reader.config_exists else 'ยังไม่ได้ตั้งค่า' }}
+          </span>
+          <code style="font-size:0.78rem;color:rgb(var(--c-muted))">{{ qr_reader.config_path.as_posix() }}</code>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config card -->
+  <div class="cf-card">
+    <div class="card-head hair-b" style="padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;gap:0.75rem;">
+      <h2 style="font-size:0.9rem;font-weight:600">ตั้งค่า Device</h2>
+      <span id="config-result" style="font-size:0.78rem;color:rgb(var(--c-faint))"></span>
+    </div>
+    <div style="padding:1.25rem;display:flex;flex-direction:column;gap:1rem;">
+      <div style="display:flex;flex-direction:column;gap:0.35rem;">
+        <label class="cf-label" for="device-select">อุปกรณ์ hidraw</label>
+        <select class="cf-input" id="device-select" style="font-family:'Bai Jamjuree',monospace;">
+          <option value="">Auto-detect (ใช้อุปกรณ์แรกที่พบ)</option>
+          {% for dev in detected_devices %}
+          <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
+          {% endfor %}
+        </select>
+        {% if not detected_devices %}
+        <p style="font-size:0.72rem;color:rgb(var(--c-caution))">
+          ⚠ ยังไม่พบอุปกรณ์ ZKTeco — ตรวจสอบการเชื่อมต่อ USB หรือติดตั้ง udev rule ก่อน
+        </p>
+        {% endif %}
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button class="cf-btn cf-btn-primary" id="btn-save-config" onclick="qrSaveConfig()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+          </svg>
+          บันทึก Config
+        </button>
+        <button class="cf-btn" onclick="location.reload()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Install hint -->
+  {% if not qr_reader.udev_rule_has_signature %}
+  <div class="cf-warn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    <span>
+      udev rule ยังไม่ได้ติดตั้ง — รัน <code style="font-family:'Bai Jamjuree',monospace;background:rgb(var(--c-caution)/0.12);padding:0.1em 0.35em;border-radius:3px;">sudo vas qr install-udev</code> เพื่อให้ผู้ใช้ non-root เข้าถึง /dev/hidraw* ได้
+    </span>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var evtSource = null;
+
+  // ── SSE connection ──────────────────────────────────────────
+  function connectSSE() {
+    if (evtSource) { evtSource.close(); }
+    evtSource = new EventSource("/api/qr/stream");
+    setBadge("cf-zone-neutral", "เชื่อมต่อ...");
+
+    evtSource.addEventListener("message", function (e) {
+      if (e.data === "__stopped__") {
+        setBadge("cf-zone-mute", "Reader หยุด");
+        updateHeaderBadge(false);
+        toggleHeaderBtns(false);
+        return;
+      }
+      // scan value
+      var display = document.getElementById("qr-scan-display");
+      display.textContent = e.data;
+      display.style.color = "rgb(var(--c-accent))";
+      setTimeout(function () { display.style.color = ""; }, 1200);
+      setBadge("cf-zone-free", "กำลังรับข้อมูล");
+    });
+
+    evtSource.addEventListener("status", function (e) {
+      try {
+        var d = JSON.parse(e.data);
+        if (d.running) {
+          setBadge("cf-zone-safe", "เชื่อมต่อแล้ว" + (d.device ? " · " + d.device : ""));
+          updateHeaderBadge(true);
+          toggleHeaderBtns(true);
+        } else {
+          setBadge("cf-zone-mute", "Reader หยุด");
+          updateHeaderBadge(false);
+          toggleHeaderBtns(false);
+        }
+      } catch (_) {}
+    });
+
+    evtSource.onerror = function () {
+      setBadge("cf-zone-caution", "ขาดการเชื่อมต่อ");
+    };
+  }
+
+  function setBadge(cls, text) {
+    var badge = document.getElementById("sse-badge");
+    var statusText = document.getElementById("sse-status-text");
+    badge.className = "cf-zone " + cls;
+    badge.textContent = text;
+    if (statusText) statusText.textContent = text;
+  }
+
+  function updateHeaderBadge(running) {
+    var b = document.getElementById("header-reader-badge");
+    if (!b) return;
+    b.className = "cf-zone " + (running ? "cf-zone-safe" : "cf-zone-neutral");
+    b.textContent = running ? "กำลังทำงาน" : "หยุด";
+  }
+
+  function toggleHeaderBtns(running) {
+    var start = document.getElementById("btn-start");
+    var stop  = document.getElementById("btn-stop");
+    if (start) start.style.display = running ? "none" : "";
+    if (stop)  stop.style.display  = running ? "" : "none";
+  }
+
+  // ── API actions ─────────────────────────────────────────────
+  function qrStart() {
+    var device = document.getElementById("device-select").value || null;
+    fetch("/api/qr/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(device ? { device: device } : {}),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status === "ok") {
+          connectSSE();
+          toggleHeaderBtns(true);
+        } else {
+          alert("Error: " + (data.errors || []).join(", "));
+        }
+      })
+      .catch(function (e) { alert("Error: " + e); });
+  }
+
+  function qrStop() {
+    fetch("/api/qr/stop", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function () {
+        setBadge("cf-zone-mute", "Reader หยุด");
+        toggleHeaderBtns(false);
+        updateHeaderBadge(false);
+      });
+  }
+
+  function qrSaveConfig() {
+    var device = document.getElementById("device-select").value || null;
+    var btn = document.getElementById("btn-save-config");
+    btn.disabled = true;
+    fetch("/api/qr/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_path: device }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var el = document.getElementById("config-result");
+        if (data.status === "ok") {
+          el.style.color = "rgb(var(--c-safe))";
+          el.textContent = "✓ บันทึกแล้ว";
+        } else {
+          el.style.color = "rgb(var(--c-danger))";
+          el.textContent = "Error: " + (data.errors || []).join(", ");
+        }
+        setTimeout(function () { el.textContent = ""; }, 3000);
+      })
+      .catch(function (e) {
+        document.getElementById("config-result").textContent = "Error: " + e;
+      })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  window.qrStart = qrStart;
+  window.qrStop  = qrStop;
+  window.qrSaveConfig = qrSaveConfig;
+
+  document.addEventListener("DOMContentLoaded", connectSSE);
+})();
+</script>
+{% endblock %}

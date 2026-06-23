@@ -1,25 +1,45 @@
 {% extends "base.html" %}
 {% set title = "Dashboard" %}
+{% block header_title %}Dashboard{% endblock %}
 
 {% block content %}
-<section class="status-grid">
-  <article class="panel">
-    <h2>Session</h2>
-    <dl>
-      <dt>Display</dt>
-      <dd><span class="badge {{ 'ok' if session.is_x11 else 'warn' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>{{ session.session_type }} via {{ session.source }}</dd>
-      <dt>Display config</dt>
-      <dd><span class="badge {{ 'ok' if display_config.has_signature else 'warn' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>{{ display_config.path.as_posix() }}</dd>
-      <dt>Session script</dt>
-      <dd><span class="badge {{ 'ok' if display_script.has_signature and display_script.executable else 'warn' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>{{ display_script.path.as_posix() }}</dd>
-      <dt>Touchscreen</dt>
-      <dd><span class="badge {{ 'ok' if touchscreen.has_signature else 'warn' }}">{{ 'OK' if touchscreen.has_signature else 'WARN' }}</span>{{ touchscreen.path.as_posix() }}</dd>
-    </dl>
-  </article>
+<div class="page-head">
+  <p class="cf-eyebrow">VAS · ภาพรวมระบบ</p>
+  <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">Dashboard</h1>
+</div>
 
-  <article class="panel">
+<!-- Session panel -->
+<div class="cf-card">
+  <div class="card-head hair-b">
+    <h2>Session</h2>
+  </div>
+  <div class="status-dl">
+    <div class="status-dl-row">
+      <span class="status-dl-key">Display</span>
+      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if session.is_x11 else 'cf-zone-caution' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>{{ session.session_type }} via {{ session.source }}</span>
+    </div>
+    <div class="status-dl-row">
+      <span class="status-dl-key">Display config</span>
+      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if display_config.has_signature else 'cf-zone-caution' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>{{ display_config.path.as_posix() }}</span>
+    </div>
+    <div class="status-dl-row">
+      <span class="status-dl-key">Session script</span>
+      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if display_script.has_signature and display_script.executable else 'cf-zone-caution' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>{{ display_script.path.as_posix() }}</span>
+    </div>
+    <div class="status-dl-row">
+      <span class="status-dl-key">Touchscreen</span>
+      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if touchscreen.has_signature else 'cf-zone-caution' }}">{{ 'OK' if touchscreen.has_signature else 'WARN' }}</span>{{ touchscreen.path.as_posix() }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Core Tools panel -->
+<div class="cf-card">
+  <div class="card-head hair-b">
     <h2>Core Tools</h2>
-    <table>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="cf-table">
       <thead>
         <tr><th>Tool</th><th>Status</th><th>Version</th></tr>
       </thead>
@@ -27,53 +47,141 @@
         {% for tool in tools %}
         <tr>
           <td>{{ tool.name }}</td>
-          <td><span class="badge {{ 'ok' if tool.installed else 'missing' }}">{{ 'OK' if tool.installed else 'MISSING' }}</span></td>
+          <td><span class="cf-zone {{ 'cf-zone-safe' if tool.installed else 'cf-zone-danger' }}">{{ 'OK' if tool.installed else 'MISSING' }}</span></td>
           <td>{{ tool.version or "not installed" }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-  </article>
+  </div>
+</div>
 
-  <article class="panel">
-    <h2>VPN</h2>
-    <dl>
-      <dt>WireGuard</dt>
-      <dd><span class="badge {{ 'ok' if vpn.wg_installed else 'missing' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</dd>
-      <dt>App config</dt>
-      <dd><span class="badge {{ 'ok' if vpn.app_config_exists else 'warn' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>{{ vpn.app_config_path.as_posix() }}</dd>
-      <dt>Active config</dt>
-      <dd><span class="badge {{ 'ok' if vpn.active_config_exists else 'warn' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>{{ vpn.active_config_path.as_posix() }}</dd>
-      <dt>Connection</dt>
-      <dd><span class="badge {{ 'ok' if vpn.service_active == 'active' and vpn.interface_exists else 'warn' }}">{{ 'OK' if vpn.service_active == 'active' and vpn.interface_exists else 'WARN' }}</span>{{ vpn_connection_label(vpn) }}</dd>
-    </dl>
-  </article>
+<!-- Status panels row -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;">
 
-  <article class="panel">
-    <h2>Remote</h2>
-    <dl>
-      <dt>AnyDesk</dt>
-      <dd><span class="badge {{ 'ok' if remote.anydesk_installed else 'missing' }}">{{ 'OK' if remote.anydesk_installed else 'MISSING' }}</span>{{ remote.anydesk_version or "not installed" }}</dd>
-      <dt>ID</dt>
-      <dd><span class="badge {{ 'ok' if remote.anydesk_id else 'warn' }}">{{ 'OK' if remote.anydesk_id else 'WARN' }}</span>{{ remote.anydesk_id or "not available" }}</dd>
-      <dt>Status</dt>
-      <dd><span class="badge {{ 'ok' if remote.anydesk_status|lower == 'online' else 'warn' }}">{{ 'OK' if remote.anydesk_status|lower == 'online' else 'WARN' }}</span>{{ remote.anydesk_status }}</dd>
-      <dt>Service</dt>
-      <dd><span class="badge {{ 'ok' if remote.service_active == 'active' else 'warn' }}">{{ 'OK' if remote.service_active == 'active' else 'WARN' }}</span>{{ remote.service_enabled }} / {{ remote.service_active }}</dd>
-    </dl>
-  </article>
+  <!-- VPN panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
+      <h2>VPN</h2>
+    </div>
+    <div class="status-dl">
+      <div class="status-dl-row">
+        <span class="status-dl-key">WireGuard</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.wg_installed else 'cf-zone-danger' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">App config</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.app_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>{{ vpn.app_config_path.as_posix() }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Active config</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.active_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>{{ vpn.active_config_path.as_posix() }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Connection</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.service_active == 'active' and vpn.interface_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.service_active == 'active' and vpn.interface_exists else 'WARN' }}</span>{{ vpn_connection_label(vpn) }}</span>
+      </div>
+    </div>
+  </div>
 
-  <article class="panel">
-    <h2>Web Server</h2>
-    <dl>
-      <dt>Service</dt>
-      <dd><span class="badge {{ 'ok' if web_server.service_enabled == 'enabled' else 'warn' }}">{{ 'OK' if web_server.service_enabled == 'enabled' else 'WARN' }}</span>{{ web_server.service_enabled }}</dd>
-      <dt>Connection</dt>
-      <dd><span class="badge {{ 'ok' if web_server.service_active == 'active' else 'warn' }}">{{ 'OK' if web_server.service_active == 'active' else 'WARN' }}</span>{{ web_server.service_active }}</dd>
-      <dt>Address</dt>
-      <dd><span class="badge ok">OK</span>{{ web_server.url }}</dd>
-    </dl>
-  </article>
-</section>
+  <!-- Remote panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
+      <h2>Remote</h2>
+    </div>
+    <div class="status-dl">
+      <div class="status-dl-row">
+        <span class="status-dl-key">AnyDesk</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.anydesk_installed else 'cf-zone-danger' }}">{{ 'OK' if remote.anydesk_installed else 'MISSING' }}</span>{{ remote.anydesk_version or "not installed" }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">ID</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.anydesk_id else 'cf-zone-caution' }}">{{ 'OK' if remote.anydesk_id else 'WARN' }}</span>{{ remote.anydesk_id or "not available" }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Status</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.anydesk_status|lower == 'online' else 'cf-zone-caution' }}">{{ 'OK' if remote.anydesk_status|lower == 'online' else 'WARN' }}</span>{{ remote.anydesk_status }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Service</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.service_active == 'active' else 'cf-zone-caution' }}">{{ 'OK' if remote.service_active == 'active' else 'WARN' }}</span>{{ remote.service_enabled }} / {{ remote.service_active }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">OpenSSH</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if openssh.installed else 'cf-zone-danger' }}">{{ 'OK' if openssh.installed else 'MISSING' }}</span>{{ openssh.version or "not installed" }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">SSH Service</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if openssh.service_active == 'active' else 'cf-zone-caution' }}">{{ 'OK' if openssh.service_active == 'active' else 'WARN' }}</span>{{ openssh.service_enabled }} / {{ openssh.service_active }}</span>
+      </div>
+    </div>
+  </div>
 
+  <!-- Web Server panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
+      <h2>Web Server</h2>
+    </div>
+    <div class="status-dl">
+      <div class="status-dl-row">
+        <span class="status-dl-key">Service</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if web_server.service_enabled == 'enabled' else 'cf-zone-caution' }}">{{ 'OK' if web_server.service_enabled == 'enabled' else 'WARN' }}</span>{{ web_server.service_enabled }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Connection</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if web_server.service_active == 'active' else 'cf-zone-caution' }}">{{ 'OK' if web_server.service_active == 'active' else 'WARN' }}</span>{{ web_server.service_active }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Address</span>
+        <span class="status-dl-val"><span class="cf-zone cf-zone-safe">OK</span>{{ web_server.url }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Reader panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
+      <h2>QR Reader</h2>
+      <a href="{{ url_for('qr_reader_page') }}" class="cf-btn" style="font-size:0.75rem;padding:0.25rem 0.6rem;">รายละเอียด</a>
+    </div>
+    <div class="status-dl">
+      <div class="status-dl-row">
+        <span class="status-dl-key">udev rule</span>
+        <span class="status-dl-val">
+          <span class="cf-zone {{ 'cf-zone-safe' if qr_reader.udev_rule_has_signature else 'cf-zone-caution' }}">
+            {{ 'OK' if qr_reader.udev_rule_has_signature else 'WARN' }}
+          </span>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">อุปกรณ์</span>
+        <span class="status-dl-val">
+          {% if qr_reader.detected_devices %}
+            {{ qr_reader.detected_devices[0] }}
+            {% if qr_reader.detected_devices | length > 1 %}
+              +{{ qr_reader.detected_devices | length - 1 }}
+            {% endif %}
+          {% else %}
+            <span class="cf-zone cf-zone-caution">ไม่พบ</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Reader</span>
+        <span class="status-dl-val">
+          <span class="cf-zone {{ 'cf-zone-safe' if qr_reader.reader_running else 'cf-zone-caution' }}">
+            {{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}
+          </span>
+        </span>
+      </div>
+      {% if qr_reader.last_scan %}
+      <div class="status-dl-row">
+        <span class="status-dl-key">ล่าสุด</span>
+        <span class="status-dl-val" style="font-family:monospace;font-size:0.85rem">{{ qr_reader.last_scan }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
 {% endblock %}

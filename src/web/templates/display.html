@@ -1,82 +1,108 @@
 {% extends "base.html" %}
 {% set title = "Display" %}
+{% block header_title %}จอแสดงผล{% endblock %}
+
+{% block header_actions %}
+<button class="cf-btn cf-btn-primary" id="applyDisplay" type="button">Apply</button>
+{% endblock %}
 
 {% block content %}
 <section class="display-tool" data-default-display="{{ default_display }}">
-  <section class="status-grid display-detail">
-    <article class="panel">
+
+  <div class="page-head">
+    <p class="cf-eyebrow">VAS · จอแสดงผล</p>
+    <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">Display Settings</h1>
+  </div>
+
+  <!-- Display Details panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
       <h2>Display Details</h2>
-      <dl>
-        <dt>Session</dt>
-        <dd><span class="badge {{ 'ok' if session.is_x11 else 'warn' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>{{ session.session_type }} via {{ session.source }}</dd>
-        <dt>GDM Wayland</dt>
-        <dd class="detail-value">
+    </div>
+    <div class="status-dl">
+      <div class="status-dl-row">
+        <span class="status-dl-key">Session</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if session.is_x11 else 'cf-zone-caution' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>{{ session.session_type }} via {{ session.source }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">GDM Wayland</span>
+        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
           <span>
             <span class="badge {{ 'ok' if gdm_wayland.disabled else 'warn' }}" id="gdmWaylandBadge">{{ 'OK' if gdm_wayland.disabled else 'WARN' }}</span>
             <span id="gdmWaylandText">{{ 'disabled' if gdm_wayland.disabled else 'enabled/default' }}{% if gdm_wayland.value %} (WaylandEnable={{ gdm_wayland.value }}){% endif %} - {{ gdm_wayland.path.as_posix() }}</span>
           </span>
-          <span class="detail-actions">
-            <button class="secondary-action compact-action" data-wayland-action="disable" type="button">Disable</button>
-            <button class="secondary-action compact-action" data-wayland-action="enable" type="button">Enable</button>
-            <button class="config-view-btn" data-config-key="gdm_custom" data-config-title="GDM custom.conf" type="button">View</button>
+          <span style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+            <button class="cf-btn" data-wayland-action="disable" type="button">Disable</button>
+            <button class="cf-btn" data-wayland-action="enable" type="button">Enable</button>
+            <button class="cf-btn config-view-btn" data-config-key="gdm_custom" data-config-title="GDM custom.conf" type="button">View</button>
           </span>
-        </dd>
-        <dt>Monitors</dt>
-        <dd>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Monitors</span>
+        <span class="status-dl-val">
           {% if outputs %}
             {% for output in outputs %}
             {{ output }}{% if not loop.last %}, {% endif %}
             {% endfor %}
           {% else %}
-            <span class="badge warn">WARN</span>none detected
+            <span class="cf-zone cf-zone-caution">WARN</span>none detected
           {% endif %}
-        </dd>
-        <dt>Touchscreens</dt>
-        <dd>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Touchscreens</span>
+        <span class="status-dl-val">
           {% if touch_devices %}
             {% for t in touch_devices %}
             {{ t.name }}{% if t.xinput_id is not none %} (id: {{ t.xinput_id }}){% endif %}{% if not loop.last %}, {% endif %}
             {% endfor %}
           {% else %}
-            <span class="badge warn">WARN</span>none detected
+            <span class="cf-zone cf-zone-caution">WARN</span>none detected
           {% endif %}
-        </dd>
-        <dt>.xprofile</dt>
-        <dd class="detail-value">
-          <span><span class="badge {{ 'ok' if display_config.has_signature else 'warn' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>{{ display_config.path.as_posix() }}</span>
-          <button class="config-view-btn" data-config-key="xprofile" data-config-title=".xprofile" type="button">View</button>
-        </dd>
-        <dt>Session script</dt>
-        <dd class="detail-value">
-          <span><span class="badge {{ 'ok' if display_script.has_signature and display_script.executable else 'warn' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>{{ display_script.path.as_posix() }}</span>
-          <button class="config-view-btn" data-config-key="display_script" data-config-title="display-session.sh" type="button">View</button>
-        </dd>
-        <dt>Xorg touchscreen</dt>
-        <dd class="detail-value">
-          <span><span class="badge {{ 'ok' if xorg_touchscreen.has_signature else 'warn' }}">{{ 'OK' if xorg_touchscreen.has_signature else 'WARN' }}</span>{{ xorg_touchscreen.path.as_posix() }}</span>
-          <button class="config-view-btn" data-config-key="xorg_touchscreen" data-config-title="Xorg touchscreen" type="button">View</button>
-        </dd>
-      </dl>
-    </article>
-  </section>
-
-  <div class="panel config-file-viewer" id="configFileViewer" hidden>
-    <div class="config-file-header">
-      <div>
-        <h2 id="configFileTitle">Config file</h2>
-        <p class="config-file-path" id="configFilePath"></p>
+        </span>
       </div>
-      <button class="config-close-btn" id="configViewerClose" type="button" aria-label="Close config viewer">Close</button>
+      <div class="status-dl-row">
+        <span class="status-dl-key">.xprofile</span>
+        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
+          <span><span class="cf-zone {{ 'cf-zone-safe' if display_config.has_signature else 'cf-zone-caution' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>{{ display_config.path.as_posix() }}</span>
+          <button class="cf-btn config-view-btn" data-config-key="xprofile" data-config-title=".xprofile" type="button">View</button>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Session script</span>
+        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
+          <span><span class="cf-zone {{ 'cf-zone-safe' if display_script.has_signature and display_script.executable else 'cf-zone-caution' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>{{ display_script.path.as_posix() }}</span>
+          <button class="cf-btn config-view-btn" data-config-key="display_script" data-config-title="display-session.sh" type="button">View</button>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Xorg touchscreen</span>
+        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
+          <span><span class="cf-zone {{ 'cf-zone-safe' if xorg_touchscreen.has_signature else 'cf-zone-caution' }}">{{ 'OK' if xorg_touchscreen.has_signature else 'WARN' }}</span>{{ xorg_touchscreen.path.as_posix() }}</span>
+          <button class="cf-btn config-view-btn" data-config-key="xorg_touchscreen" data-config-title="Xorg touchscreen" type="button">View</button>
+        </span>
+      </div>
     </div>
-    <pre class="config-file-content" id="configFileContent"></pre>
   </div>
 
-  <section class="panel monitor-setting-panel">
-    <div class="display-header">
-      <h2>Monitor Setting</h2>
-      <button class="primary-action" id="applyDisplay" type="button">Apply</button>
+  <!-- Config file viewer -->
+  <div class="cf-card config-file-viewer" id="configFileViewer" hidden>
+    <div class="card-head hair-b" style="justify-content:space-between;">
+      <div>
+        <h2 id="configFileTitle">Config file</h2>
+        <p style="font-size:0.72rem;color:rgb(var(--c-faint));margin-top:2px;" id="configFilePath"></p>
+      </div>
+      <button class="cf-btn" id="configViewerClose" type="button" aria-label="Close config viewer">Close</button>
     </div>
+    <pre class="config-file-content" id="configFileContent" style="margin:0;padding:1rem;font-family:'JetBrains Mono','Fira Code','Courier New',monospace;font-size:0.78rem;line-height:1.6;white-space:pre;overflow-x:auto;background:rgb(var(--c-surface));max-height:380px;overflow-y:auto;border-radius:0 0 0.75rem 0.75rem;"></pre>
+  </div>
 
+  <!-- Monitor Setting panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
+      <h2>Monitor Setting</h2>
+    </div>
     <div class="display-layout">
       <div class="monitor-workspace">
         <div class="monitor-frame">
@@ -99,24 +125,24 @@
       </div>
 
       <aside class="display-options">
-        <label for="displayOutput">Display</label>
-        <select id="displayOutput">
+        <label class="cf-label" for="displayOutput">Display</label>
+        <select class="cf-select" id="displayOutput">
           {% for output in outputs %}
           <option value="{{ output }}">{{ output }}</option>
           {% endfor %}
         </select>
 
-        <label for="touchDevice">Touchscreen</label>
-        <select id="touchDevice">
+        <label class="cf-label" for="touchDevice">Touchscreen</label>
+        <select class="cf-select" id="touchDevice">
           {% for touch in touch_devices %}
           <option value="{{ touch.name }}">{{ touch.name }}{% if touch.xinput_id is not none %} (id: {{ touch.xinput_id }}){% endif %}</option>
           {% endfor %}
         </select>
 
-        <label for="xDisplay">X display server</label>
+        <label class="cf-label" for="xDisplay">X display server</label>
         <div class="inline-control">
-          <input id="xDisplay" value="{{ default_display }}" autocomplete="off">
-          <button id="refreshDevices" type="button">Refresh</button>
+          <input class="cf-input" id="xDisplay" value="{{ default_display }}" autocomplete="off">
+          <button class="cf-btn" id="refreshDevices" type="button">Refresh</button>
         </div>
         <p class="field-hint">Usually :0. Display output is the monitor name from xrandr.</p>
 
@@ -132,12 +158,17 @@
       </aside>
     </div>
 
-    <div class="apply-result" id="applyResult" aria-live="polite"></div>
-  </section>
+    <div style="padding:0 1.25rem 1rem;">
+      <div class="apply-result" id="applyResult" aria-live="polite"></div>
+    </div>
+  </div>
 
-  <div class="command-preview">
-    <h3>Command Preview</h3>
-    <ul class="command-list" id="commandPreviewList"></ul>
+  <!-- Command Preview -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
+      <h3 style="font-size:0.9rem;font-weight:600;">Command Preview</h3>
+    </div>
+    <ul class="command-list" id="commandPreviewList" style="list-style:none;padding:0;margin:0;"></ul>
   </div>
 
 </section>

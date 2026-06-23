@@ -3,7 +3,7 @@
   <li>
     <div>
       <strong>{{ command.label }}</strong>
-      {% if command.requires_root %}<span class="badge warn">sudo</span>{% endif %}
+      {% if command.requires_root %}<span class="cf-zone cf-zone-caution">sudo</span>{% endif %}
     </div>
     <code>{{ command.command }}</code>
   </li>

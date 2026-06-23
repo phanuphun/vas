@@ -22,12 +22,16 @@ from display import (
 )
 from runner import CommandExecutionError, CommandResult, CommandRunner
 from status import (
+    OpenSshStatus,
+    QrReaderStatus,
     ToolStatus,
     VpnStatus,
     collect_gdm_wayland_status,
     collect_display_session_config_status,
     collect_display_session_script_status,
     collect_display_session_status,
+    collect_openssh_status,
+    collect_qr_reader_status,
     collect_remote_access_status,
     collect_status,
     collect_vpn_status,
@@ -47,8 +51,8 @@ from wireguard import (
 
 
 WEB_DIR = Path(__file__).parent / "web"
-INSTALL_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk")
-LIFECYCLE_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk")
+INSTALL_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk", "openssh", "qr-udev")
+LIFECYCLE_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk", "openssh", "qr-udev")
 WIREGUARD_ACTIONS = (
     ("Install", "sudo vas wireguard install"),
     ("Create template", "vas wireguard init-config --name wg0 --output ./wg0.conf"),
@@ -125,8 +129,10 @@ def create_app() -> Flask:
             display_script=collect_display_session_script_status(),
             touchscreen=collect_xorg_touchscreen_config_status(),
             remote=collect_remote_access_status(),
+            openssh=collect_openssh_status(),
             vpn=collect_vpn_status(),
             web_server=collect_web_server_status(),
+            qr_reader=collect_qr_reader_status(),
         )
 
     @app.get("/install")
@@ -414,7 +420,159 @@ def create_app() -> Flask:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    import atexit
+    from qr_reader import stop_reader as _stop_qr_reader
+    atexit.register(_stop_qr_reader)
+
+    @app.get("/qr")
+    def qr_reader_page() -> str:
+        from qr_reader import find_zkteco_hidraw_devices, load_qr_config
+        return render_template(
+            "qr.html",
+            qr_reader=collect_qr_reader_status(),
+            detected_devices=find_zkteco_hidraw_devices(),
+            config=load_qr_config(),
+        )
+
+    @app.get("/api/qr/last-scan")
+    def qr_last_scan_api() -> dict[str, object]:
+        """Return: {"status":"ok","scan":<str|null>,"device":<str|null>,"running":<bool>}"""
+        from qr_reader import get_reader
+        reader = get_reader()
+        running = reader is not None and reader.is_alive()
+        return {
+            "status": "ok",
+            "scan": reader.last_scan if running else None,
+            "device": reader.device_path if running else None,
+            "running": running,
+        }
+
+    @app.post("/api/qr/start")
+    def qr_start_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        """
+        Payload (optional): {"device": "/dev/hidraw0"}
+        200: {"status":"ok","device":<path>,"running":true}
+        400: {"status":"error","errors":[...]}  -- device not found
+        500: {"status":"error","errors":[...]}  -- OS error
+        """
+        from qr_reader import start_reader
+        payload = request.get_json(silent=True) or {}
+        device = str(payload.get("device", "")).strip() or None
+        try:
+            thread = start_reader(device_path=device)
+        except RuntimeError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        except OSError as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        return {"status": "ok", "device": thread.device_path, "running": True}
+
+    @app.post("/api/qr/stop")
+    def qr_stop_api() -> dict[str, object]:
+        """Return: {"status":"ok","running":false}"""
+        from qr_reader import stop_reader
+        stop_reader()
+        return {"status": "ok", "running": False}
+
+    @app.get("/api/qr/config")
+    def qr_config_get_api() -> dict[str, object]:
+        """Return: {"status":"ok","config":{"device_path":<str|null>},"path":<file_path>}"""
+        from qr_reader import load_qr_config
+        from config import qr_config_path
+        config = load_qr_config()
+        return {
+            "status": "ok",
+            "config": config.to_dict(),
+            "path": qr_config_path().as_posix(),
+        }
+
+    @app.post("/api/qr/config")
+    def qr_config_save_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        """
+        Payload: {"device_path": "/dev/hidraw0"}  -- null clears to auto-detect
+        200: {"status":"ok","config":{...}}
+        500: {"status":"error","errors":[...]}
+        """
+        from qr_reader import QrConfig, save_qr_config
+        payload = request.get_json(silent=True) or {}
+        device_path = payload.get("device_path") or None
+        if device_path is not None:
+            device_path = str(device_path).strip() or None
+        config = QrConfig(device_path=device_path)
+        try:
+            save_qr_config(config)
+        except OSError as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        return {"status": "ok", "config": config.to_dict()}
+
+    @app.get("/api/qr/stream")
+    def qr_stream_api():  # type: ignore[return]
+        """
+        Server-Sent Events stream -- real-time QR scan
+
+        SSE event format:
+
+            event: scan
+            data: {"scan": "<value>", "device": "<path>", "ts": "<ISO8601-UTC>"}
+
+            event: status
+            data: {"running": <bool>, "device": "<path>"|null}
+
+            event: heartbeat
+            data: {}
+        """
+        from flask import stream_with_context, Response
+        import time
+        from datetime import datetime, timezone
+
+        def generate():
+            from qr_reader import get_reader
+
+            reader = get_reader()
+            running = reader is not None and reader.is_alive()
+            device = reader.device_path if running else None
+            yield f"event: status\ndata: {_json_dumps({'running': running, 'device': device})}\n\n"
+
+            last_seen: str | None = None
+            last_heartbeat = time.monotonic()
+            HEARTBEAT_INTERVAL = 5.0
+            POLL_INTERVAL = 0.2
+
+            try:
+                while True:
+                    time.sleep(POLL_INTERVAL)
+                    now = time.monotonic()
+                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        yield "event: heartbeat\ndata: {}\n\n"
+                        last_heartbeat = now
+
+                    reader = get_reader()
+                    if reader is not None and reader.is_alive():
+                        scan = reader.last_scan
+                        if scan is not None and scan != last_seen:
+                            last_seen = scan
+                            ts = datetime.now(timezone.utc).isoformat()
+                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts})}\n\n"
+            except GeneratorExit:
+                # client disconnected — generator is being closed
+                return
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     return app
+
+
+import json as _json
+
+
+def _json_dumps(obj: dict[str, object]) -> str:
+    return _json.dumps(obj, ensure_ascii=False)
 
 
 def run_server(host: str, port: int, debug: bool) -> None:

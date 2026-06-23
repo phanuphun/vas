@@ -1,40 +1,44 @@
 {% extends "base.html" %}
+{% block header_title %}บันทึกระบบ{% endblock %}
+
+{% block header_actions %}
+<button class="cf-btn" id="refreshSystemLogs" type="button">Refresh</button>
+<button class="cf-btn cf-btn-primary" id="collectSystemLog" type="button">Collect Snapshot</button>
+{% endblock %}
+
 {% block content %}
-<section class="logs-page">
-  <article class="panel">
-    <div class="section-header">
-      <div>
-        <h2>System Log Snapshots</h2>
-        <p class="muted">{{ system_snapshot_dir }}</p>
-      </div>
-      <div class="action-row">
-        <button class="secondary-action" id="refreshSystemLogs" type="button">Refresh</button>
-        <button class="primary-action" id="collectSystemLog" type="button">Collect Snapshot</button>
-      </div>
-    </div>
-    <div class="system-log-layout">
-      <div class="log-list" id="systemSnapshotList">
+<div class="page-head">
+  <p class="cf-eyebrow">VAS · บันทึกระบบ</p>
+  <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">System Logs</h1>
+  <p style="color:rgb(var(--c-muted));font-size:0.82rem;margin-top:0.25rem">{{ system_snapshot_dir }}</p>
+</div>
+
+<div class="cf-card" style="overflow:hidden;">
+  <div class="log-split">
+    <div class="log-list-pane">
+      <div id="systemSnapshotList">
         {% for snapshot in system_snapshots %}
-        <button class="log-entry log-entry-button" data-system-snapshot="{{ snapshot.id }}" type="button">
+        <button class="log-entry-button" data-system-snapshot="{{ snapshot.id }}" type="button"
+          style="width:100%;display:flex;flex-direction:column;gap:2px;padding:0.65rem 1rem;background:none;border:none;border-bottom:1px solid rgb(var(--c-line)/0.06);cursor:pointer;text-align:left;font-family:inherit;">
           <span>
-            <strong>{{ snapshot.id }}</strong>
-            <small>{{ snapshot.path }} | {{ snapshot.size }} bytes</small>
+            <strong style="font-size:0.78rem;font-weight:600;color:rgb(var(--c-ink));display:block;">{{ snapshot.id }}</strong>
+            <small style="font-size:0.68rem;color:rgb(var(--c-faint));">{{ snapshot.path }} | {{ snapshot.size }} bytes</small>
           </span>
         </button>
         {% else %}
-        <p class="muted">No system log snapshots collected yet.</p>
+        <p class="muted" style="padding:1rem;font-size:0.82rem;">No system log snapshots collected yet.</p>
         {% endfor %}
       </div>
-      <div class="system-log-viewer">
-        <div class="system-log-viewer-header">
-          <strong id="systemLogTitle">Select a snapshot</strong>
-          <span class="muted" id="systemLogPath"></span>
-        </div>
-        <pre class="config-file-content system-log-content" id="systemLogContent">System log content will appear here.</pre>
-      </div>
     </div>
-  </article>
-</section>
+    <div class="log-viewer-pane">
+      <div class="log-viewer-header">
+        <strong class="log-viewer-title" id="systemLogTitle">Select a snapshot</strong>
+        <span class="log-viewer-path" id="systemLogPath"></span>
+      </div>
+      <pre class="log-content config-file-content" id="systemLogContent">System log content will appear here.</pre>
+    </div>
+  </div>
+</div>
 
 <script>
 const systemList = document.getElementById("systemSnapshotList");
@@ -48,10 +52,11 @@ function renderSystemSnapshots(snapshots) {
     return;
   }
   systemList.innerHTML = snapshots.map((snapshot) => `
-    <button class="log-entry log-entry-button" data-system-snapshot="${escapeHtml(snapshot.id || "")}" type="button">
+    <button class="log-entry log-entry-button" data-system-snapshot="${escapeHtml(snapshot.id || "")}" type="button"
+      style="width:100%;display:flex;flex-direction:column;gap:2px;padding:0.65rem 1rem;background:none;border:none;border-bottom:1px solid rgb(var(--c-line)/0.06);cursor:pointer;text-align:left;font-family:inherit;">
       <span>
-        <strong>${escapeHtml(snapshot.id || "")}</strong>
-        <small>${escapeHtml(snapshot.path || "")} | ${Number(snapshot.size || 0)} bytes</small>
+        <strong style="font-size:0.78rem;font-weight:600;color:rgb(var(--c-ink));display:block;">${escapeHtml(snapshot.id || "")}</strong>
+        <small style="font-size:0.68rem;color:rgb(var(--c-faint));">${escapeHtml(snapshot.path || "")} | ${Number(snapshot.size || 0)} bytes</small>
       </span>
     </button>
   `).join("");

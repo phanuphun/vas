@@ -5,10 +5,12 @@ from unittest.mock import patch
 from status import (
     DISPLAY_SESSION_SCRIPT_SIGNATURE,
     DISPLAY_SESSION_SIGNATURE,
+    OpenSshStatus,
     RemoteAccessStatus,
     VpnStatus,
     XORG_TOUCHSCREEN_SIGNATURE,
     collect_gdm_wayland_status,
+    collect_openssh_status,
     collect_remote_access_status,
     collect_vpn_status,
     collect_display_session_status,
@@ -232,3 +234,26 @@ def test_print_status_includes_vpn_section(capsys: Any) -> None:
     assert "[VPN]" in output
     assert "App Config" in output
     assert "Connection" in output
+
+def test_collect_openssh_status_installed() -> None:
+    # which เรียก 2 ครั้ง: sshd (server, ใช้ตรวจ installed) แล้ว ssh (client, ใช้ดู version)
+    with patch("status.shutil.which", side_effect=["/usr/sbin/sshd", "/usr/bin/ssh"]):
+        with patch("status._read_version", return_value="OpenSSH_8.9p1"):
+            with patch("status._read_command_first_line", side_effect=("enabled", "active")):
+                status = collect_openssh_status()
+
+    assert status.installed is True
+    assert status.version == "OpenSSH_8.9p1"
+    assert status.service_enabled == "enabled"
+    assert status.service_active == "active"
+
+
+def test_collect_openssh_status_not_installed() -> None:
+    with patch("status.shutil.which", return_value=None):
+        with patch("status._read_command_first_line", side_effect=("disabled", "inactive")):
+            status = collect_openssh_status()
+
+    assert status.installed is False
+    assert status.version is None  # ssh_path is None → version skipped
+    assert status.service_enabled == "disabled"
+    assert status.service_active == "inactive"

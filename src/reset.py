@@ -14,8 +14,8 @@ from status import (
 from wireguard import WIREGUARD_CONFIG_DIR, default_store_dir, sanitize_interface_name, service_name
 
 
-INSTALL_COMPONENTS = ("node", "docker", "git", "wireguard", "anydesk")
-RESET_COMPONENTS = ("node", "docker", "git", "wireguard", "anydesk", "display")
+INSTALL_COMPONENTS = ("node", "docker", "git", "wireguard", "anydesk", "openssh", "qr-udev")
+RESET_COMPONENTS = ("node", "docker", "git", "wireguard", "anydesk", "openssh", "display", "qr-udev")
 
 NODE_APT_FILES = (
     Path("/etc/apt/sources.list.d/nodesource.list"),
@@ -73,6 +73,10 @@ class LifecycleManager:
                 self.uninstall_wireguard(wireguard_name, remove_config=False)
             elif component == "anydesk":
                 self.uninstall_anydesk(remove_config=False)
+            elif component == "openssh":
+                self.uninstall_openssh()
+            elif component == "qr-udev":
+                self.reset_qr_config()
             else:
                 raise ValueError(f"Unsupported uninstall component: {component}")
         self.runner.run(["apt-get", "autoremove", "-y"], check=False)
@@ -91,6 +95,10 @@ class LifecycleManager:
                 self.reset_display_config()
             elif component == "anydesk":
                 self.uninstall_anydesk(remove_config=True)
+            elif component == "openssh":
+                self.reset_openssh()
+            elif component == "qr-udev":
+                self.reset_qr_config()
             else:
                 raise ValueError(f"Unsupported reset component: {component}")
         self.runner.run(["apt-get", "autoremove", "-y"], check=False)
@@ -129,10 +137,24 @@ class LifecycleManager:
             for path in ANYDESK_APT_FILES:
                 self._remove_file(path)
 
+    def uninstall_openssh(self) -> None:
+        self.runner.run(["systemctl", "disable", "--now", "ssh"], check=False)
+
+    def reset_openssh(self) -> None:
+        self.runner.run(["systemctl", "disable", "--now", "ssh"], check=False)
+
     def reset_display_config(self) -> None:
         self._remove_file_if_has_signature(XORG_TOUCHSCREEN_CONFIG_PATH, XORG_TOUCHSCREEN_SIGNATURE)
         self._remove_file_if_has_signature(_effective_home_script_path(), DISPLAY_SESSION_SCRIPT_SIGNATURE)
         self._remove_display_session_block(_effective_home_config_path())
+
+    def reset_qr_config(self) -> None:
+        """ลบ udev rule (ถ้ามี signature) และ config file แล้ว reload udev"""
+        from config import QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE, qr_config_path
+        self._remove_file_if_has_signature(QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE)
+        self._remove_file(qr_config_path())
+        self.runner.run(["udevadm", "control", "--reload-rules"], check=False)
+        self.runner.run(["udevadm", "trigger"], check=False)
 
     def _remove_display_session_block(self, path: Path) -> None:
         self.runner.print_operation(f"remove managed block {_format_path(path)}")
@@ -198,6 +220,10 @@ def count_uninstall_operations(components: tuple[str, ...]) -> int:
             total += 2
         elif component == "anydesk":
             total += 2
+        elif component == "openssh":
+            total += 1
+        elif component == "qr-udev":
+            total += 4  # remove udev + remove config + reload + trigger
     return total
 
 
@@ -216,6 +242,10 @@ def count_reset_operations(components: tuple[str, ...]) -> int:
             total += 3
         elif component == "anydesk":
             total += 4
+        elif component == "openssh":
+            total += 1
+        elif component == "qr-udev":
+            total += 4  # remove udev + remove config + reload + trigger
     return total
 
 

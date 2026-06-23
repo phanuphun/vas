@@ -1,40 +1,65 @@
 {% extends "base.html" %}
 {% set title = "Commands" %}
+{% block header_title %}คำสั่ง CLI{% endblock %}
 
 {% block content %}
-<section class="panel">
-  <h2>Command Docs</h2>
-  <p class="muted">Commands are preview-only. Run them manually in a terminal on the vending machine.</p>
-  <div class="command-sections">
-    <section class="command-section">
-      <h3>Install</h3>
+<div class="page-head">
+  <p class="cf-eyebrow">VAS · เอกสารคำสั่ง</p>
+  <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">คู่มือคำสั่ง VAS CLI</h1>
+  <p class="doc-intro" style="margin-top:0.5rem">Commands are preview-only. Run them manually in a terminal on the vending machine.</p>
+</div>
+
+<div class="commands-grid">
+
+  <div class="cf-card doc-section">
+    <div class="card-head hair-b">
+      <h2>Install</h2>
+    </div>
+    <div>
       {% set commands = install_commands %}
       {% include "_command_list.html" with context %}
-    </section>
+    </div>
+  </div>
 
-    <section class="command-section">
-      <h3>Reset</h3>
+  <div class="cf-card doc-section">
+    <div class="card-head hair-b">
+      <h2>Reset</h2>
+    </div>
+    <div>
       {% set commands = reset_commands %}
       {% include "_command_list.html" %}
-    </section>
+    </div>
+  </div>
 
-    <section class="command-section">
-      <h3>Display</h3>
+  <div class="cf-card doc-section">
+    <div class="card-head hair-b">
+      <h2>Display</h2>
+    </div>
+    <div>
       {% set commands = display_commands %}
       {% include "_command_list.html" %}
-    </section>
+    </div>
+  </div>
 
-    <section class="command-section">
-      <h3>VPN</h3>
+  <div class="cf-card doc-section">
+    <div class="card-head hair-b">
+      <h2>VPN</h2>
+    </div>
+    <div>
       {% set commands = wireguard_commands %}
       {% include "_command_list.html" %}
-    </section>
+    </div>
+  </div>
 
-    <section class="command-section">
-      <h3>Server</h3>
+  <div class="cf-card doc-section">
+    <div class="card-head hair-b">
+      <h2>Server</h2>
+    </div>
+    <div>
       {% set commands = server_commands %}
       {% include "_command_list.html" %}
-    </section>
+    </div>
   </div>
-</section>
+
+</div>
 {% endblock %}

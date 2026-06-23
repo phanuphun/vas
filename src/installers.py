@@ -51,6 +51,10 @@ class PhaseOneInstaller:
                 self.install_git()
             elif component == "anydesk":
                 self.install_anydesk()
+            elif component == "openssh":
+                self.install_openssh()
+            elif component == "qr-udev":
+                self.install_qr_udev_rule()
             else:
                 raise ValueError(f"Unsupported install component: {component}")
         self.print_versions(components)
@@ -125,6 +129,10 @@ class PhaseOneInstaller:
         self.runner.run(["apt-get", "install", "-y", "anydesk"])
         self.runner.run(["systemctl", "enable", "--now", "anydesk"], check=False)
 
+    def install_openssh(self) -> None:
+        self.runner.run(["apt-get", "install", "-y", "openssh-server"])
+        self.runner.run(["systemctl", "enable", "--now", "ssh"], check=False)
+
     def print_versions(self, components: tuple[str, ...]) -> None:
         commands: list[str] = []
         if "node" in components:
@@ -137,6 +145,15 @@ class PhaseOneInstaller:
             commands.append("anydesk")
         for command in commands:
             self.runner.run([command, "--version"], check=False)
+        if "openssh" in components:
+            self.runner.run(["ssh", "-V"], check=False)
+
+    def install_qr_udev_rule(self) -> None:
+        """เขียน udev rule สำหรับ ZKTeco QR500-BM แล้ว reload udev"""
+        from config import QR_UDEV_RULE_PATH
+        self._write_file(str(QR_UDEV_RULE_PATH), QR_UDEV_RULE_CONTENT)
+        self.runner.run(["udevadm", "control", "--reload-rules"])
+        self.runner.run(["udevadm", "trigger"])
 
     def _write_file(self, path: str, content: str) -> None:
         self.runner.print_operation(f"write {path}")
@@ -175,6 +192,10 @@ def count_install_operations(components: tuple[str, ...]) -> int:
             total += 2
         elif component == "anydesk":
             total += 8
+        elif component == "openssh":
+            total += 2
+        elif component == "qr-udev":
+            total += 3  # write file + reload + trigger
 
     if "node" in components:
         total += 3  # node --version, npm --version, and pm2 --version
@@ -184,4 +205,13 @@ def count_install_operations(components: tuple[str, ...]) -> int:
         total += 1
     if "anydesk" in components:
         total += 1
+    if "openssh" in components:
+        total += 1
     return total
+
+
+QR_UDEV_RULE_CONTENT = (
+    "# managed by vas\n"
+    'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020",'
+    ' MODE="0666", TAG+="uaccess"\n'
+)

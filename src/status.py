@@ -94,6 +94,14 @@ class RemoteAccessStatus:
     service_active: str
 
 
+@dataclass(frozen=True)
+class OpenSshStatus:
+    installed: bool
+    version: str | None
+    service_enabled: str
+    service_active: str
+
+
 XORG_TOUCHSCREEN_CONFIG_PATH = Path("/etc/X11/xorg.conf.d/99-vending-touchscreen.conf")
 GDM_CUSTOM_CONFIG_PATH = Path("/etc/gdm3/custom.conf")
 XORG_TOUCHSCREEN_SIGNATURE = "# vending-auto-config: touchscreen-xorg"
@@ -152,6 +160,19 @@ def collect_remote_access_status() -> RemoteAccessStatus:
         anydesk_status=_read_command_first_line((anydesk_path, "--get-status")) if anydesk_path is not None else "not installed",
         service_enabled=_read_command_first_line(("systemctl", "is-enabled", "anydesk")),
         service_active=_read_command_first_line(("systemctl", "is-active", "anydesk")),
+    )
+
+
+def collect_openssh_status() -> OpenSshStatus:
+    # ใช้ sshd (server binary) ไม่ใช่ ssh (client) — openssh-client ติดตั้งมาเป็น default
+    # บน Ubuntu 22.04 โดยไม่ต้อง install openssh-server
+    sshd_path = shutil.which("sshd")
+    ssh_path = shutil.which("ssh")
+    return OpenSshStatus(
+        installed=sshd_path is not None,
+        version=_read_version((ssh_path, "-V")) if ssh_path is not None else None,
+        service_enabled=_read_command_first_line(("systemctl", "is-enabled", "ssh")),
+        service_active=_read_command_first_line(("systemctl", "is-active", "ssh")),
     )
 
 
@@ -312,10 +333,13 @@ def print_status() -> None:
         _print_tool_status(status)
     print()
     _print_remote_access_status(collect_remote_access_status())
+    _print_openssh_status(collect_openssh_status())
     print()
     _print_vpn_status(collect_vpn_status())
     print()
     _print_web_server_status(collect_web_server_status())
+    print()
+    _print_qr_reader_status(collect_qr_reader_status())
 
 
 def main() -> int:
@@ -336,10 +360,13 @@ def main() -> int:
         _print_tool_status(status)
     print()
     _print_remote_access_status(collect_remote_access_status())
+    _print_openssh_status(collect_openssh_status())
     print()
     _print_vpn_status(collect_vpn_status())
     print()
     _print_web_server_status(collect_web_server_status())
+    print()
+    _print_qr_reader_status(collect_qr_reader_status())
 
     return 0 if all(status.installed for status in statuses) else 1
 
@@ -610,6 +637,16 @@ def _print_web_server_status(status: WebServerStatus) -> None:
     print(f"{'OK':7} {'Address':10} {status.url}")
 
 
+def _print_openssh_status(status: OpenSshStatus) -> None:
+    installed_marker = "OK" if status.installed else "MISSING"
+    version = status.version or "not installed"
+    print(f"{installed_marker:7} {'OpenSSH':10} {version}")
+    enabled_marker = "OK" if status.service_enabled == "enabled" else "WARN"
+    active_marker = "OK" if status.service_active == "active" else "WARN"
+    print(f"{enabled_marker:7} {'Service':10} ssh enabled={status.service_enabled}")
+    print(f"{active_marker:7} {'Connection':10} service {status.service_active}")
+
+
 def _print_remote_access_status(status: RemoteAccessStatus) -> None:
     print("[Remote]")
     installed_marker = "OK" if status.anydesk_installed else "MISSING"
@@ -633,3 +670,81 @@ def _print_path_status(label: str, exists: bool, path: Path, ok_text: str, missi
     marker = "OK" if exists else "WARN"
     status_text = ok_text if exists else missing_text
     print(f"{marker:7} {label:10} {status_text} ({path.as_posix()})")
+
+
+# ---------------------------------------------------------------------------
+# QR Reader status
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class QrReaderStatus:
+    udev_rule_path: Path
+    udev_rule_exists: bool
+    udev_rule_has_signature: bool
+    config_path: Path
+    config_exists: bool
+    detected_devices: tuple[str, ...]   # hidraw paths ที่พบ
+    active_device: str | None           # device ที่ thread กำลังอ่านอยู่
+    reader_running: bool
+    last_scan: str | None               # in-memory ค่าล่าสุด
+
+
+def collect_qr_reader_status() -> QrReaderStatus:
+    """
+    Collect QR reader hardware + software status
+
+    Import qr_reader lazily เพื่อหลีกเลี่ยง import error เมื่อยังไม่ได้ install
+    ถ้า ImportError -> return stub ที่ fields ทั้งหมดเป็น False/None/empty
+    """
+    from config import QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE, qr_config_path
+
+    udev_path = QR_UDEV_RULE_PATH
+    udev_exists = _path_exists(udev_path)
+    udev_has_sig = False
+    if udev_exists:
+        try:
+            udev_has_sig = QR_UDEV_SIGNATURE in udev_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+
+    cfg_path = qr_config_path()
+    cfg_exists = _path_exists(cfg_path)
+
+    try:
+        from qr_reader import find_zkteco_hidraw_devices, get_reader
+        detected = tuple(find_zkteco_hidraw_devices())
+        reader = get_reader()
+        reader_running = reader is not None and reader.is_alive()
+        active_device = reader.device_path if reader_running else None
+        last_scan = reader.last_scan if reader_running else None
+    except Exception:
+        detected = ()
+        reader_running = False
+        active_device = None
+        last_scan = None
+
+    return QrReaderStatus(
+        udev_rule_path=udev_path,
+        udev_rule_exists=udev_exists,
+        udev_rule_has_signature=udev_has_sig,
+        config_path=cfg_path,
+        config_exists=cfg_exists,
+        detected_devices=detected,
+        active_device=active_device,
+        reader_running=reader_running,
+        last_scan=last_scan,
+    )
+
+
+def _print_qr_reader_status(status: QrReaderStatus) -> None:
+    print("[QR Reader]")
+    udev_marker = "OK" if status.udev_rule_has_signature else "WARN"
+    print(f"{udev_marker:7} {'udev rule':12} {status.udev_rule_path.as_posix()}")
+    dev_marker = "OK" if status.detected_devices else "WARN"
+    devices_str = ", ".join(status.detected_devices) if status.detected_devices else "none detected"
+    print(f"{dev_marker:7} {'devices':12} {devices_str}")
+    reader_marker = "OK" if status.reader_running else "WARN"
+    active = "running on " + (status.active_device or "") if status.reader_running else "stopped"
+    print(f"{reader_marker:7} {'reader':12} {active}")
+    if status.last_scan is not None:
+        print(f"{'':7} {'last scan':12} {status.last_scan}")

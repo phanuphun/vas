@@ -277,3 +277,44 @@ def test_display_enable_wayland_dry_run_comments_gdm_disable(capsys: Any) -> Non
     output = capsys.readouterr().out
     assert "enable Wayland in /etc/gdm3/custom.conf" in output
     assert "#WaylandEnable=false" in output
+
+def test_install_openssh_dry_run_installs_openssh_server(capsys: Any) -> None:
+    exit_code = main(["--dry-run", "install", "--component", "openssh"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "openssh-server" in output
+
+
+def test_reset_openssh_dry_run_disables_ssh(capsys: Any) -> None:
+    exit_code = main(["--dry-run", "reset", "--component", "openssh"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "disable" in output
+    assert "ssh" in output
+
+
+def test_install_all_dry_run_installs_openssh(capsys: Any) -> None:
+    exit_code = main(["--dry-run", "install", "--component", "all"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "openssh-server" in output
+
+def test_uninstall_openssh_dry_run_disables_ssh(capsys: Any) -> None:
+    exit_code = main(["--dry-run", "uninstall", "--component", "openssh"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "disable" in output
+    assert "ssh" in output
+
+
+def test_uninstall_all_dry_run_includes_openssh(capsys: Any) -> None:
+    exit_code = main(["--dry-run", "uninstall", "--component", "all"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "disable" in output
+    assert "ssh" in output

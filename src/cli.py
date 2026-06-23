@@ -164,6 +164,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_component_arguments(reset, (*RESET_COMPONENTS, "all"))
     add_lifecycle_arguments(reset)
+    qr = subcommands.add_parser("qr", help="Manage QR code reader (ZKTeco QR500-BM).")
+    qr_subcommands = qr.add_subparsers(dest="qr_command", required=True)
+
+    qr_subcommands.add_parser("status", help="Show QR reader device and config status.")
+
+    qr_start = qr_subcommands.add_parser("start", help="Start QR reader thread (blocking, until Ctrl+C).")
+    qr_start.add_argument("--device", help="hidraw device path. Defaults to auto-detect.")
+
+    qr_subcommands.add_parser("stop", help="Stop the global QR reader thread.")
+
+    qr_subcommands.add_parser("last-scan", help="Print the last scanned value.")
+
+    qr_config_cmd = qr_subcommands.add_parser("config", help="Set QR reader config.")
+    qr_config_cmd.add_argument("--device", help="hidraw device path to pin.")
+    qr_config_cmd.add_argument("--clear-device", action="store_true", help="Clear pinned device (use auto-detect).")
+
     return parser
 
 
@@ -298,7 +314,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
         components = tuple(args.component) if args.component else ("node", "docker", "git")
         if "all" in components:
             components = (*INSTALL_COMPONENTS,)
-        core_components = tuple(component for component in components if component in {"node", "docker", "git", "anydesk"})
+        core_components = tuple(component for component in components if component in {"node", "docker", "git", "anydesk", "openssh", "qr-udev"})
         total_operations = count_install_operations(core_components) if core_components else 0
         if "wireguard" in components:
             total_operations += 2
@@ -445,9 +461,79 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             runner.stop_progress()
         return 0
 
+    if args.command == "qr":
+        from qr_reader import (
+            QrConfig,
+            find_zkteco_hidraw_devices,
+            get_reader,
+            load_qr_config,
+            save_qr_config,
+            start_reader,
+            stop_reader,
+        )
+        from status import collect_qr_reader_status, _print_qr_reader_status
+
+        if args.qr_command == "status":
+            _print_qr_reader_status(collect_qr_reader_status())
+            return 0
+
+        if args.qr_command == "start":
+            device = getattr(args, "device", None)
+            try:
+                import sys as _sys
+                thread = start_reader(device_path=device)
+                print(f"QR reader started on {thread.device_path}")
+                import signal
+                signal.pause()   # block จน Ctrl+C
+            except (RuntimeError, OSError) as error:
+                import sys as _sys
+                print(f"Error: {error}", file=_sys.stderr)
+                return 1
+            return 0
+
+        if args.qr_command == "stop":
+            stop_reader()
+            print("QR reader stopped.")
+            return 0
+
+        if args.qr_command == "last-scan":
+            reader = get_reader()
+            if reader is None or not reader.is_alive():
+                import sys as _sys
+                print("QR reader is not running.", file=_sys.stderr)
+                return 1
+            scan = reader.last_scan
+            print(scan if scan is not None else "(no scan yet)")
+            return 0
+
+        if args.qr_command == "config":
+            config = load_qr_config()
+            if args.clear_device:
+                config = QrConfig(device_path=None)
+            elif getattr(args, "device", None):
+                config = QrConfig(device_path=args.device)
+            save_qr_config(config)
+            print(f"Config saved: {config}")
+            return 0
+
     parser.error(f"Unknown command: {args.command}")
     return 2
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _print_qr_status(status: "QrReaderStatus") -> None:
+    from status import QrReaderStatus
+    print("[QR Reader]")
+    udev_marker = "OK" if status.udev_rule_has_signature else "WARN"
+    print(f"{udev_marker:7} {'udev rule':12} {status.udev_rule_path.as_posix()}")
+    dev_marker = "OK" if status.detected_devices else "WARN"
+    devices_str = ", ".join(status.detected_devices) if status.detected_devices else "none detected"
+    print(f"{dev_marker:7} {'devices':12} {devices_str}")
+    reader_marker = "OK" if status.reader_running else "WARN"
+    active = "running on " + (status.active_device or "") if status.reader_running else "stopped"
+    print(f"{reader_marker:7} {'reader':12} {active}")
+    if status.last_scan is not None:
+        print(f"{'':7} {'last scan':12} {status.last_scan}")

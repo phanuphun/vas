@@ -1,109 +1,145 @@
 {% extends "base.html" %}
 {% set title = "WireGuard" %}
+{% block header_title %}VPN{% endblock %}
+
+{% block header_actions %}
+<span class="cf-zone {{ 'cf-zone-safe' if vpn.service_active == 'active' and vpn.interface_exists else 'cf-zone-danger' }}" id="connectionBadge">
+  {{ 'Connected' if vpn.service_active == 'active' and vpn.interface_exists else 'Disconnected' }}
+</span>
+{% endblock %}
 
 {% block content %}
 <section class="wireguard-page" data-interface="{{ vpn.interface_name }}">
-  <section class="status-grid">
-    <article class="panel">
-      <h2>WireGuard Status</h2>
-      <dl>
-        <dt>Tool</dt>
-        <dd><span class="badge {{ 'ok' if vpn.wg_installed else 'missing' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</dd>
-        <dt>App config</dt>
-        <dd><span class="badge {{ 'ok' if vpn.app_config_exists else 'warn' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>{{ vpn.app_config_path.as_posix() }}</dd>
-        <dt>Active config</dt>
-        <dd><span class="badge {{ 'ok' if vpn.active_config_exists else 'warn' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>{{ vpn.active_config_path.as_posix() }}</dd>
-        <dt>History</dt>
-        <dd><span class="badge {{ 'ok' if vpn.history_exists else 'warn' }}">{{ 'OK' if vpn.history_exists else 'WARN' }}</span>{{ vpn.history_dir.as_posix() }}</dd>
-        <dt>Service</dt>
-        <dd>{{ vpn.service_enabled }} / {{ vpn.service_active }}</dd>
-        <dt>Connection</dt>
-        <dd>{{ vpn_connection_label(vpn) }}</dd>
-      </dl>
-    </article>
-  </section>
 
-  <section class="wireguard-layout">
-    <article class="panel wireguard-editor">
-      <div class="section-header">
+  <div class="page-head">
+    <p class="cf-eyebrow">VAS · VPN</p>
+    <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">WireGuard VPN</h1>
+  </div>
+
+  <!-- WireGuard Status panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b">
+      <h2>WireGuard Status</h2>
+    </div>
+    <div class="status-dl">
+      <div class="status-dl-row">
+        <span class="status-dl-key">Tool</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.wg_installed else 'cf-zone-danger' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">App config</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.app_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>{{ vpn.app_config_path.as_posix() }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Active config</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.active_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>{{ vpn.active_config_path.as_posix() }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">History</span>
+        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.history_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.history_exists else 'WARN' }}</span>{{ vpn.history_dir.as_posix() }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Service</span>
+        <span class="status-dl-val">{{ vpn.service_enabled }} / {{ vpn.service_active }}</span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Connection</span>
+        <span class="status-dl-val">{{ vpn_connection_label(vpn) }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor + Actions layout -->
+  <div class="wg-layout">
+
+    <!-- Config editor panel -->
+    <div class="cf-card">
+      <div class="card-head hair-b section-header" style="flex-wrap:wrap;gap:0.5rem;">
         <div>
           <h2>App Config</h2>
-          <p class="muted">{{ vpn.app_config_path.as_posix() }}</p>
+          <p class="muted" style="font-size:0.75rem;color:rgb(var(--c-faint));margin-top:2px;">{{ vpn.app_config_path.as_posix() }}</p>
         </div>
-        <div class="action-row">
-          <button class="secondary-action" id="loadTemplate" type="button">New template</button>
-          <button class="secondary-action" id="validateConfig" type="button">Validate</button>
-          <button class="primary-action" id="saveConfig" type="button">Save</button>
-          <button class="danger-action" id="deleteConfig" type="button">Delete</button>
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+          <button class="cf-btn" id="loadTemplate" type="button">New template</button>
+          <button class="cf-btn" id="validateConfig" type="button">Validate</button>
+          <button class="cf-btn cf-btn-primary" id="saveConfig" type="button">Save</button>
+          <button class="cf-btn cf-btn-danger" id="deleteConfig" type="button">Delete</button>
         </div>
       </div>
-
-      <textarea id="wireguardConfig" spellcheck="false">{{ config_content }}</textarea>
-      <div class="validation-panel {{ 'valid' if config_validation.valid else 'invalid' }}" id="configValidation">
-        <strong>{{ 'Valid config' if config_validation.valid else 'Config needs attention' }}</strong>
-        <ul>
-          {% for error in config_validation.errors %}
-          <li>{{ error }}</li>
-          {% endfor %}
-          {% for warning in config_validation.warnings %}
-          <li>{{ warning }}</li>
-          {% endfor %}
-          {% if config_validation.valid and not config_validation.warnings %}
-          <li>No validation issues.</li>
-          {% endif %}
-        </ul>
-      </div>
-    </article>
-
-    <aside class="panel wireguard-actions">
-      <h2>Actions</h2>
-      <div class="action-stack">
-        <button class="primary-action" data-wireguard-action="sync" type="button">Sync active config</button>
-        <button class="secondary-action" data-wireguard-action="unsync" type="button">Unsync active config</button>
-      </div>
-      <p class="field-hint">Sync writes the saved app config to the active WireGuard config and restarts the interface. Unsync disables the service and backs up the active config.</p>
-      <div class="apply-result" id="wireguardResult" aria-live="polite"></div>
-    </aside>
-  </section>
-
-  <section>
-    <article class="panel">
-      <div class="section-header">
-        <div>
-          <h2>Config History</h2>
-          <p class="muted">{{ vpn.history_dir.as_posix() }}</p>
+      <div style="padding:1rem;display:flex;flex-direction:column;gap:0.75rem;">
+        <textarea class="config-textarea" id="wireguardConfig" spellcheck="false">{{ config_content }}</textarea>
+        <div class="validation-panel {{ 'valid' if config_validation.valid else 'invalid' }}" id="configValidation">
+          <strong>{{ 'Valid config' if config_validation.valid else 'Config needs attention' }}</strong>
+          <ul>
+            {% for error in config_validation.errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+            {% for warning in config_validation.warnings %}
+            <li>{{ warning }}</li>
+            {% endfor %}
+            {% if config_validation.valid and not config_validation.warnings %}
+            <li>No validation issues.</li>
+            {% endif %}
+          </ul>
         </div>
-        <button class="secondary-action" id="refreshHistory" type="button">Refresh</button>
       </div>
+    </div>
 
-      <div class="history-list" id="historyList">
-        {% for entry in history_entries %}
-        <div class="history-entry" data-history-id="{{ entry.id }}">
-          <button class="history-item" type="button">
-            <span>
-              <strong>{{ entry.id }}</strong>
-              <small>{{ entry.path }}</small>
-            </span>
-            <span class="badge {{ 'ok' if entry.valid else 'warn' }}">{{ 'OK' if entry.valid else 'WARN' }}</span>
-          </button>
-          <div class="history-accordion" hidden>
-            <div class="section-header">
-              <div>
-                <h3>Snapshot Preview</h3>
-                <p class="muted history-path"></p>
-              </div>
-              <button class="danger-action delete-history" type="button">Delete</button>
+    <!-- Actions panel -->
+    <div class="cf-card">
+      <div class="card-head hair-b">
+        <h2>Actions</h2>
+      </div>
+      <div style="padding:1rem;display:flex;flex-direction:column;gap:0.75rem;">
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+          <button class="cf-btn cf-btn-primary" data-wireguard-action="sync" type="button">Sync active config</button>
+          <button class="cf-btn" data-wireguard-action="unsync" type="button">Unsync active config</button>
+        </div>
+        <p class="field-hint">Sync writes the saved app config to the active WireGuard config and restarts the interface. Unsync disables the service and backs up the active config.</p>
+        <div class="apply-result" id="wireguardResult" aria-live="polite"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- History panel -->
+  <div class="cf-card">
+    <div class="card-head hair-b section-header">
+      <div>
+        <h2>Config History</h2>
+        <p class="muted" style="font-size:0.75rem;color:rgb(var(--c-faint));margin-top:2px;">{{ vpn.history_dir.as_posix() }}</p>
+      </div>
+      <button class="cf-btn" id="refreshHistory" type="button">Refresh</button>
+    </div>
+
+    <div class="history-list" id="historyList">
+      {% for entry in history_entries %}
+      <div class="history-entry" data-history-id="{{ entry.id }}">
+        <button class="history-item" type="button">
+          <span>
+            <strong>{{ entry.id }}</strong>
+            <small>{{ entry.path }}</small>
+          </span>
+          <span class="badge {{ 'ok' if entry.valid else 'warn' }}">{{ 'OK' if entry.valid else 'WARN' }}</span>
+        </button>
+        <div class="history-accordion" hidden>
+          <div class="section-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.75rem;padding:0.75rem 0;">
+            <div>
+              <h3 style="font-size:0.88rem;font-weight:600;">Snapshot Preview</h3>
+              <p class="muted history-path" style="font-size:0.72rem;color:rgb(var(--c-faint));"></p>
             </div>
-            <div class="validation-panel history-validation"></div>
-            <pre class="config-file-content history-content"></pre>
+            <button class="danger-action delete-history cf-btn cf-btn-danger" type="button">Delete</button>
           </div>
+          <div class="validation-panel history-validation"></div>
+          <pre class="config-file-content history-content" style="margin:0;padding:1rem;font-family:'JetBrains Mono','Fira Code','Courier New',monospace;font-size:0.78rem;line-height:1.6;white-space:pre;overflow-x:auto;background:rgb(var(--c-surface));border-radius:0 0 0.75rem 0.75rem;"></pre>
         </div>
-        {% else %}
-        <p class="muted" id="historyEmpty">No history snapshots found.</p>
-        {% endfor %}
       </div>
-    </article>
-  </section>
+      {% else %}
+      <p class="muted" id="historyEmpty">No history snapshots found.</p>
+      {% endfor %}
+    </div>
+  </div>
+
 </section>
 
 <script>
