@@ -15,6 +15,7 @@
 - SSE stream สำหรับ real-time scan, API start/stop/config
 - ติดตั้ง udev rule ผ่าน `vas install --component qr-udev`
 - เพิ่ม agent skill และเอกสารอ้างอิง ZKTeco QR500
+
 ## [2026-06-20]
 
 ### เพิ่ม MCP tool specs และปรับปรุง TODO
@@ -35,4 +36,3 @@
 - เพิ่มโฟลเดอร์ `wiki/` สำหรับ project wiki
 - เพิ่ม `.mcp.json` ใน `.gitignore` เพื่อป้องกัน machine-specific config รั่วไหล
 - แก้ไข `CLAUDE.md` ให้ reference `@AGENTS.md` ตัวพิมพ์ถูกต้อง
-
