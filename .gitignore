@@ -6,3 +6,6 @@
 .venv/
 __pycache__/
 *.py[cod]
+
+# MCP local config (contains machine-specific URLs/IPs)
+.mcp.json
