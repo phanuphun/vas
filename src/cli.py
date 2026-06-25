@@ -631,19 +631,9 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
 
             buffer: list[str] = []
             scan_count = 0
-            interrupted = False
-
-            def _handle_signal(_sig: int, _frame: object) -> None:
-                nonlocal interrupted
-                interrupted = True
-
-            _signal.signal(_signal.SIGINT, _handle_signal)
-            _signal.signal(_signal.SIGTERM, _handle_signal)
 
             try:
                 for event in device.read_loop():
-                    if interrupted:
-                        break
                     if event.type != _evdev.ecodes.EV_KEY:
                         continue
                     key = _evdev.categorize(event)
@@ -657,6 +647,8 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                             buffer.clear()
                     elif key.scancode in EVDEV_KEYMAP:
                         buffer.append(EVDEV_KEYMAP[key.scancode])
+            except KeyboardInterrupt:
+                pass  # Ctrl+C ออกจาก read_loop() ทันที
             finally:
                 if grab:
                     try:
