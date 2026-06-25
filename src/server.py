@@ -610,7 +610,8 @@ def create_app() -> Flask:
                             # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่
                             try:
                                 from mqtt_client import publish_qr_scan as _mqtt_publish
-                                _mqtt_publish(scan, reader.device_path, ts)
+                                scan_raw = getattr(reader, "last_scan_raw", None)
+                                _mqtt_publish(scan, reader.device_path, ts, scan_raw=scan_raw)
                             except Exception:
                                 pass
             except GeneratorExit:
@@ -969,6 +970,4 @@ def vpn_connection_label(vpn: VpnStatus) -> str:
         if vpn.handshake_peers is None:
             return "Active, handshake unknown"
         if vpn.handshake_peers > 0:
-            return f"Connected with {vpn.handshake_peers} peer(s)"
-        return "Active, waiting for peer handshake"
-    return f"Service {vpn.service_active}"
+            return f"Connected with {vpn.handshake_peers} pee

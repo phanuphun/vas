@@ -278,7 +278,8 @@ class QrReaderThread(threading.Thread):
     Usage:
         thread = QrReaderThread(device_path="/dev/hidraw0")
         thread.start()
-        scan = thread.last_scan   # thread-safe
+        scan     = thread.last_scan      # decoded text  e.g. "3833401723"
+        scan_raw = thread.last_scan_raw  # raw keycodes  e.g. [39,30,30,32,...]
         thread.stop()
         thread.join(timeout=2.0)
     """
@@ -288,13 +289,20 @@ class QrReaderThread(threading.Thread):
         self.device_path = device_path
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
+        self._last_scan_raw: list[int] | None = None  # raw HID keycodes ก่อน decode
         self._lock = threading.Lock()
 
     @property
     def last_scan(self) -> str | None:
-        """Scan string ล่าสุด หรือ None ถ้ายังไม่เคย scan"""
+        """Scan string ล่าสุด (decoded) หรือ None ถ้ายังไม่เคย scan"""
         with self._lock:
             return self._last_scan
+
+    @property
+    def last_scan_raw(self) -> list[int] | None:
+        """Raw HID keycode sequence ของ scan ล่าสุด หรือ None"""
+        with self._lock:
+            return self._last_scan_raw
 
     def stop(self) -> None:
         """Signal ให้ thread หยุด"""
@@ -302,16 +310,11 @@ class QrReaderThread(threading.Thread):
 
     def run(self) -> None:
         """
-        Main loop:
-        1. open(self.device_path, "rb") as fd
-        2. วน loop จนกว่า _stop_event.is_set()
-        3. os.read(fd.fileno(), REPORT_SIZE) -> bytes
-        4. ถ้า len(report) < 3 -> continue
-        5. ตรวจ Enter keycode -> flush buffer -> set _last_scan
-        6. ไม่งั้น decode_hid_report(report) -> append chars to buffer
-        7. OSError / IOError -> break (device disconnected)
+        Main loop — เก็บทั้ง decoded text และ raw keycodes ควบคู่กัน
+        raw_buf: list[int] เก็บ keycode จาก byte[2:8] ของแต่ละ report (ไม่รวม 0 และ Enter)
         """
         buffer = ""
+        raw_buf: list[int] = []
         try:
             with open(self.device_path, "rb") as fd:
                 while not self._stop_event.is_set():
@@ -324,10 +327,16 @@ class QrReaderThread(threading.Thread):
                     has_enter = ENTER_KEYCODE in report[2:8]
                     chars = decode_hid_report(report)
                     buffer += chars
+                    # เก็บ keycodes ดิบ (ไม่รวม 0 และ Enter)
+                    for kc in report[2:8]:
+                        if kc != 0 and kc != ENTER_KEYCODE:
+                            raw_buf.append(int(kc))
                     if has_enter and buffer:
                         with self._lock:
                             self._last_scan = buffer.strip()
+                            self._last_scan_raw = list(raw_buf)
                         buffer = ""
+                        raw_buf = []
         except (OSError, IOError):
             pass
 
@@ -342,8 +351,9 @@ class EvdevQrReaderThread(threading.Thread):
     ใช้ device.grab() เพื่อป้องกัน keystrokes ไม่ให้ถึง OS / UI
 
     Interface เหมือน QrReaderThread:
-        thread.last_scan   -> str | None
-        thread.device_path -> str
+        thread.last_scan      -> str | None         decoded text
+        thread.last_scan_raw  -> list[int] | None   raw evdev scancodes
+        thread.device_path    -> str
         thread.stop()
         thread.join(timeout)
     """
@@ -353,12 +363,19 @@ class EvdevQrReaderThread(threading.Thread):
         self.device_path = device_path
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
+        self._last_scan_raw: list[int] | None = None  # raw evdev scancodes ก่อน decode
         self._lock = threading.Lock()
 
     @property
     def last_scan(self) -> str | None:
         with self._lock:
             return self._last_scan
+
+    @property
+    def last_scan_raw(self) -> list[int] | None:
+        """Raw evdev scancode sequence ของ scan ล่าสุด หรือ None"""
+        with self._lock:
+            return self._last_scan_raw
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -376,6 +393,7 @@ class EvdevQrReaderThread(threading.Thread):
             return
 
         buffer: list[str] = []
+        raw_buf: list[int] = []
         try:
             for event in device.read_loop():
                 if self._stop_event.is_set():
@@ -389,9 +407,12 @@ class EvdevQrReaderThread(threading.Thread):
                     if buffer:
                         with self._lock:
                             self._last_scan = "".join(buffer).strip()
+                            self._last_scan_raw = list(raw_buf)
                         buffer.clear()
+                        raw_buf = []
                 elif key.scancode in EVDEV_KEYMAP:
                     buffer.append(EVDEV_KEYMAP[key.scancode])
+                    raw_buf.append(key.scancode)  # เก็บ raw scancode ควบคู่
         except (OSError, IOError):
             pass
         finally:
@@ -443,34 +464,4 @@ def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrRea
             # ลอง evdev ก่อน (HID keyboard = Open)
             evdev_devices = find_zkteco_evdev_devices()
             if evdev_devices:
-                thread: QrReaderThread | EvdevQrReaderThread = EvdevQrReaderThread(device_path=evdev_devices[0])
-                thread.start()
-                _reader_thread = thread
-                return thread
-            # Fallback: hidraw (HID keyboard = Close)
-            hidraw_devices = find_zkteco_hidraw_devices()
-            if not hidraw_devices:
-                raise RuntimeError("No ZKTeco QR500-BM device found (tried evdev and hidraw)")
-            device_path = hidraw_devices[0]
-
-        # explicit device_path
-        if device_path.startswith("/dev/input/"):
-            thread = EvdevQrReaderThread(device_path=device_path)
-        else:
-            thread = QrReaderThread(device_path=device_path)
-        thread.start()
-        _reader_thread = thread
-        return thread
-
-
-def stop_reader() -> None:
-    """หยุด global reader thread ถ้ากำลัง run"""
-    global _reader_thread
-    with _reader_lock:
-        if _reader_thread is not None:
-            thread = _reader_thread
-            thread.stop()
-            _reader_thread = None
-    # join นอก lock เพื่อไม่ให้ deadlock กับ thread ที่กำลัง run
-    if "thread" in dir():
-        thread.join(timeout=2.0)
+ 

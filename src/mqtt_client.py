@@ -23,6 +23,14 @@ from urllib.parse import urlparse
 # Config
 # ---------------------------------------------------------------------------
 
+PAYLOAD_MODES = ("decoded", "raw")
+"""
+payload_mode:
+    "decoded"  → publish ข้อมูลหลัง decode แล้ว  {"scan":"3833401723","device":"...","ts":"..."}
+    "raw"      → publish raw keycodes ก่อน decode  {"scan":[39,30,30,...],"device":"...","ts":"..."}
+"""
+
+
 @dataclass
 class MqttConfig:
     enabled: bool = False
@@ -34,6 +42,7 @@ class MqttConfig:
     topic: str = "sterile/vending/qr/scan"
     qos: int = 1
     retain: bool = False
+    payload_mode: str = "decoded"   # "decoded" | "raw"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -46,6 +55,7 @@ class MqttConfig:
             "topic": self.topic,
             "qos": self.qos,
             "retain": self.retain,
+            "payload_mode": self.payload_mode,
         }
 
     @classmethod
@@ -62,6 +72,9 @@ class MqttConfig:
                 return int(d.get(key, default))  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 return default
+        mode = _str("payload_mode", "decoded")
+        if mode not in PAYLOAD_MODES:
+            mode = "decoded"
         return cls(
             enabled=_bool("enabled"),
             broker_url=_str("broker_url", cls.__dataclass_fields__["broker_url"].default),  # type: ignore[attr-defined]
@@ -72,6 +85,7 @@ class MqttConfig:
             topic=_str("topic", cls.__dataclass_fields__["topic"].default),  # type: ignore[attr-defined]
             qos=_int("qos", 1),
             retain=_bool("retain"),
+            payload_mode=mode,
         )
 
 
@@ -294,16 +308,30 @@ class VasMqttClient:
                 self._last_error = str(exc)
             return False
 
-    def publish_qr_scan(self, scan: str, device: str, ts: str) -> bool:
+    def publish_qr_scan(
+        self,
+        scan: str,
+        device: str,
+        ts: str,
+        scan_raw: "list[int] | None" = None,
+    ) -> bool:
         """
         Publish QR scan ไปยัง topic ที่ config ไว้
 
-        Payload:
-            {"scan": "...", "device": "...", "ts": "<ISO8601-UTC>"}
+        payload_mode == "decoded"  → {"scan": "<decoded_text>", "device":"...", "ts":"..."}
+        payload_mode == "raw"      → {"scan": [39,30,30,...],   "device":"...", "ts":"..."}
+                                     scan_raw คือ list ของ HID keycodes / evdev scancodes
+                                     ถ้า scan_raw เป็น None จะ fallback เป็น decoded mode
         """
         if not self.config.enabled:
             return False
-        payload = json.dumps({"scan": scan, "device": device, "ts": ts}, ensure_ascii=False)
+
+        if self.config.payload_mode == "raw" and scan_raw is not None:
+            scan_value: object = scan_raw
+        else:
+            scan_value = scan
+
+        payload = json.dumps({"scan": scan_value, "device": device, "ts": ts}, ensure_ascii=False)
         return self.publish(self.config.topic, payload)
 
     def status_dict(self) -> dict[str, object]:
@@ -343,48 +371,4 @@ def start_mqtt(config: MqttConfig | None = None) -> VasMqttClient:
     with _client_lock:
         if _client is not None:
             _client.disconnect()
-        c = VasMqttClient(cfg)
-        c.connect()
-        _client = c
-    return c
-
-
-def stop_mqtt() -> None:
-    global _client
-    with _client_lock:
-        if _client is not None:
-            _client.disconnect()
-            _client = None
-
-
-def publish_qr_scan(scan: str, device: str, ts: str) -> bool:
-    """Convenience wrapper — ส่งออก MQTT ถ้า client เชื่อมต่ออยู่"""
-    with _client_lock:
-        c = _client
-    if c is None:
-        return False
-    return c.publish_qr_scan(scan, device, ts)
-
-
-def get_mqtt_status() -> dict[str, object]:
-    """Return status dict ที่ใช้ใน API/template"""
-    with _client_lock:
-        c = _client
-    if c is None:
-        return {
-            "enabled": False,
-            "connected": False,
-            "broker_url": None,
-            "topic": None,
-            "last_error": None,
-            "paho_available": _paho_available(),
-        }
-    return c.status_dict()
-
-
-def _paho_available() -> bool:
-    try:
-        import paho.mqtt.client  # noqa: F401
-        return True
-    except ImportError:
-        return False
+        c = VasMqttCl
