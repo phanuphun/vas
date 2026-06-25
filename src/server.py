@@ -422,7 +422,9 @@ def create_app() -> Flask:
 
     import atexit
     from qr_reader import stop_reader as _stop_qr_reader
+    from mqtt_client import stop_mqtt as _stop_mqtt
     atexit.register(_stop_qr_reader)
+    atexit.register(_stop_mqtt)
 
     # Auto-start QR reader เมื่อ server boot (ถ้ามี device ต่ออยู่)
     try:
@@ -431,6 +433,15 @@ def create_app() -> Flask:
             _auto_start_qr()
     except Exception:
         pass  # ยังไม่มี device — reader จะ start เมื่อกด restart หรือเสียบ USB ใหม่
+
+    # Auto-start MQTT ถ้า enabled
+    try:
+        from mqtt_client import load_mqtt_config as _load_mqtt_cfg, start_mqtt as _auto_start_mqtt
+        _mqtt_boot_cfg = _load_mqtt_cfg()
+        if _mqtt_boot_cfg.enabled:
+            _auto_start_mqtt(_mqtt_boot_cfg)
+    except Exception:
+        pass
 
     @app.get("/qr")
     def qr_reader_page() -> str:
@@ -596,6 +607,12 @@ def create_app() -> Flask:
                             last_seen = scan
                             ts = datetime.now(timezone.utc).isoformat()
                             yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts})}\n\n"
+                            # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่
+                            try:
+                                from mqtt_client import publish_qr_scan as _mqtt_publish
+                                _mqtt_publish(scan, reader.device_path, ts)
+                            except Exception:
+                                pass
             except GeneratorExit:
                 # client disconnected
                 return
@@ -608,6 +625,72 @@ def create_app() -> Flask:
                 "X-Accel-Buffering": "no",
             },
         )
+
+    # ── MQTT routes ─────────────────────────────────────────────
+
+    @app.get("/mqtt")
+    def mqtt_page() -> str:
+        from mqtt_client import load_mqtt_config, get_mqtt_status
+        from config import main_config_path
+        return render_template(
+            "mqtt.html",
+            mqtt_config=load_mqtt_config(),
+            mqtt_status=get_mqtt_status(),
+            config_path=main_config_path().as_posix(),
+        )
+
+    @app.get("/api/mqtt/status")
+    def mqtt_status_api() -> dict[str, object]:
+        from mqtt_client import get_mqtt_status
+        return {"status": "ok", **get_mqtt_status()}
+
+    @app.post("/api/mqtt/config")
+    def mqtt_config_save_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        """
+        Payload: MqttConfig fields (camelCase หรือ snake_case ก็ได้)
+        บันทึก config และ restart MQTT client ทันที
+        """
+        from mqtt_client import MqttConfig, save_mqtt_config, start_mqtt, stop_mqtt
+        payload = request.get_json(silent=True) or {}
+        try:
+            config = MqttConfig.from_dict(payload)
+            save_mqtt_config(config)
+            stop_mqtt()
+            if config.enabled:
+                start_mqtt(config)
+        except ImportError as e:
+            return {"status": "error", "errors": [str(e)]}, 500
+        except Exception as e:
+            return {"status": "error", "errors": [str(e)]}, 500
+        from mqtt_client import get_mqtt_status
+        return {"status": "ok", "mqtt": get_mqtt_status()}
+
+    @app.post("/api/mqtt/test")
+    def mqtt_test_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        """Publish test message ไปยัง topic ที่ config ไว้"""
+        from mqtt_client import get_mqtt_client, get_mqtt_status
+        from datetime import datetime, timezone
+        c = get_mqtt_client()
+        if c is None:
+            return {"status": "error", "errors": ["MQTT client ยังไม่ได้เชื่อมต่อ"]}, 400
+        if not c.is_connected:
+            return {"status": "error", "errors": ["ยังไม่ได้เชื่อมต่อกับ broker"]}, 400
+        import json as _j
+        payload = _j.dumps({
+            "scan": "TEST-VAS-QR",
+            "device": "test",
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }, ensure_ascii=False)
+        ok = c.publish(c.config.topic, payload)
+        if not ok:
+            return {"status": "error", "errors": ["publish ไม่สำเร็จ — ตรวจสอบ connection"]}, 500
+        return {"status": "ok", "topic": c.config.topic, "payload": payload}
+
+    @app.post("/api/mqtt/disconnect")
+    def mqtt_disconnect_api() -> dict[str, object]:
+        from mqtt_client import stop_mqtt
+        stop_mqtt()
+        return {"status": "ok", "connected": False}
 
     return app
 

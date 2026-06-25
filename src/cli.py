@@ -204,6 +204,28 @@ def build_parser() -> argparse.ArgumentParser:
     qr_config_cmd.add_argument("--device", help="Device path to pin (/dev/input/eventX or /dev/hidrawX).")
     qr_config_cmd.add_argument("--clear-device", action="store_true", help="Clear pinned device (use auto-detect).")
 
+    # ── mqtt subcommand ─────────────────────────────────────────────
+    mqtt = subcommands.add_parser("mqtt", help="Manage MQTT publish settings.")
+    mqtt_subcommands = mqtt.add_subparsers(dest="mqtt_command", required=True)
+
+    mqtt_subcommands.add_parser("status", help="Show MQTT client status and current config.")
+
+    mqtt_cfg = mqtt_subcommands.add_parser("config", help="Set MQTT config.")
+    mqtt_cfg.add_argument("--broker-url",    help="Broker URL เช่น mqtts://broker.example.com:8883")
+    mqtt_cfg.add_argument("--username",      help="MQTT username")
+    mqtt_cfg.add_argument("--password",      help="MQTT password")
+    mqtt_cfg.add_argument("--client-id",     help="MQTT client ID (ว่าง = auto-generate)")
+    mqtt_cfg.add_argument("--topic",         help="Topic ที่จะ publish QR scan")
+    mqtt_cfg.add_argument("--qos",           type=int, choices=[0,1,2], help="QoS level (0/1/2)")
+    mqtt_cfg.add_argument("--retain",        action="store_true", default=None, help="Enable retain flag")
+    mqtt_cfg.add_argument("--no-retain",     action="store_true", help="Disable retain flag")
+    mqtt_cfg.add_argument("--tls-insecure",  action="store_true", default=None, help="Skip TLS certificate verify")
+    mqtt_cfg.add_argument("--no-tls-insecure", action="store_true", help="Enable TLS certificate verify")
+    mqtt_cfg.add_argument("--enable",        action="store_true", default=None, help="เปิดใช้งาน MQTT publish")
+    mqtt_cfg.add_argument("--disable",       action="store_true", help="ปิดใช้งาน MQTT publish")
+
+    mqtt_subcommands.add_parser("test", help="Test publish ไปยัง broker ที่ config ไว้.")
+
     return parser
 
 
@@ -675,6 +697,116 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             runner.run(["udevadm", "control", "--reload-rules"])
             runner.run(["udevadm", "trigger"])
             print("udev reloaded — ถอดแล้วเสียบ USB ใหม่เพื่อให้ rule มีผล")
+            return 0
+
+    if args.command == "mqtt":
+        from mqtt_client import load_mqtt_config, save_mqtt_config, MqttConfig
+
+        if args.mqtt_command == "status":
+            cfg = load_mqtt_config()
+            from mqtt_client import get_mqtt_status, _paho_available
+            status = get_mqtt_status()
+            print("[MQTT]")
+            print(f"  enabled      : {'yes' if cfg.enabled else 'no'}")
+            print(f"  connected    : {'yes' if status.get('connected') else 'no'}")
+            print(f"  broker_url   : {cfg.broker_url}")
+            print(f"  username     : {cfg.username or '(none)'}")
+            print(f"  client_id    : {cfg.client_id or '(auto-generate)'}")
+            print(f"  topic        : {cfg.topic}")
+            print(f"  qos          : {cfg.qos}")
+            print(f"  retain       : {'yes' if cfg.retain else 'no'}")
+            print(f"  tls_insecure : {'yes' if cfg.tls_insecure else 'no'}")
+            print(f"  paho-mqtt    : {'installed' if _paho_available() else 'NOT installed (sudo apt install -y python3-paho-mqtt)'}")
+            if status.get("last_error"):
+                print(f"  last_error   : {status['last_error']}")
+            from config import main_config_path
+            print(f"  config file  : {main_config_path().as_posix()}")
+            return 0
+
+        if args.mqtt_command == "config":
+            cfg = load_mqtt_config()
+            changed = False
+            if getattr(args, "broker_url", None):
+                cfg = MqttConfig(**{**cfg.to_dict(), "broker_url": args.broker_url})
+                changed = True
+            if getattr(args, "username", None) is not None:
+                cfg = MqttConfig(**{**cfg.to_dict(), "username": args.username})
+                changed = True
+            if getattr(args, "password", None) is not None:
+                cfg = MqttConfig(**{**cfg.to_dict(), "password": args.password})
+                changed = True
+            if getattr(args, "client_id", None) is not None:
+                cfg = MqttConfig(**{**cfg.to_dict(), "client_id": args.client_id})
+                changed = True
+            if getattr(args, "topic", None):
+                cfg = MqttConfig(**{**cfg.to_dict(), "topic": args.topic})
+                changed = True
+            if getattr(args, "qos", None) is not None:
+                cfg = MqttConfig(**{**cfg.to_dict(), "qos": args.qos})
+                changed = True
+            if getattr(args, "retain", None):
+                cfg = MqttConfig(**{**cfg.to_dict(), "retain": True})
+                changed = True
+            if getattr(args, "no_retain", False):
+                cfg = MqttConfig(**{**cfg.to_dict(), "retain": False})
+                changed = True
+            if getattr(args, "tls_insecure", None):
+                cfg = MqttConfig(**{**cfg.to_dict(), "tls_insecure": True})
+                changed = True
+            if getattr(args, "no_tls_insecure", False):
+                cfg = MqttConfig(**{**cfg.to_dict(), "tls_insecure": False})
+                changed = True
+            if getattr(args, "enable", None):
+                cfg = MqttConfig(**{**cfg.to_dict(), "enabled": True})
+                changed = True
+            if getattr(args, "disable", False):
+                cfg = MqttConfig(**{**cfg.to_dict(), "enabled": False})
+                changed = True
+            if not changed:
+                # ถ้าไม่มี flag ใดเลย แสดง current config
+                print("Usage: vas mqtt config [--broker-url ...] [--topic ...] [--enable] ...")
+                print("Current config:")
+                for k, v in cfg.to_dict().items():
+                    print(f"  {k:14}: {v}")
+                return 0
+            save_mqtt_config(cfg)
+            from config import main_config_path
+            print(f"Config saved → {main_config_path().as_posix()}")
+            for k, v in cfg.to_dict().items():
+                print(f"  {k:14}: {v}")
+            return 0
+
+        if args.mqtt_command == "test":
+            from mqtt_client import start_mqtt, get_mqtt_client, _paho_available
+            import json as _json_mod
+            from datetime import datetime, timezone
+            if not _paho_available():
+                print("Error: paho-mqtt ไม่ได้ติดตั้ง — รัน: sudo apt install -y python3-paho-mqtt")
+                return 1
+            cfg = load_mqtt_config()
+            if not cfg.broker_url:
+                print("Error: ยังไม่ได้ตั้งค่า broker_url — รัน: vas mqtt config --broker-url ...")
+                return 1
+            print(f"กำลังเชื่อมต่อ {cfg.broker_url} ...")
+            import time as _time
+            c = start_mqtt(cfg)
+            for _ in range(20):  # รอ connect max 4 วิ
+                _time.sleep(0.2)
+                if c.is_connected:
+                    break
+            if not c.is_connected:
+                print(f"Error: เชื่อมต่อไม่สำเร็จ — {c.last_error or 'timeout'}")
+                return 1
+            ts = datetime.now(timezone.utc).isoformat()
+            payload = _json_mod.dumps({"scan": "TEST-VAS-QR", "device": "test", "ts": ts}, ensure_ascii=False)
+            ok = c.publish(cfg.topic, payload)
+            if ok:
+                print(f"✓ publish สำเร็จ")
+                print(f"  topic  : {cfg.topic}")
+                print(f"  payload: {payload}")
+            else:
+                print("Error: publish ไม่สำเร็จ")
+                return 1
             return 0
 
     parser.error(f"Unknown command: {args.command}")

@@ -37,3 +37,8 @@ def qr_config_dir() -> _Path:
 def qr_config_path() -> _Path:
     """Return ~/.config/vas/qr_config.json ของ user จริง"""
     return qr_config_dir() / "qr_config.json"
+
+
+def main_config_path() -> _Path:
+    """Return config.json ที่ project root (/opt/vending-auto-setup/config.json)"""
+    return _Path(__file__).parent.parent / "config.json"

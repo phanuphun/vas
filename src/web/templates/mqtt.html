@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+{% block page_title %}MQTT — VAS{% endblock %}
+{% block header_title %}MQTT{% endblock %}
+
+{% block header_actions %}
+<span class="cf-zone {{ 'cf-zone-safe' if mqtt_status.connected else ('cf-zone-neutral' if not mqtt_status.enabled else 'cf-zone-caution') }}"
+      id="header-mqtt-badge">
+  {% if mqtt_status.connected %}เชื่อมต่อแล้ว
+  {% elif not mqtt_status.enabled %}ปิดใช้งาน
+  {% else %}ไม่ได้เชื่อมต่อ{% endif %}
+</span>
+{% endblock %}
+
+{% block content %}
+<style>
+.toggle-switch {
+  position: relative; display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer;
+}
+.toggle-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle-track {
+  width: 36px; height: 20px; border-radius: 10px;
+  background: rgb(var(--c-faint)/0.4); transition: background 0.2s;
+  border: 1px solid rgb(var(--c-rule)); position: relative;
+}
+.toggle-switch input:checked + .toggle-track { background: rgb(var(--c-safe)); border-color: rgb(var(--c-safe)); }
+.toggle-thumb {
+  position: absolute; left: 2px; top: 2px;
+  width: 14px; height: 14px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.15); transition: left 0.2s;
+}
+.toggle-switch input:checked ~ .toggle-track .toggle-thumb { left: 18px; }
+.toggle-switch input:checked + .toggle-track .toggle-thumb { left: 18px; }
+</style>
+
+  <!-- Stat row -->
+  <div class="stat-row-3">
+    <div class="cf-stat">
+      <span class="cf-stat-val" id="stat-enabled"
+            style="font-size:1.1rem;{{ 'color:rgb(var(--c-safe))' if mqtt_config.enabled else 'color:rgb(var(--c-faint))' }}">
+        {{ 'เปิด' if mqtt_config.enabled else 'ปิด' }}
+      </span>
+      <span class="cf-stat-label">สถานะ</span>
+    </div>
+    <div class="cf-stat">
+      <span class="cf-stat-val" id="stat-conn"
+            style="font-size:1.1rem;{{ 'color:rgb(var(--c-safe))' if mqtt_status.connected else 'color:rgb(var(--c-faint))' }}">
+        {{ 'ใช่' if mqtt_status.connected else 'ไม่' }}
+      </span>
+      <span class="cf-stat-label">Connected</span>
+    </div>
+    <div class="cf-stat">
+      <span class="cf-stat-val" id="stat-paho"
+            style="font-size:0.8rem;{{ 'color:rgb(var(--c-safe))' if mqtt_status.paho_available else 'color:rgb(var(--c-caution))' }}">
+        {{ 'ติดตั้งแล้ว' if mqtt_status.paho_available else 'ยังไม่ได้ติดตั้ง' }}
+      </span>
+      <span class="cf-stat-label">paho-mqtt</span>
+    </div>
+  </div>
+
+  <!-- Connection status card -->
+  <div class="cf-card">
+    <div class="card-head hair-b" style="padding:0.85rem 1.25rem;display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="font-size:0.9rem;font-weight:600">สถานะการเชื่อมต่อ</h2>
+      <button class="cf-btn" onclick="mqttRefreshStatus()" style="font-size:0.78rem;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        Refresh
+      </button>
+    </div>
+    <div class="status-dl" id="status-dl-area">
+      <div class="status-dl-row">
+        <span class="status-dl-key">Broker</span>
+        <span class="status-dl-val" id="status-broker">
+          <code style="font-size:0.78rem;color:rgb(var(--c-muted))">{{ mqtt_config.broker_url or '—' }}</code>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Connected</span>
+        <span class="status-dl-val">
+          <span class="cf-zone {{ 'cf-zone-safe' if mqtt_status.connected else 'cf-zone-mute' }}" id="status-conn-badge">
+            {{ 'เชื่อมต่อแล้ว' if mqtt_status.connected else 'ไม่ได้เชื่อมต่อ' }}
+          </span>
+        </span>
+      </div>
+      <div class="status-dl-row">
+        <span class="status-dl-key">Topic</span>
+        <span class="status-dl-val">
+          <code style="font-size:0.78rem;color:rgb(var(--c-muted))" id="status-topic">{{ mqtt_config.topic or '—' }}</code>
+        </span>
+      </div>
+      {% if mqtt_status.last_error %}
+      <div class="status-dl-row">
+        <span class="status-dl-key">Error</span>
+        <span class="status-dl-val">
+          <span style="font-size:0.78rem;color:rgb(var(--c-danger))" id="status-error">{{ mqtt_status.last_error }}</span>
+        </span>
+      </div>
+      {% else %}
+      <div class="status-dl-row" id="status-error-row" style="display:none;">
+        <span class="status-dl-key">Error</span>
+        <span class="status-dl-val"><span style="font-size:0.78rem;color:rgb(var(--c-danger))" id="status-error"></span></span>
+      </div>
+      {% endif %}
+      <div class="status-dl-row">
+        <span class="status-dl-key">Config file</span>
+        <span class="status-dl-val">
+          <code style="font-size:0.72rem;color:rgb(var(--c-faint))">{{ config_path }}</code>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config card -->
+  <div class="cf-card">
+    <div class="card-head hair-b" style="padding:0.85rem 1.25rem;display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="font-size:0.9rem;font-weight:600">ตั้งค่า MQTT</h2>
+      <span id="config-result" style="font-size:0.78rem;color:rgb(var(--c-faint))"></span>
+    </div>
+    <div style="padding:1.25rem;display:flex;flex-direction:column;gap:1rem;">
+
+      <!-- Enabled toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0.6rem 0;border-bottom:1px solid rgb(var(--c-rule));">
+        <div>
+          <div style="font-size:0.88rem;font-weight:600">เปิดใช้งาน MQTT Publish</div>
+          <div style="font-size:0.72rem;color:rgb(var(--c-faint));margin-top:2px">เมื่อสแกน QR จะ publish ข้อมูลออกไปยัง broker อัตโนมัติ</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="cfg-enabled" {{ 'checked' if mqtt_config.enabled else '' }}>
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
+        <!-- Broker URL -->
+        <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:0.3rem;">
+          <label class="cf-label" for="cfg-broker-url">Broker URL</label>
+          <input class="cf-input" id="cfg-broker-url" type="text"
+                 placeholder="mqtts://broker.example.com:8883"
+                 value="{{ mqtt_config.broker_url }}"
+                 style="font-family:'Bai Jamjuree',monospace;font-size:0.82rem;">
+          <p style="font-size:0.7rem;color:rgb(var(--c-faint))">รองรับ mqtt://, mqtts:// (TLS)</p>
+        </div>
+
+        <!-- Username -->
+        <div style="display:flex;flex-direction:column;gap:0.3rem;">
+          <label class="cf-label" for="cfg-username">Username</label>
+          <input class="cf-input" id="cfg-username" type="text"
+                 placeholder="username"
+                 value="{{ mqtt_config.username }}"
+                 autocomplete="username">
+        </div>
+
+        <!-- Password -->
+        <div style="display:flex;flex-direction:column;gap:0.3rem;">
+          <label class="cf-label" for="cfg-password">Password</label>
+          <input class="cf-input" id="cfg-password" type="password"
+                 placeholder="••••••••"
+                 value="{{ mqtt_config.password }}"
+                 autocomplete="current-password">
+        </div>
+
+        <!-- Client ID -->
+        <div style="display:flex;flex-direction:column;gap:0.3rem;">
+          <label class="cf-label" for="cfg-client-id">Client ID</label>
+          <input class="cf-input" id="cfg-client-id" type="text"
+                 placeholder="vas-qr-reader (auto-generate ถ้าว่าง)"
+                 value="{{ mqtt_config.client_id }}"
+                 style="font-family:'Bai Jamjuree',monospace;font-size:0.82rem;">
+        </div>
+
+        <!-- Topic -->
+        <div style="display:flex;flex-direction:column;gap:0.3rem;">
+          <label class="cf-label" for="cfg-topic">Topic</label>
+          <input class="cf-input" id="cfg-topic" type="text"
+                 placeholder="sterile/vending/qr/scan"
+                 value="{{ mqtt_config.topic }}"
+                 style="font-family:'Bai Jamjuree',monospace;font-size:0.82rem;">
+        </div>
+
+        <!-- QoS -->
+        <div style="display:flex;flex-direction:column;gap:0.3rem;">
+          <label class="cf-label" for="cfg-qos">QoS</label>
+          <select class="cf-input" id="cfg-qos" style="font-size:0.82rem;">
+            <option value="0" {{ 'selected' if mqtt_config.qos == 0 else '' }}>0 — At most once</option>
+            <option value="1" {{ 'selected' if mqtt_config.qos == 1 else '' }}>1 — At least once (แนะนำ)</option>
+            <option value="2" {{ 'selected' if mqtt_config.qos == 2 else '' }}>2 — Exactly once</option>
+          </select>
+        </div>
+
+        <!-- Retain -->
+        <div style="display:flex;align-items:center;gap:0.75rem;padding-top:1.4rem;">
+          <label class="toggle-switch">
+            <input type="checkbox" id="cfg-retain" {{ 'checked' if mqtt_config.retain else '' }}>
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
+          <div>
+            <div style="font-size:0.84rem;font-weight:500">Retain</div>
+            <div style="font-size:0.7rem;color:rgb(var(--c-faint))">broker เก็บข้อความล่าสุดไว้</div>
+          </div>
+        </div>
+
+        <!-- TLS Insecure -->
+        <div style="display:flex;align-items:center;gap:0.75rem;padding-top:1.4rem;">
+          <label class="toggle-switch">
+            <input type="checkbox" id="cfg-tls-insecure" {{ 'checked' if mqtt_config.tls_insecure else '' }}>
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
+          <div>
+            <div style="font-size:0.84rem;font-weight:500">TLS Insecure</div>
+            <div style="font-size:0.7rem;color:rgb(var(--c-caution))">ข้าม certificate verify (self-signed)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Buttons -->
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;padding-top:0.25rem;">
+        <button class="cf-btn cf-btn-primary" onclick="mqttSaveConfig()" id="btn-save">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+          </svg>
+          บันทึก &amp; เชื่อมต่อ
+        </button>
+        <button class="cf-btn" onclick="mqttTestPublish()" id="btn-test">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Test Publish
+        </button>
+        <button class="cf-btn" onclick="mqttDisconnect()" style="color:rgb(var(--c-caution));">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+          ตัดการเชื่อมต่อ
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Info: paho-mqtt not installed -->
+  {% if not mqtt_status.paho_available %}
+  <div class="cf-warn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    <span>
+      paho-mqtt ยังไม่ได้ติดตั้ง — รัน
+      <code style="font-family:'Bai Jamjuree',monospace;background:rgb(var(--c-caution)/0.12);padding:0.1em 0.35em;border-radius:3px;">sudo apt install -y python3-paho-mqtt</code>
+    </span>
+  </div>
+  {% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  // ── Toggle switch fix ─────────────────────────────────────────
+  // CSS :checked applies to input, thumb is sibling of track
+  document.querySelectorAll(".toggle-switch input").forEach(function (inp) {
+    function syncThumb() {
+      var thumb = inp.closest(".toggle-switch").querySelector(".toggle-thumb");
+      if (thumb) thumb.style.left = inp.checked ? "18px" : "2px";
+      var track = inp.closest(".toggle-switch").querySelector(".toggle-track");
+      if (track) {
+        track.style.background  = inp.checked ? "rgb(var(--c-safe))" : "";
+        track.style.borderColor = inp.checked ? "rgb(var(--c-safe))" : "";
+      }
+    }
+    inp.addEventListener("change", syncThumb);
+    syncThumb();
+  });
+
+  // ── Read form ─────────────────────────────────────────────────
+  function readForm() {
+    return {
+      enabled:     document.getElementById("cfg-enabled").checked,
+      broker_url:  document.getElementById("cfg-broker-url").value.trim(),
+      username:    document.getElementById("cfg-username").value,
+      password:    document.getElementById("cfg-password").value,
+      client_id:   document.getElementById("cfg-client-id").value.trim(),
+      tls_insecure:document.getElementById("cfg-tls-insecure").checked,
+      topic:       document.getElementById("cfg-topic").value.trim(),
+      qos:         parseInt(document.getElementById("cfg-qos").value, 10),
+      retain:      document.getElementById("cfg-retain").checked,
+    };
+  }
+
+  // ── Result label ──────────────────────────────────────────────
+  function setResult(msg, ok) {
+    var el = document.getElementById("config-result");
+    el.textContent = msg;
+    el.style.color = ok ? "rgb(var(--c-safe))" : "rgb(var(--c-danger))";
+    if (ok) setTimeout(function () { el.textContent = ""; }, 4000);
+  }
+
+  // ── API helpers ───────────────────────────────────────────────
+  function post(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) { return r.json(); });
+  }
+
+  // ── Actions ───────────────────────────────────────────────────
+  function mqttSaveConfig() {
+    var btn = document.getElementById("btn-save");
+    btn.disabled = true;
+    post("/api/mqtt/config", readForm())
+      .then(function (d) {
+        if (d.status === "ok") {
+          setResult("✓ บันทึกแล้ว — กำลังเชื่อมต่อ...", true);
+          setTimeout(mqttRefreshStatus, 2000);
+        } else {
+          setResult("Error: " + (d.errors || []).join(", "), false);
+        }
+      })
+      .catch(function (e) { setResult("Error: " + e, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  function mqttTestPublish() {
+    var btn = document.getElementById("btn-test");
+    btn.disabled = true;
+    post("/api/mqtt/test", {})
+      .then(function (d) {
+        if (d.status === "ok") {
+          setResult("✓ Test publish สำเร็จ", true);
+        } else {
+          setResult("Error: " + (d.errors || []).join(", "), false);
+        }
+      })
+      .catch(function (e) { setResult("Error: " + e, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  function mqttDisconnect() {
+    post("/api/mqtt/disconnect", {})
+      .then(function () { mqttRefreshStatus(); });
+  }
+
+  function mqttRefreshStatus() {
+    fetch("/api/mqtt/status")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        // header badge
+        var hb = document.getElementById("header-mqtt-badge");
+        if (d.connected) {
+          hb.className = "cf-zone cf-zone-safe"; hb.textContent = "เชื่อมต่อแล้ว";
+        } else if (!d.enabled) {
+          hb.className = "cf-zone cf-zone-neutral"; hb.textContent = "ปิดใช้งาน";
+        } else {
+          hb.className = "cf-zone cf-zone-caution"; hb.textContent = "ไม่ได้เชื่อมต่อ";
+        }
+        // status dl
+        var connBadge = document.getElementById("status-conn-badge");
+        if (connBadge) {
+          connBadge.className = "cf-zone " + (d.connected ? "cf-zone-safe" : "cf-zone-mute");
+          connBadge.textContent = d.connected ? "เชื่อมต่อแล้ว" : "ไม่ได้เชื่อมต่อ";
+        }
+        var errEl = document.getElementById("status-error");
+        var errRow = document.getElementById("status-error-row");
+        if (errEl) errEl.textContent = d.last_error || "";
+        if (errRow) errRow.style.display = d.last_error ? "" : "none";
+        // broker
+        var brokerEl = document.getElementById("status-broker");
+        if (brokerEl && d.broker_url) brokerEl.innerHTML = "<code style='font-size:0.78rem;color:rgb(var(--c-muted))'>" + d.broker_url + "</code>";
+        // topic
+        var topicEl = document.getElementById("status-topic");
+        if (topicEl && d.topic) topicEl.textContent = d.topic;
+      })
+      .catch(function () {});
+  }
+
+  window.mqttSaveConfig  = mqttSaveConfig;
+  window.mqttTestPublish = mqttTestPublish;
+  window.mqttDisconnect  = mqttDisconnect;
+  window.mqttRefreshStatus = mqttRefreshStatus;
+
+  // Auto-refresh status ทุก 10 วิ
+  setInterval(mqttRefreshStatus, 10000);
+})();
+</script>
+{% endblock %}
