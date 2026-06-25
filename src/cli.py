@@ -815,10 +815,6 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
     return 2
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 def _notify_server_mqtt_reload(cfg: "MqttConfig") -> None:  # type: ignore[name-defined]
     """
     POST config ไปยัง server process (localhost:8888) เพื่อ reload MQTT ทันที
@@ -839,6 +835,10 @@ def _notify_server_mqtt_reload(cfg: "MqttConfig") -> None:  # type: ignore[name-
             print("Server MQTT client reloaded ✓")
     except (_uerr.URLError, OSError):
         print("Note: server ไม่ตอบสนอง — MQTT จะ start เมื่อ server restart ครั้งถัดไป")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 
 def _print_qr_status(status: "QrReaderStatus") -> None:
