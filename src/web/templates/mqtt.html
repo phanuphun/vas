@@ -178,6 +178,52 @@
                  style="font-family:'Bai Jamjuree',monospace;font-size:0.82rem;">
         </div>
 
+        <!-- Payload Mode -->
+        <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:0.6rem;">
+          <label class="cf-label">Payload Mode</label>
+          <div style="display:flex;flex-direction:column;gap:0.5rem;">
+
+            <label style="display:flex;align-items:flex-start;gap:0.65rem;cursor:pointer;padding:0.55rem 0.75rem;border:1px solid rgb(var(--c-rule));border-radius:6px;"
+                   id="lbl-mode-json">
+              <input type="radio" name="cfg-payload-mode" id="cfg-payload-json" value="json"
+                     style="margin-top:3px;" {{ 'checked' if mqtt_config.payload_mode == 'json' or mqtt_config.payload_mode not in ('raw','decoded') else '' }}
+                     onchange="updateModeLabels()">
+              <div>
+                <div style="font-size:0.84rem;font-weight:600">JSON Object</div>
+                <div style="font-size:0.72rem;color:rgb(var(--c-faint));margin-top:2px">ส่ง QR string ใน JSON envelope</div>
+                <code style="font-size:0.7rem;color:rgb(var(--c-muted))">{"scan":"3833401723","device":"/dev/input/event6","ts":"..."}</code>
+              </div>
+            </label>
+
+            <label style="display:flex;align-items:flex-start;gap:0.65rem;cursor:pointer;padding:0.55rem 0.75rem;border:1px solid rgb(var(--c-rule));border-radius:6px;"
+                   id="lbl-mode-raw">
+              <input type="radio" name="cfg-payload-mode" id="cfg-payload-raw" value="raw"
+                     style="margin-top:3px;" {{ 'checked' if mqtt_config.payload_mode == 'raw' else '' }}
+                     onchange="updateModeLabels()">
+              <div>
+                <div style="font-size:0.84rem;font-weight:600">Raw String</div>
+                <div style="font-size:0.72rem;color:rgb(var(--c-faint));margin-top:2px">ส่ง QR string เปล่าๆ ไม่มี wrapper</div>
+                <code style="font-size:0.7rem;color:rgb(var(--c-muted))">3833401723</code>
+              </div>
+            </label>
+
+            <label style="display:flex;align-items:flex-start;gap:0.65rem;cursor:pointer;padding:0.55rem 0.75rem;border:1px solid rgb(var(--c-rule));border-radius:6px;"
+                   id="lbl-mode-decoded">
+              <input type="radio" name="cfg-payload-mode" id="cfg-payload-decoded" value="decoded"
+                     style="margin-top:3px;" {{ 'checked' if mqtt_config.payload_mode == 'decoded' else '' }}
+                     onchange="updateModeLabels()">
+              <div>
+                <div style="font-size:0.84rem;font-weight:600">Decoded</div>
+                <div style="font-size:0.72rem;color:rgb(var(--c-faint));margin-top:2px">
+                  ลอง decode QR content ก่อน publish — รองรับ JSON / URL params / Base64 JSON
+                </div>
+                <code style="font-size:0.7rem;color:rgb(var(--c-muted))">{"scan":{"order_id":"123","amount":"50"},"device":"...","ts":"..."}</code>
+              </div>
+            </label>
+
+          </div>
+        </div>
+
         <!-- QoS -->
         <div style="display:flex;flex-direction:column;gap:0.3rem;">
           <label class="cf-label" for="cfg-qos">QoS</label>
@@ -260,6 +306,22 @@
 (function () {
   "use strict";
 
+  // ── Payload mode card highlight ──────────────────────────────
+  function updateModeLabels() {
+    ["json", "raw", "decoded"].forEach(function (m) {
+      var inp = document.getElementById("cfg-payload-" + m);
+      var lbl = document.getElementById("lbl-mode-" + m);
+      if (!inp || !lbl) return;
+      lbl.style.borderColor = inp.checked
+        ? "rgb(var(--c-accent))"
+        : "rgb(var(--c-rule))";
+      lbl.style.background = inp.checked
+        ? "rgb(var(--c-accent)/0.05)"
+        : "";
+    });
+  }
+  updateModeLabels();
+
   // ── Toggle switch fix ─────────────────────────────────────────
   // CSS :checked applies to input, thumb is sibling of track
   document.querySelectorAll(".toggle-switch input").forEach(function (inp) {
@@ -278,16 +340,18 @@
 
   // ── Read form ─────────────────────────────────────────────────
   function readForm() {
+    var payloadMode = document.querySelector('input[name="cfg-payload-mode"]:checked');
     return {
-      enabled:     document.getElementById("cfg-enabled").checked,
-      broker_url:  document.getElementById("cfg-broker-url").value.trim(),
-      username:    document.getElementById("cfg-username").value,
-      password:    document.getElementById("cfg-password").value,
-      client_id:   document.getElementById("cfg-client-id").value.trim(),
-      tls_insecure:document.getElementById("cfg-tls-insecure").checked,
-      topic:       document.getElementById("cfg-topic").value.trim(),
-      qos:         parseInt(document.getElementById("cfg-qos").value, 10),
-      retain:      document.getElementById("cfg-retain").checked,
+      enabled:      document.getElementById("cfg-enabled").checked,
+      broker_url:   document.getElementById("cfg-broker-url").value.trim(),
+      username:     document.getElementById("cfg-username").value,
+      password:     document.getElementById("cfg-password").value,
+      client_id:    document.getElementById("cfg-client-id").value.trim(),
+      tls_insecure: document.getElementById("cfg-tls-insecure").checked,
+      topic:        document.getElementById("cfg-topic").value.trim(),
+      qos:          parseInt(document.getElementById("cfg-qos").value, 10),
+      retain:       document.getElementById("cfg-retain").checked,
+      payload_mode: payloadMode ? payloadMode.value : "json",
     };
   }
 

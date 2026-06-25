@@ -221,6 +221,8 @@ def build_parser() -> argparse.ArgumentParser:
     mqtt_cfg.add_argument("--no-retain",     action="store_true", help="Disable retain flag")
     mqtt_cfg.add_argument("--tls-insecure",  action="store_true", default=None, help="Skip TLS certificate verify")
     mqtt_cfg.add_argument("--no-tls-insecure", action="store_true", help="Enable TLS certificate verify")
+    mqtt_cfg.add_argument("--payload-mode", choices=["json", "raw", "decoded"],
+                          help="รูปแบบ payload: json=JSON envelope, raw=string เปล่า, decoded=decode QR content ก่อน publish")
     mqtt_cfg.add_argument("--enable",        action="store_true", default=None, help="เปิดใช้งาน MQTT publish")
     mqtt_cfg.add_argument("--disable",       action="store_true", help="ปิดใช้งาน MQTT publish")
 
@@ -716,6 +718,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             print(f"  qos          : {cfg.qos}")
             print(f"  retain       : {'yes' if cfg.retain else 'no'}")
             print(f"  tls_insecure : {'yes' if cfg.tls_insecure else 'no'}")
+            print(f"  payload_mode : {cfg.payload_mode}")
             print(f"  paho-mqtt    : {'installed' if _paho_available() else 'NOT installed (sudo apt install -y python3-paho-mqtt)'}")
             if status.get("last_error"):
                 print(f"  last_error   : {status['last_error']}")
@@ -755,6 +758,9 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 changed = True
             if getattr(args, "no_tls_insecure", False):
                 cfg = MqttConfig(**{**cfg.to_dict(), "tls_insecure": False})
+                changed = True
+            if getattr(args, "payload_mode", None):
+                cfg = MqttConfig(**{**cfg.to_dict(), "payload_mode": args.payload_mode})
                 changed = True
             if getattr(args, "enable", None):
                 cfg = MqttConfig(**{**cfg.to_dict(), "enabled": True})

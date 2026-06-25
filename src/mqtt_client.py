@@ -23,6 +23,16 @@ from urllib.parse import urlparse
 # Config
 # ---------------------------------------------------------------------------
 
+PAYLOAD_MODES = ("json", "raw", "decoded")
+"""
+payload_mode:
+    "json"    → {"scan": "<raw_string>", "device": "...", "ts": "..."}   (default)
+    "raw"     → ค่า scan string เปล่าๆ เช่น  3833401723
+    "decoded" → {"scan": <parsed_object>, "device": "...", "ts": "..."}
+                  ลอง parse QR content เป็น JSON / URL params / Base64 JSON
+"""
+
+
 @dataclass
 class MqttConfig:
     enabled: bool = False
@@ -34,6 +44,7 @@ class MqttConfig:
     topic: str = "sterile/vending/qr/scan"
     qos: int = 1
     retain: bool = False
+    payload_mode: str = "json"   # "json" | "raw"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -46,6 +57,7 @@ class MqttConfig:
             "topic": self.topic,
             "qos": self.qos,
             "retain": self.retain,
+            "payload_mode": self.payload_mode,
         }
 
     @classmethod
@@ -62,6 +74,9 @@ class MqttConfig:
                 return int(d.get(key, default))  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 return default
+        mode = _str("payload_mode", "json")
+        if mode not in PAYLOAD_MODES:
+            mode = "json"
         return cls(
             enabled=_bool("enabled"),
             broker_url=_str("broker_url", cls.__dataclass_fields__["broker_url"].default),  # type: ignore[attr-defined]
@@ -72,6 +87,7 @@ class MqttConfig:
             topic=_str("topic", cls.__dataclass_fields__["topic"].default),  # type: ignore[attr-defined]
             qos=_int("qos", 1),
             retain=_bool("retain"),
+            payload_mode=mode,
         )
 
 
@@ -298,12 +314,31 @@ class VasMqttClient:
         """
         Publish QR scan ไปยัง topic ที่ config ไว้
 
-        Payload:
-            {"scan": "...", "device": "...", "ts": "<ISO8601-UTC>"}
+        payload_mode == "raw"     → plain string  เช่น  3833401723
+        payload_mode == "json"    → {"scan": "<raw>", "device": "...", "ts": "..."}
+        payload_mode == "decoded" → {"scan": <parsed>, "device": "...", "ts": "..."}
+                                    โดย <parsed> คือผลจาก decode_qr_content():
+                                    JSON / URL params / Base64 JSON / {"value": raw}
         """
         if not self.config.enabled:
             return False
-        payload = json.dumps({"scan": scan, "device": device, "ts": ts}, ensure_ascii=False)
+
+        mode = self.config.payload_mode
+
+        if mode == "raw":
+            payload = scan
+        elif mode == "decoded":
+            from qr_reader import decode_qr_content
+            decoded = decode_qr_content(scan)
+            payload = json.dumps(
+                {"scan": decoded, "device": device, "ts": ts},
+                ensure_ascii=False,
+            )
+        else:  # "json" (default)
+            payload = json.dumps(
+                {"scan": scan, "device": device, "ts": ts},
+                ensure_ascii=False,
+            )
         return self.publish(self.config.topic, payload)
 
     def status_dict(self) -> dict[str, object]:
