@@ -424,6 +424,14 @@ def create_app() -> Flask:
     from qr_reader import stop_reader as _stop_qr_reader
     atexit.register(_stop_qr_reader)
 
+    # Auto-start QR reader เมื่อ server boot (ถ้ามี device ต่ออยู่)
+    try:
+        from qr_reader import get_reader as _get_qr_reader, start_reader as _auto_start_qr
+        if _get_qr_reader() is None:
+            _auto_start_qr()
+    except Exception:
+        pass  # ยังไม่มี device — reader จะ start เมื่อกด restart หรือเสียบ USB ใหม่
+
     @app.get("/qr")
     def qr_reader_page() -> str:
         from qr_reader import find_zkteco_evdev_devices, find_zkteco_hidraw_devices, load_qr_config
