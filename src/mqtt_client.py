@@ -116,14 +116,32 @@ def _gen_client_id() -> str:
     return f"vas-qr-reader-{suffix}"
 
 
-def _parse_broker_url(url: str) -> tuple[str, int, bool]:
-    """Return (host, port, use_tls)"""
+def _parse_broker_url(url: str) -> tuple[str, int, bool, bool]:
+    """
+    Return (host, port, use_tls, use_websocket)
+
+    Scheme mapping:
+        mqtt://   → TCP plain,       port 1883
+        mqtts://  → TCP + TLS,       port 8883
+        ws://     → WebSocket plain, port 8083
+        wss://    → WebSocket + TLS, port 8084
+    """
     parsed = urlparse(url)
-    use_tls = parsed.scheme in ("mqtts", "ssl")
+    scheme = (parsed.scheme or "mqtt").lower()
+    use_tls       = scheme in ("mqtts", "ssl", "wss")
+    use_websocket = scheme in ("ws", "wss")
     host = parsed.hostname or "localhost"
-    default_port = 8883 if use_tls else 1883
-    port = parsed.port or default_port
-    return host, port, use_tls
+    if parsed.port:
+        port = parsed.port
+    elif scheme == "wss":
+        port = 8084
+    elif scheme == "ws":
+        port = 8083
+    elif use_tls:
+        port = 8883
+    else:
+        port = 1883
+    return host, port, use_tls, use_websocket
 
 
 class VasMqttClient:
@@ -179,19 +197,20 @@ class VasMqttClient:
 
         cfg = self.config
         client_id = cfg.client_id.strip() or _gen_client_id()
+        host, port, use_tls, use_websocket = _parse_broker_url(cfg.broker_url)
 
         client = _paho.Client(
             client_id=client_id,
             protocol=_paho.MQTTv311,
             clean_session=True,
+            transport="websockets" if use_websocket else "tcp",
         )
 
         # Auth
         if cfg.username:
             client.username_pw_set(cfg.username, cfg.password or None)
 
-        # TLS
-        host, port, use_tls = _parse_broker_url(cfg.broker_url)
+        # TLS (mqtts:// หรือ wss://)
         if use_tls:
             import ssl as _ssl
             client.tls_set(tls_version=_ssl.PROTOCOL_TLS_CLIENT)
