@@ -188,14 +188,20 @@ def build_parser() -> argparse.ArgumentParser:
     qr_subcommands.add_parser("status", help="Show QR reader device and config status.")
 
     qr_start = qr_subcommands.add_parser("start", help="Start QR reader thread (blocking, until Ctrl+C).")
-    qr_start.add_argument("--device", help="hidraw device path. Defaults to auto-detect.")
+    qr_start.add_argument("--device", help="Device path (/dev/input/eventX or /dev/hidrawX). Defaults to auto-detect.")
 
     qr_subcommands.add_parser("stop", help="Stop the global QR reader thread.")
 
     qr_subcommands.add_parser("last-scan", help="Print the last scanned value.")
 
+    qr_test = qr_subcommands.add_parser("test", help="Interactive QR reader test — scan QR and print results. (Ctrl+C to stop)")
+    qr_test.add_argument("--device", help="Device path (/dev/input/eventX). Defaults to auto-detect.")
+    qr_test.add_argument("--no-grab", action="store_true", help="Do not grab device (keystrokes reach OS — debug only).")
+
+    qr_subcommands.add_parser("install-udev", help="Install udev rule so non-root users can access /dev/hidraw*.")
+
     qr_config_cmd = qr_subcommands.add_parser("config", help="Set QR reader config.")
-    qr_config_cmd.add_argument("--device", help="hidraw device path to pin.")
+    qr_config_cmd.add_argument("--device", help="Device path to pin (/dev/input/eventX or /dev/hidrawX).")
     qr_config_cmd.add_argument("--clear-device", action="store_true", help="Clear pinned device (use auto-detect).")
 
     return parser
@@ -583,6 +589,100 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 config = QrConfig(device_path=args.device)
             save_qr_config(config)
             print(f"Config saved: {config}")
+            return 0
+
+        if args.qr_command == "test":
+            import signal as _signal
+            from qr_reader import find_zkteco_evdev_devices, EvdevQrReaderThread, EVDEV_KEYMAP
+            try:
+                import evdev as _evdev  # type: ignore[import]
+            except ImportError:
+                import sys as _sys
+                print("Error: python3-evdev is not installed.", file=_sys.stderr)
+                print("Install: sudo apt install -y python3-evdev", file=_sys.stderr)
+                return 1
+
+            device_path = getattr(args, "device", None)
+            if device_path is None:
+                devices = find_zkteco_evdev_devices()
+                if not devices:
+                    import sys as _sys
+                    print("Error: ไม่พบ ZKTeco evdev device", file=_sys.stderr)
+                    print("ตรวจสอบ: sudo evtest", file=_sys.stderr)
+                    return 1
+                device_path = devices[0]
+
+            grab = not getattr(args, "no_grab", False)
+            try:
+                device = _evdev.InputDevice(device_path)
+                if grab:
+                    device.grab()
+            except OSError as error:
+                import sys as _sys
+                print(f"Error: {error}", file=_sys.stderr)
+                return 1
+
+            print(f"Device : {device.name}")
+            print(f"Path   : {device.path}")
+            print(f"Grab   : {'yes (keystrokes blocked from OS)' if grab else 'no (debug mode)'}")
+            print()
+            print("รอ scan QR... (Ctrl+C เพื่อหยุด)")
+            print("-" * 50)
+
+            buffer: list[str] = []
+            scan_count = 0
+            interrupted = False
+
+            def _handle_signal(_sig: int, _frame: object) -> None:
+                nonlocal interrupted
+                interrupted = True
+
+            _signal.signal(_signal.SIGINT, _handle_signal)
+            _signal.signal(_signal.SIGTERM, _handle_signal)
+
+            try:
+                for event in device.read_loop():
+                    if interrupted:
+                        break
+                    if event.type != _evdev.ecodes.EV_KEY:
+                        continue
+                    key = _evdev.categorize(event)
+                    if key.keystate != _evdev.KeyEvent.key_down:
+                        continue
+                    if key.scancode == 28:  # KEY_ENTER
+                        if buffer:
+                            data = "".join(buffer)
+                            scan_count += 1
+                            print(f"[#{scan_count}] {data}")
+                            buffer.clear()
+                    elif key.scancode in EVDEV_KEYMAP:
+                        buffer.append(EVDEV_KEYMAP[key.scancode])
+            finally:
+                if grab:
+                    try:
+                        device.ungrab()
+                    except Exception:
+                        pass
+                print(f"\nหยุดแล้ว — scan ทั้งหมด {scan_count} ครั้ง")
+            return 0
+
+        if args.qr_command == "install-udev":
+            require_linux()
+            require_root()
+            from config import QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE
+            rule_content = (
+                f"{QR_UDEV_SIGNATURE}\n"
+                "# ZKTeco QR500-BM / ZKRFID R400 — allow plugdev group access\n"
+                'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020", MODE="0666", GROUP="plugdev"\n'
+                'SUBSYSTEM=="usb", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020", MODE="0664", GROUP="plugdev"\n'
+                'KERNEL=="event*", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020", MODE="0664", GROUP="plugdev"\n'
+            )
+            QR_UDEV_RULE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            QR_UDEV_RULE_PATH.write_text(rule_content, encoding="utf-8")
+            print(f"udev rule written: {QR_UDEV_RULE_PATH}")
+            runner.run(["udevadm", "control", "--reload-rules"])
+            runner.run(["udevadm", "trigger"])
+            print("udev reloaded — ถอดแล้วเสียบ USB ใหม่เพื่อให้ rule มีผล")
             return 0
 
     parser.error(f"Unknown command: {args.command}")

@@ -426,11 +426,17 @@ def create_app() -> Flask:
 
     @app.get("/qr")
     def qr_reader_page() -> str:
-        from qr_reader import find_zkteco_hidraw_devices, load_qr_config
+        from qr_reader import find_zkteco_evdev_devices, find_zkteco_hidraw_devices, load_qr_config
+        evdev_devices = find_zkteco_evdev_devices()
+        hidraw_devices = find_zkteco_hidraw_devices()
+        # รวม evdev ก่อน hidraw (evdev = HID keyboard Open mode ที่แนะนำ)
+        all_devices = evdev_devices + [d for d in hidraw_devices if d not in evdev_devices]
         return render_template(
             "qr.html",
             qr_reader=collect_qr_reader_status(),
-            detected_devices=find_zkteco_hidraw_devices(),
+            detected_devices=all_devices,
+            evdev_devices=evdev_devices,
+            hidraw_devices=hidraw_devices,
             config=load_qr_config(),
         )
 

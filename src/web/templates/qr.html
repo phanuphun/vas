@@ -145,16 +145,27 @@
     </div>
     <div style="padding:1.25rem;display:flex;flex-direction:column;gap:1rem;">
       <div style="display:flex;flex-direction:column;gap:0.35rem;">
-        <label class="cf-label" for="device-select">อุปกรณ์ hidraw</label>
+        <label class="cf-label" for="device-select">อุปกรณ์</label>
         <select class="cf-input" id="device-select" style="font-family:'Bai Jamjuree',monospace;">
           <option value="">Auto-detect (ใช้อุปกรณ์แรกที่พบ)</option>
-          {% for dev in detected_devices %}
-          <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
-          {% endfor %}
+          {% if evdev_devices %}
+          <optgroup label="evdev — HID keyboard mode (แนะนำ)">
+            {% for dev in evdev_devices %}
+            <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
+          {% if hidraw_devices %}
+          <optgroup label="hidraw — raw HID mode">
+            {% for dev in hidraw_devices %}
+            <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
         </select>
         {% if not detected_devices %}
         <p style="font-size:0.72rem;color:rgb(var(--c-caution))">
-          ⚠ ยังไม่พบอุปกรณ์ ZKTeco — ตรวจสอบการเชื่อมต่อ USB หรือติดตั้ง udev rule ก่อน
+          ⚠ ยังไม่พบอุปกรณ์ ZKTeco — ตรวจสอบการเชื่อมต่อ USB
         </p>
         {% endif %}
       </div>

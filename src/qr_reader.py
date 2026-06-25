@@ -4,7 +4,7 @@ import glob
 import json
 import os
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -61,6 +61,25 @@ SHIFT_MASK = 0x22   # left shift=0x02, right shift=0x20
 ENTER_KEYCODE = 40
 REPORT_SIZE = 64
 
+# ---------------------------------------------------------------------------
+# evdev keycode map (HID keyboard = Open mode)
+# ---------------------------------------------------------------------------
+
+EVDEV_KEYMAP: dict[int, str] = {
+    2: "1", 3: "2", 4: "3", 5: "4", 6: "5",
+    7: "6", 8: "7", 9: "8", 10: "9", 11: "0",
+    16: "q", 17: "w", 18: "e", 19: "r", 20: "t",
+    21: "y", 22: "u", 23: "i", 24: "o", 25: "p",
+    30: "a", 31: "s", 32: "d", 33: "f", 34: "g",
+    35: "h", 36: "j", 37: "k", 38: "l",
+    44: "z", 45: "x", 46: "c", 47: "v", 48: "b",
+    49: "n", 50: "m",
+    12: "-", 13: "=", 26: "[", 27: "]",
+    39: ";", 40: "'", 51: ",", 52: ".", 53: "/",
+}
+
+EVDEV_DEVICE_NAMES = ["ZKRFID", "ZK", "QR500"]
+
 
 # ---------------------------------------------------------------------------
 # Device discovery
@@ -89,6 +108,32 @@ def _parse_hid_id(uevent_content: str) -> tuple[str, str] | None:
             return None
         return (vendor_id, product_id)
     return None
+
+
+def find_zkteco_evdev_devices() -> list[str]:
+    """
+    ค้นหา /dev/input/eventX paths ของ ZKTeco QR reader
+    ใช้เมื่อ HID keyboard = Open (evdev mode)
+
+    Returns:
+        list[str]: paths เรียงตามชื่อ เช่น ["/dev/input/event6"]
+        คืน list ว่างถ้าไม่พบ หรือ python3-evdev ไม่ได้ติดตั้ง
+    """
+    try:
+        import evdev  # type: ignore[import]
+    except ImportError:
+        return []
+
+    results: list[str] = []
+    for path in evdev.list_devices():
+        try:
+            d = evdev.InputDevice(path)
+            if any(name in d.name.upper() for name in EVDEV_DEVICE_NAMES):
+                if evdev.ecodes.EV_KEY in d.capabilities():
+                    results.append(path)
+        except Exception:
+            continue
+    return sorted(results)
 
 
 def find_zkteco_hidraw_devices() -> list[str]:
@@ -174,13 +219,17 @@ def decode_hid_report(report: bytes) -> str:
 @dataclass
 class QrConfig:
     device_path: str | None = None  # None = auto-detect
+    mode: str = "auto"              # "auto" | "evdev" | "hidraw"
 
     def to_dict(self) -> dict[str, object]:
-        return {"device_path": self.device_path}
+        return {"device_path": self.device_path, "mode": self.mode}
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "QrConfig":
-        return cls(device_path=data.get("device_path") or None)
+        return cls(
+            device_path=data.get("device_path") or None,
+            mode=str(data.get("mode") or "auto"),
+        )
 
 
 def load_qr_config() -> QrConfig:
@@ -284,6 +333,75 @@ class QrReaderThread(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
+# EvdevQrReaderThread  (HID keyboard = Open mode)
+# ---------------------------------------------------------------------------
+
+class EvdevQrReaderThread(threading.Thread):
+    """
+    Background thread อ่าน QR ผ่าน evdev (HID keyboard = Open)
+    ใช้ device.grab() เพื่อป้องกัน keystrokes ไม่ให้ถึง OS / UI
+
+    Interface เหมือน QrReaderThread:
+        thread.last_scan   -> str | None
+        thread.device_path -> str
+        thread.stop()
+        thread.join(timeout)
+    """
+
+    def __init__(self, device_path: str) -> None:
+        super().__init__(daemon=True, name="qr-reader-evdev")
+        self.device_path = device_path
+        self._stop_event = threading.Event()
+        self._last_scan: str | None = None
+        self._lock = threading.Lock()
+
+    @property
+    def last_scan(self) -> str | None:
+        with self._lock:
+            return self._last_scan
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def run(self) -> None:
+        try:
+            import evdev  # type: ignore[import]
+        except ImportError:
+            return
+
+        try:
+            device = evdev.InputDevice(self.device_path)
+            device.grab()
+        except (OSError, Exception):
+            return
+
+        buffer: list[str] = []
+        try:
+            for event in device.read_loop():
+                if self._stop_event.is_set():
+                    break
+                if event.type != evdev.ecodes.EV_KEY:
+                    continue
+                key = evdev.categorize(event)
+                if key.keystate != evdev.KeyEvent.key_down:
+                    continue
+                if key.scancode == 28:  # KEY_ENTER = จบ QR
+                    if buffer:
+                        with self._lock:
+                            self._last_scan = "".join(buffer).strip()
+                        buffer.clear()
+                elif key.scancode in EVDEV_KEYMAP:
+                    buffer.append(EVDEV_KEYMAP[key.scancode])
+        except (OSError, IOError):
+            pass
+        finally:
+            try:
+                device.ungrab()
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # Module-level singleton management
 # ---------------------------------------------------------------------------
 
@@ -297,12 +415,18 @@ def get_reader() -> QrReaderThread | None:
         return _reader_thread
 
 
-def start_reader(device_path: str | None = None) -> QrReaderThread:
+def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrReaderThread":
     """
-    เริ่ม QrReaderThread global singleton
+    เริ่ม QR reader global singleton
+
+    Auto-detect mode:
+      1. ลอง evdev ก่อน (HID keyboard = Open) — ค้นหา /dev/input/event*
+      2. Fallback hidraw (HID keyboard = Close) — ค้นหา /dev/hidraw*
 
     Args:
-        device_path: ถ้า None -> auto-detect จาก find_zkteco_hidraw_devices()[0]
+        device_path: ถ้า None -> auto-detect
+                     ถ้าขึ้นต้น /dev/input/ -> ใช้ evdev
+                     อื่นๆ -> ใช้ hidraw
 
     Raises:
         RuntimeError: ถ้าไม่พบ device และ device_path=None
@@ -314,12 +438,26 @@ def start_reader(device_path: str | None = None) -> QrReaderThread:
     with _reader_lock:
         if _reader_thread is not None and _reader_thread.is_alive():
             return _reader_thread
+
         if device_path is None:
-            devices = find_zkteco_hidraw_devices()
-            if not devices:
-                raise RuntimeError("No ZKTeco QR500-BM device found")
-            device_path = devices[0]
-        thread = QrReaderThread(device_path=device_path)
+            # ลอง evdev ก่อน (HID keyboard = Open)
+            evdev_devices = find_zkteco_evdev_devices()
+            if evdev_devices:
+                thread: QrReaderThread | EvdevQrReaderThread = EvdevQrReaderThread(device_path=evdev_devices[0])
+                thread.start()
+                _reader_thread = thread
+                return thread
+            # Fallback: hidraw (HID keyboard = Close)
+            hidraw_devices = find_zkteco_hidraw_devices()
+            if not hidraw_devices:
+                raise RuntimeError("No ZKTeco QR500-BM device found (tried evdev and hidraw)")
+            device_path = hidraw_devices[0]
+
+        # explicit device_path
+        if device_path.startswith("/dev/input/"):
+            thread = EvdevQrReaderThread(device_path=device_path)
+        else:
+            thread = QrReaderThread(device_path=device_path)
         thread.start()
         _reader_thread = thread
         return thread
