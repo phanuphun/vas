@@ -464,4 +464,34 @@ def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrRea
             # ลอง evdev ก่อน (HID keyboard = Open)
             evdev_devices = find_zkteco_evdev_devices()
             if evdev_devices:
- 
+                thread: QrReaderThread | EvdevQrReaderThread = EvdevQrReaderThread(device_path=evdev_devices[0])
+                thread.start()
+                _reader_thread = thread
+                return thread
+            # Fallback: hidraw (HID keyboard = Close)
+            hidraw_devices = find_zkteco_hidraw_devices()
+            if not hidraw_devices:
+                raise RuntimeError("No ZKTeco QR500-BM device found (tried evdev and hidraw)")
+            device_path = hidraw_devices[0]
+
+        # explicit device_path
+        if device_path.startswith("/dev/input/"):
+            thread = EvdevQrReaderThread(device_path=device_path)
+        else:
+            thread = QrReaderThread(device_path=device_path)
+        thread.start()
+        _reader_thread = thread
+        return thread
+
+
+def stop_reader() -> None:
+    """หยุด global reader thread ถ้ากำลัง run"""
+    global _reader_thread
+    with _reader_lock:
+        if _reader_thread is not None:
+            thread = _reader_thread
+            thread.stop()
+            _reader_thread = None
+    # join นอก lock เพื่อไม่ให้ deadlock กับ thread ที่กำลัง run
+    if "thread" in dir():
+        thread.join(timeout=2.0)

@@ -371,4 +371,53 @@ def start_mqtt(config: MqttConfig | None = None) -> VasMqttClient:
     with _client_lock:
         if _client is not None:
             _client.disconnect()
-        c = VasMqttCl
+        c = VasMqttClient(cfg)
+        c.connect()
+        _client = c
+    return c
+
+
+def stop_mqtt() -> None:
+    global _client
+    with _client_lock:
+        if _client is not None:
+            _client.disconnect()
+            _client = None
+
+
+def publish_qr_scan(
+    scan: str,
+    device: str,
+    ts: str,
+    scan_raw: "list[int] | None" = None,
+) -> bool:
+    """Convenience wrapper — ส่งออก MQTT ถ้า client เชื่อมต่ออยู่"""
+    with _client_lock:
+        c = _client
+    if c is None:
+        return False
+    return c.publish_qr_scan(scan, device, ts, scan_raw=scan_raw)
+
+
+def get_mqtt_status() -> dict[str, object]:
+    """Return status dict ที่ใช้ใน API/template"""
+    with _client_lock:
+        c = _client
+    if c is None:
+        return {
+            "enabled": False,
+            "connected": False,
+            "broker_url": None,
+            "topic": None,
+            "last_error": None,
+            "paho_available": _paho_available(),
+        }
+    return c.status_dict()
+
+
+def _paho_available() -> bool:
+    try:
+        import paho.mqtt.client  # noqa: F401
+        return True
+    except ImportError:
+        return False

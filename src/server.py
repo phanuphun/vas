@@ -970,4 +970,6 @@ def vpn_connection_label(vpn: VpnStatus) -> str:
         if vpn.handshake_peers is None:
             return "Active, handshake unknown"
         if vpn.handshake_peers > 0:
-            return f"Connected with {vpn.handshake_peers} pee
+            return f"Connected with {vpn.handshake_peers} peer(s)"
+        return "Active, waiting for peer handshake"
+    return f"Service {vpn.service_active}"

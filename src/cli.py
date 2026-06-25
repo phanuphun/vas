@@ -853,4 +853,10 @@ def _print_qr_status(status: "QrReaderStatus") -> None:
     udev_marker = "OK" if status.udev_rule_has_signature else "WARN"
     print(f"{udev_marker:7} {'udev rule':12} {status.udev_rule_path.as_posix()}")
     dev_marker = "OK" if status.detected_devices else "WARN"
-    devices_str = ", ".join(status.det
+    devices_str = ", ".join(status.detected_devices) if status.detected_devices else "none detected"
+    print(f"{dev_marker:7} {'devices':12} {devices_str}")
+    reader_marker = "OK" if status.reader_running else "WARN"
+    active = "running on " + (status.active_device or "") if status.reader_running else "stopped"
+    print(f"{reader_marker:7} {'reader':12} {active}")
+    if status.last_scan is not None:
+        print(f"{'':7} {'last scan':12} {status.last_scan}")

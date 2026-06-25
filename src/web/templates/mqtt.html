@@ -359,4 +359,83 @@
     }).then(function (r) { return r.json(); });
   }
 
-  // ── Actions ─────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────────
+  function mqttSaveConfig() {
+    var btn = document.getElementById("btn-save");
+    btn.disabled = true;
+    post("/api/mqtt/config", readForm())
+      .then(function (d) {
+        if (d.status === "ok") {
+          setResult("✓ บันทึกแล้ว — กำลังเชื่อมต่อ...", true);
+          setTimeout(mqttRefreshStatus, 2000);
+        } else {
+          setResult("Error: " + (d.errors || []).join(", "), false);
+        }
+      })
+      .catch(function (e) { setResult("Error: " + e, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  function mqttTestPublish() {
+    var btn = document.getElementById("btn-test");
+    btn.disabled = true;
+    post("/api/mqtt/test", {})
+      .then(function (d) {
+        if (d.status === "ok") {
+          setResult("✓ Test publish สำเร็จ", true);
+        } else {
+          setResult("Error: " + (d.errors || []).join(", "), false);
+        }
+      })
+      .catch(function (e) { setResult("Error: " + e, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  function mqttDisconnect() {
+    post("/api/mqtt/disconnect", {})
+      .then(function () { mqttRefreshStatus(); });
+  }
+
+  function mqttRefreshStatus() {
+    fetch("/api/mqtt/status")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        // header badge
+        var hb = document.getElementById("header-mqtt-badge");
+        if (d.connected) {
+          hb.className = "cf-zone cf-zone-safe"; hb.textContent = "เชื่อมต่อแล้ว";
+        } else if (!d.enabled) {
+          hb.className = "cf-zone cf-zone-neutral"; hb.textContent = "ปิดใช้งาน";
+        } else {
+          hb.className = "cf-zone cf-zone-caution"; hb.textContent = "ไม่ได้เชื่อมต่อ";
+        }
+        // status dl
+        var connBadge = document.getElementById("status-conn-badge");
+        if (connBadge) {
+          connBadge.className = "cf-zone " + (d.connected ? "cf-zone-safe" : "cf-zone-mute");
+          connBadge.textContent = d.connected ? "เชื่อมต่อแล้ว" : "ไม่ได้เชื่อมต่อ";
+        }
+        var errEl = document.getElementById("status-error");
+        var errRow = document.getElementById("status-error-row");
+        if (errEl) errEl.textContent = d.last_error || "";
+        if (errRow) errRow.style.display = d.last_error ? "" : "none";
+        // broker
+        var brokerEl = document.getElementById("status-broker");
+        if (brokerEl && d.broker_url) brokerEl.innerHTML = "<code style='font-size:0.78rem;color:rgb(var(--c-muted))'>" + d.broker_url + "</code>";
+        // topic
+        var topicEl = document.getElementById("status-topic");
+        if (topicEl && d.topic) topicEl.textContent = d.topic;
+      })
+      .catch(function () {});
+  }
+
+  window.mqttSaveConfig  = mqttSaveConfig;
+  window.mqttTestPublish = mqttTestPublish;
+  window.mqttDisconnect  = mqttDisconnect;
+  window.mqttRefreshStatus = mqttRefreshStatus;
+
+  // Auto-refresh status ทุก 10 วิ
+  setInterval(mqttRefreshStatus, 10000);
+})();
+</script>
+{% endblock %}
