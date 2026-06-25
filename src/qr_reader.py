@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import glob
 import json
 import os
@@ -210,6 +211,63 @@ def decode_hid_report(report: bytes) -> str:
             continue
         chars.append(char)
     return "".join(chars)
+
+
+# ---------------------------------------------------------------------------
+# QR content decoder
+# ---------------------------------------------------------------------------
+
+def decode_qr_content(raw: str) -> object:
+    """
+    ลอง decode QR content เป็น structured data
+
+    ลำดับการลอง:
+    1. JSON string  → parse เป็น dict/list/value
+    2. URL (http/https) → {"url": ..., "params": {...query params...}}
+    3. Base64 JSON  → decode base64 แล้วลอง parse JSON
+    4. Fallback     → {"value": raw}
+
+    Returns:
+        dict หรือ list หรือ primitive ที่ parse ได้
+        ถ้า parse ไม่ได้เลย → {"value": raw}
+    """
+    stripped = raw.strip()
+
+    # 1. Try JSON
+    try:
+        parsed = json.loads(stripped)
+        return parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 2. Try URL with query params
+    try:
+        from urllib.parse import urlparse, parse_qs
+        parsed_url = urlparse(stripped)
+        if parsed_url.scheme in ("http", "https") and parsed_url.netloc:
+            params: dict[str, object] = {}
+            for k, v in parse_qs(parsed_url.query).items():
+                params[k] = v[0] if len(v) == 1 else v
+            result: dict[str, object] = {"url": stripped}
+            if params:
+                result["params"] = params
+            return result
+    except Exception:
+        pass
+
+    # 3. Try Base64 → JSON
+    try:
+        # เติม padding ถ้าขาด
+        padded = stripped + "=" * (-len(stripped) % 4)
+        decoded_bytes = base64.b64decode(padded, validate=True)
+        decoded_str = decoded_bytes.decode("utf-8")
+        parsed_b64 = json.loads(decoded_str)
+        return parsed_b64
+    except Exception:
+        pass
+
+    # 4. Fallback
+    return {"value": raw}
 
 
 # ---------------------------------------------------------------------------

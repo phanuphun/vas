@@ -221,8 +221,6 @@ def build_parser() -> argparse.ArgumentParser:
     mqtt_cfg.add_argument("--no-retain",     action="store_true", help="Disable retain flag")
     mqtt_cfg.add_argument("--tls-insecure",  action="store_true", default=None, help="Skip TLS certificate verify")
     mqtt_cfg.add_argument("--no-tls-insecure", action="store_true", help="Enable TLS certificate verify")
-    mqtt_cfg.add_argument("--payload-mode", choices=["decoded", "raw"],
-                          help="decoded=ข้อมูลหลัง decode (default), raw=raw HID keycodes ก่อน decode")
     mqtt_cfg.add_argument("--enable",        action="store_true", default=None, help="เปิดใช้งาน MQTT publish")
     mqtt_cfg.add_argument("--disable",       action="store_true", help="ปิดใช้งาน MQTT publish")
 
