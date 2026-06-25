@@ -210,12 +210,21 @@ class VasMqttClient:
         if cfg.username:
             client.username_pw_set(cfg.username, cfg.password or None)
 
+        # WebSocket path — EMQX ใช้ /mqtt (paho default คือ /)
+        if use_websocket:
+            client.ws_set_options(path="/mqtt")
+
         # TLS (mqtts:// หรือ wss://)
         if use_tls:
             import ssl as _ssl
-            client.tls_set(tls_version=_ssl.PROTOCOL_TLS_CLIENT)
             if cfg.tls_insecure:
-                client.tls_insecure_set(True)
+                # self-signed cert — ข้าม verify
+                ctx = _ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl.CERT_NONE
+                client.tls_set_context(ctx)
+            else:
+                client.tls_set(tls_version=_ssl.PROTOCOL_TLS_CLIENT)
 
         # Callbacks
         def on_connect(c, userdata, flags, rc):
