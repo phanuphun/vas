@@ -774,6 +774,8 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             print(f"Config saved → {main_config_path().as_posix()}")
             for k, v in cfg.to_dict().items():
                 print(f"  {k:14}: {v}")
+            # แจ้ง server process ให้ reload config ทันที (ถ้า server กำลัง run อยู่)
+            _notify_server_mqtt_reload(cfg)
             return 0
 
         if args.mqtt_command == "test":
@@ -815,6 +817,28 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _notify_server_mqtt_reload(cfg: "MqttConfig") -> None:  # type: ignore[name-defined]
+    """
+    POST config ไปยัง server process (localhost:8888) เพื่อ reload MQTT ทันที
+    ถ้า server ไม่ได้ run จะ silently skip และแสดง hint
+    """
+    import json as _json
+    import urllib.request as _req
+    import urllib.error as _uerr
+    payload = _json.dumps(cfg.to_dict()).encode()
+    try:
+        request = _req.Request(
+            "http://localhost:8888/api/mqtt/config",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _req.urlopen(request, timeout=3):
+            print("Server MQTT client reloaded ✓")
+    except (_uerr.URLError, OSError):
+        print("Note: server ไม่ตอบสนอง — MQTT จะ start เมื่อ server restart ครั้งถัดไป")
 
 
 def _print_qr_status(status: "QrReaderStatus") -> None:
