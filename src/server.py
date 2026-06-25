@@ -539,27 +539,57 @@ def create_app() -> Flask:
         from datetime import datetime, timezone
 
         def generate():
-            from qr_reader import get_reader
+            from qr_reader import get_reader, start_reader
 
-            reader = get_reader()
+            def _try_start():
+                """Auto-start reader ถ้ายังไม่ทำงาน — ไม่ raise"""
+                r = get_reader()
+                if r is not None and r.is_alive():
+                    return r
+                try:
+                    return start_reader()
+                except Exception:
+                    return None
+
+            # Auto-start ทันทีที่ client เชื่อมต่อ
+            reader = _try_start()
             running = reader is not None and reader.is_alive()
             device = reader.device_path if running else None
             yield f"event: status\ndata: {_json_dumps({'running': running, 'device': device})}\n\n"
 
             last_seen: str | None = None
             last_heartbeat = time.monotonic()
+            last_restart_try = 0.0  # ลอง restart ทันทีรอบแรกถ้า reader ตาย
             HEARTBEAT_INTERVAL = 5.0
             POLL_INTERVAL = 0.2
+            RESTART_INTERVAL = 8.0  # retry ทุก 8 วิถ้า reader ไม่ทำงาน
 
             try:
                 while True:
                     time.sleep(POLL_INTERVAL)
                     now = time.monotonic()
+
                     if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                         yield "event: heartbeat\ndata: {}\n\n"
                         last_heartbeat = now
 
                     reader = get_reader()
+                    currently_alive = reader is not None and reader.is_alive()
+
+                    # ลอง auto-restart ถ้า reader ตายและถึงเวลา retry
+                    if not currently_alive and now - last_restart_try >= RESTART_INTERVAL:
+                        last_restart_try = now
+                        restarted = _try_start()
+                        if restarted is not None and restarted.is_alive():
+                            reader = restarted
+                            currently_alive = True
+
+                    # ส่ง status event เมื่อ state เปลี่ยน
+                    if currently_alive != running:
+                        running = currently_alive
+                        d = reader.device_path if running and reader else None
+                        yield f"event: status\ndata: {_json_dumps({'running': running, 'device': d})}\n\n"
+
                     if reader is not None and reader.is_alive():
                         scan = reader.last_scan
                         if scan is not None and scan != last_seen:
@@ -567,7 +597,7 @@ def create_app() -> Flask:
                             ts = datetime.now(timezone.utc).isoformat()
                             yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts})}\n\n"
             except GeneratorExit:
-                # client disconnected — generator is being closed
+                # client disconnected
                 return
 
         return Response(
