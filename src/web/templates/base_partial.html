@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>{% block page_title %}VAS{% endblock %}</title>
+  <meta name="spa-header-title" content="{% block header_title %}VAS{% endblock %}">
+</head>
+<body>
+<div id="spa-content">{% block content %}{% endblock %}</div>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,507 @@
+{% extends base_template %}
+{% block page_title %}Settings — VAS{% endblock %}
+{% block header_title %}Settings{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Tab panels ─────────────────────────────────────────────── */
+  .tab-panel { display: none; }
+  .tab-panel.is-active {
+    display: flex;
+    flex-direction: column;
+    animation: tabFade 0.15s ease forwards;
+  }
+  @keyframes tabFade {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Package list rows ───────────────────────────────────────── */
+  .pkg-row { transition: background 0.1s; }
+  .pkg-row:hover { background: rgb(var(--c-surface)); }
+  .pkg-row:last-child { border-bottom: none !important; }
+
+  /* ── Terminal ─────────────────────────────────────────────────── */
+  .terminal-box {
+    font-family: 'Bai Jamjuree', monospace; font-size: 0.72rem; line-height: 1.65;
+    background: #0f1117; color: #e2e8f0; border-radius: 0.5rem;
+    padding: 0.875rem 1rem; overflow-y: auto; max-height: 320px;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .terminal-box::-webkit-scrollbar { width: 4px; }
+  .terminal-box::-webkit-scrollbar-track { background: transparent; }
+  .terminal-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+</style>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── 1. Page Header ─────────────────────────────────────────── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · Settings</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">Settings</h1>
+    <p class="text-[0.82rem] text-muted mt-1">จัดการ software, การตั้งค่าระบบ และความปลอดภัย</p>
+  </div>
+
+  <!-- ── 2. Section Menu ────────────────────────────────────────── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      {% set sub_nav = [
+        ("software", "lucide:package",      "Software",  false),
+        ("hardware", "lucide:cpu",          "Hardware",  false),
+        ("general",  "lucide:sliders",      "General",   true),
+        ("network",  "lucide:network",      "Network",   true),
+        ("security", "lucide:shield-check", "Security",  true),
+      ] %}
+      {% for tab_id, tab_icon, tab_label, is_soon in sub_nav %}
+      <button type="button"
+              data-tab="{{ tab_id }}"
+              onclick="setTab('{{ tab_id }}')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors
+                     {{ 'bg-accent/8 text-accent font-semibold' if tab_id == 'software' else 'text-muted hover:bg-surface hover:text-ink' }}">
+        <iconify-icon icon="{{ tab_icon }}" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        {{ tab_label }}
+        {% if is_soon %}
+        <span class="text-[0.58rem] text-faint font-normal ml-0.5">soon</span>
+        {% endif %}
+      </button>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <!-- ── 3. Content Section ─────────────────────────────────────── -->
+  <div>
+
+    <!-- Software tab -->
+    <div id="tab-software" class="tab-panel is-active flex flex-col gap-4">
+
+      <!-- Search bar -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-2.5">
+        <iconify-icon icon="lucide:search" width="14" height="14" class="text-faint flex-shrink-0"></iconify-icon>
+        <input id="pkg-search"
+               type="text"
+               placeholder="ค้นหา tool..."
+               oninput="filterPackages(this.value)"
+               class="flex-1 bg-transparent text-[0.84rem] text-ink placeholder:text-faint outline-none min-w-0">
+        <button id="pkg-search-clear" onclick="clearSearch()" style="display:none;"
+                class="text-faint hover:text-ink transition-colors flex-shrink-0">
+          <iconify-icon icon="lucide:x" width="13" height="13"></iconify-icon>
+        </button>
+      </div>
+
+      <div id="pkg-loading" class="bg-card border border-line/10 rounded-xl px-4 py-10 flex items-center justify-center gap-2 text-faint text-[0.84rem]">
+        <span class="spin"></span> กำลังตรวจสอบสถานะ...
+      </div>
+
+      <!-- Package list — populated by JS, one card per category -->
+      <div id="pkg-list" class="flex flex-col gap-4" style="display:none;"></div>
+
+      <!-- No results -->
+      <div id="pkg-no-results" class="bg-card border border-line/10 rounded-xl px-4 py-10 flex flex-col items-center gap-2 text-center" style="display:none;">
+        <iconify-icon icon="lucide:search-x" width="24" height="24" class="text-faint"></iconify-icon>
+        <div class="text-[0.84rem] text-muted">ไม่พบ tool ที่ค้นหา</div>
+      </div>
+
+    </div>
+
+    <!-- Hardware tab -->
+    <div id="tab-hardware" class="tab-panel flex flex-col gap-4">
+      <div id="hw-loading" class="bg-card border border-line/10 rounded-xl px-4 py-10 flex items-center justify-center gap-2 text-faint text-[0.84rem]">
+        <span class="spin"></span> กำลังตรวจสอบสถานะ...
+      </div>
+      <div id="hw-list" class="flex flex-col gap-4" style="display:none;"></div>
+    </div>
+
+    <!-- Placeholder tabs -->
+    {% for tab_id, tab_label in [("general","General"),("network","Network"),("security","Security")] %}
+    <div id="tab-{{ tab_id }}" class="tab-panel flex flex-col gap-4">
+      <div class="bg-card border border-line/10 rounded-xl px-6 py-16 flex flex-col items-center gap-3 text-center">
+        <iconify-icon icon="lucide:construction" width="28" height="28" class="text-faint"></iconify-icon>
+        <div class="text-[0.88rem] font-semibold text-muted">{{ tab_label }} — Coming soon</div>
+        <div class="text-[0.75rem] text-faint">ส่วนนี้กำลังพัฒนา</div>
+      </div>
+    </div>
+    {% endfor %}
+
+  </div>
+</div>
+
+<!-- ── Install modal ───────────────────────────────────────────── -->
+<div class="modal-backdrop" id="install-modal-backdrop" onclick="closeInstallModal()"></div>
+<div class="modal-dialog" id="install-modal" style="max-width:min(580px,calc(100vw - 2rem));">
+  <div class="flex items-start justify-between gap-3 mb-3">
+    <div class="flex items-center gap-3 min-w-0">
+      <img id="modal-logo" src="" alt="" class="w-8 h-8 object-contain rounded flex-shrink-0">
+      <div class="min-w-0">
+        <div class="modal-dialog-title" id="modal-title">Installing…</div>
+        <div class="text-[0.72rem] text-faint" id="modal-status-text">กำลังเริ่มต้น...</div>
+      </div>
+    </div>
+    <button onclick="closeInstallModal()" class="text-faint hover:text-ink p-1 flex-shrink-0">
+      <iconify-icon icon="lucide:x" width="14" height="14"></iconify-icon>
+    </button>
+  </div>
+  <div class="terminal-box" id="modal-terminal"></div>
+  <div class="flex justify-end gap-2 mt-3">
+    <button onclick="closeInstallModal()"
+            class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+      ปิด
+    </button>
+  </div>
+</div>
+
+<!-- ── Dependency alert modal ──────────────────────────────────── -->
+<div class="modal-backdrop" id="dep-modal-backdrop" onclick="closeDepModal()"></div>
+<div class="modal-dialog" id="dep-modal">
+  <div class="modal-dialog-head">
+    <div class="modal-dialog-body">
+      <div class="modal-dialog-title" id="dep-modal-title">ต้องติดตั้งก่อน</div>
+      <div class="modal-dialog-message" id="dep-modal-msg">—</div>
+    </div>
+  </div>
+  <div class="modal-dialog-actions">
+    <button onclick="closeDepModal()"
+            class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+      ยกเลิก
+    </button>
+    <button id="dep-go-btn"
+            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+      <iconify-icon icon="lucide:download" width="13" height="13"></iconify-icon>
+      ติดตั้งเดี๋ยวนี้
+    </button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var FALLBACK_LOGO = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%23f1f5f9'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='%2394a3b8'%3E%F0%9F%93%A6%3C/text%3E%3C/svg%3E";
+
+  var allPackages = [];
+
+  // ── Tab switch ────────────────────────────────────────────────
+  window.setTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) {
+      el.classList.remove("is-active");
+    });
+    var panel = document.getElementById("tab-" + id);
+    if (panel) panel.classList.add("is-active");
+
+    document.querySelectorAll(".tab-btn").forEach(function (el) {
+      var active = el.dataset.tab === id;
+      el.className = el.className
+        .replace(/\bbg-accent\/8\b/g, "").replace(/\btext-accent\b/g, "")
+        .replace(/\bfont-semibold\b/g, "").replace(/\btext-muted\b/g, "")
+        .replace(/\bhover:bg-surface\b/g, "").replace(/\bhover:text-ink\b/g, "")
+        .replace(/\s{2,}/g, " ").trim();
+      el.className += active
+        ? " bg-accent/8 text-accent font-semibold"
+        : " text-muted hover:bg-surface hover:text-ink";
+    });
+  };
+
+  // ── Render packages — list style (ref: Figma plugin marketplace) ──
+  function renderPackages(pkgs, cats) {
+    allPackages = pkgs;
+    var list = document.getElementById("pkg-list");
+
+    var grouped = {};
+    pkgs.forEach(function (p) { (grouped[p.category] = grouped[p.category] || []).push(p); });
+
+    var catOrder = ["core", "runtime", "network", "remote", "display"];
+    var html = "";
+
+    catOrder.forEach(function (cat) {
+      if (!grouped[cat]) return;
+      var catLabel = (cats[cat] || cat).toUpperCase();
+      html += '<div class="bg-card border border-line/10 rounded-xl overflow-hidden">';
+      // Category header
+      html += '<div class="px-4 py-3 border-b border-line/8">';
+      html += '<h3 class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-faint">' + catLabel + '</h3>';
+      html += '</div>';
+      // Rows
+      grouped[cat].forEach(function (p) { html += rowHtml(p); });
+      html += '</div>';
+    });
+
+    list.innerHTML = html;
+    document.getElementById("pkg-loading").style.display = "none";
+    list.style.display = "";
+  }
+
+  function renderHardware(pkgs, cats) {
+    var hwPkgs = pkgs.filter(function (p) { return p.category === "hardware"; });
+    var list = document.getElementById("hw-list");
+
+    if (!hwPkgs.length) {
+      list.innerHTML = '<div class="bg-card border border-line/10 rounded-xl px-4 py-10 flex flex-col items-center gap-2 text-center text-faint text-[0.84rem]">ไม่มีรายการ</div>';
+    } else {
+      var catLabel = (cats["hardware"] || "Hardware").toUpperCase();
+      var html = '<div class="bg-card border border-line/10 rounded-xl overflow-hidden">';
+      html += '<div class="px-4 py-3 border-b border-line/8">';
+      html += '<h3 class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-faint">' + catLabel + '</h3>';
+      html += '</div>';
+      hwPkgs.forEach(function (p) { html += hwRowHtml(p); });
+      html += '</div>';
+      list.innerHTML = html;
+    }
+    document.getElementById("hw-loading").style.display = "none";
+    list.style.display = "";
+  }
+
+  function hwRowHtml(p) {
+    var logoSrc = p.logo ? "/public/images/logo/" + encodeURIComponent(p.logo) : FALLBACK_LOGO;
+    var applied = p.installed;
+
+    var statusBadge = applied
+      ? '<span class="zone zone-safe">ตั้งค่าแล้ว</span>'
+      : '<span class="zone zone-neutral">ยังไม่ได้ตั้งค่า</span>';
+
+    var btn = applied
+      ? '<button disabled class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
+          '<iconify-icon icon="lucide:check" width="12" height="12"></iconify-icon>Applied</button>'
+      : '<button onclick="installPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+          'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
+          '<iconify-icon icon="lucide:settings-2" width="12" height="12"></iconify-icon>ตั้งค่า</button>';
+
+    return '<div class="pkg-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" id="card-' + p.id + '">' +
+      '<img src="' + logoSrc + '" alt="' + esc(p.name) + '" ' +
+        'class="w-10 h-10 object-contain rounded-lg flex-shrink-0 border border-line/8 bg-white p-0.5" ' +
+        'onerror="this.src=\'' + FALLBACK_LOGO + '\'">' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="flex items-center gap-2 flex-wrap">' +
+          '<span class="text-[0.88rem] font-semibold text-ink font-display">' + esc(p.name) + '</span>' +
+          statusBadge +
+        '</div>' +
+        '<p class="text-[0.75rem] text-muted mt-0.5 leading-snug">' + esc(p.description) + '</p>' +
+      '</div>' +
+      '<div class="flex-shrink-0">' + btn + '</div>' +
+    '</div>';
+  }
+
+  function rowHtml(p) {
+    var logoSrc = p.logo ? "/public/images/logo/" + encodeURIComponent(p.logo) : FALLBACK_LOGO;
+    var installed = p.installed;
+
+    var statusBadge = installed
+      ? '<span class="zone zone-safe">ติดตั้งแล้ว</span>'
+      : '<span class="zone zone-neutral">ยังไม่ติดตั้ง</span>';
+
+    var versionLine = p.version
+      ? '<div class="text-[0.67rem] text-faint font-display mt-0.5">' + esc(p.version) + '</div>'
+      : '';
+
+    var depLine = p.depends.length > 0
+      ? '<div class="flex items-center gap-1 mt-1">' +
+          '<iconify-icon icon="lucide:git-merge" width="10" height="10" class="text-faint flex-shrink-0"></iconify-icon>' +
+          '<span class="text-[0.63rem] text-faint">ต้องการ: ' +
+          p.depends.map(function (d) {
+            var dep = allPackages.find(function (x) { return x.id === d; });
+            return dep
+              ? '<span class="' + (dep.installed ? "text-safe" : "text-caution") + '">' + esc(dep.name) + '</span>'
+              : esc(d);
+          }).join(', ') + '</span></div>'
+      : '';
+
+    var childLine = (p.children && p.children.length > 0)
+      ? '<div class="flex items-center gap-1 mt-0.5">' +
+          '<iconify-icon icon="lucide:layers" width="10" height="10" class="text-faint flex-shrink-0"></iconify-icon>' +
+          '<span class="text-[0.63rem] text-faint">เปิดใช้: ' +
+          p.children.map(function (c) {
+            var ch = allPackages.find(function (x) { return x.id === c; });
+            return ch ? esc(ch.name) : esc(c);
+          }).join(', ') + ' หลังติดตั้ง</span></div>'
+      : '';
+
+    var btn = installed
+      ? '<button disabled class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
+          '<iconify-icon icon="lucide:check" width="12" height="12"></iconify-icon>Installed</button>'
+      : '<button onclick="installPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+          'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
+          '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>Install</button>';
+
+    return '<div class="pkg-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" id="card-' + p.id + '">' +
+      '<img src="' + logoSrc + '" alt="' + esc(p.name) + '" ' +
+        'class="w-10 h-10 object-contain rounded-lg flex-shrink-0 border border-line/8 bg-white p-0.5" ' +
+        'onerror="this.src=\'' + FALLBACK_LOGO + '\'">' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="flex items-center gap-2 flex-wrap">' +
+          '<span class="text-[0.88rem] font-semibold text-ink">' + esc(p.name) + '</span>' +
+          statusBadge +
+        '</div>' +
+        versionLine +
+        '<p class="text-[0.75rem] text-muted mt-0.5 leading-snug">' + esc(p.description) + '</p>' +
+        depLine + childLine +
+      '</div>' +
+      '<div class="flex-shrink-0">' + btn + '</div>' +
+    '</div>';
+  }
+
+  // ── Install ───────────────────────────────────────────────────
+  window.installPkg = function (pkgId) {
+    var pkg = allPackages.find(function (p) { return p.id === pkgId; });
+    if (!pkg) return;
+
+    if (pkg.depends.length > 0 && !pkg.deps_ok) {
+      var missing = pkg.depends.filter(function (d) {
+        var dep = allPackages.find(function (x) { return x.id === d; });
+        return dep && !dep.installed;
+      });
+      if (missing.length > 0) {
+        var names = missing.map(function (d) {
+          var dep = allPackages.find(function (x) { return x.id === d; });
+          return dep ? dep.name : d;
+        });
+        openDepModal(pkg, missing[0], names);
+        return;
+      }
+    }
+
+    openInstallModal(pkg);
+    fetch("/api/settings/install/" + encodeURIComponent(pkgId), { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status !== "ok") {
+          appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
+          setModalStatus("เกิดข้อผิดพลาด", "danger");
+          return;
+        }
+        streamInstall(pkgId);
+      })
+      .catch(function (e) { appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m"); });
+  };
+
+  function streamInstall(pkgId) {
+    var evtSrc = new EventSource("/api/settings/install/" + encodeURIComponent(pkgId) + "/stream");
+    evtSrc.addEventListener("line", function (e) {
+      appendTerminal(ansiToHtml(JSON.parse(e.data).text));
+    });
+    evtSrc.addEventListener("done", function () {
+      evtSrc.close();
+      setModalStatus("เสร็จแล้ว", "ok");
+      setTimeout(loadPackages, 800);
+    });
+    evtSrc.addEventListener("error", function (e) {
+      try { appendTerminal("\x1b[31mError: " + JSON.parse(e.data).msg + "\x1b[0m"); } catch (_) {}
+      evtSrc.close();
+      setModalStatus("Error", "danger");
+    });
+    evtSrc.onerror = function () { evtSrc.close(); };
+  }
+
+  // ── Install modal ─────────────────────────────────────────────
+  function openInstallModal(pkg) {
+    document.getElementById("modal-logo").src = pkg.logo
+      ? "/public/images/logo/" + encodeURIComponent(pkg.logo)
+      : FALLBACK_LOGO;
+    document.getElementById("modal-title").textContent = "กำลังติดตั้ง " + pkg.name;
+    setModalStatus("กำลังเริ่มต้น...", "pending");
+    document.getElementById("modal-terminal").innerHTML = "";
+    document.getElementById("install-modal-backdrop").classList.add("is-visible");
+    document.getElementById("install-modal").classList.add("is-visible");
+    document.body.classList.add("modal-open");
+  }
+  window.closeInstallModal = function () {
+    document.getElementById("install-modal-backdrop").classList.remove("is-visible");
+    document.getElementById("install-modal").classList.remove("is-visible");
+    document.body.classList.remove("modal-open");
+  };
+  function setModalStatus(text, type) {
+    var el = document.getElementById("modal-status-text");
+    el.textContent = text;
+    el.className = "text-[0.72rem] " + (type === "ok" ? "text-safe" : type === "danger" ? "text-danger" : "text-faint");
+  }
+  function appendTerminal(html) {
+    var box = document.getElementById("modal-terminal");
+    var div = document.createElement("div");
+    div.innerHTML = html;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // ── Dep modal ─────────────────────────────────────────────────
+  function openDepModal(pkg, depId, depNames) {
+    document.getElementById("dep-modal-title").textContent = "ต้องติดตั้ง " + depNames.join(", ") + " ก่อน";
+    document.getElementById("dep-modal-msg").textContent =
+      pkg.name + " ต้องการ " + depNames.join(", ") + " — ต้องการติดตั้งเดี๋ยวนี้เลยไหม?";
+    document.getElementById("dep-go-btn").onclick = function () { closeDepModal(); installPkg(depId); };
+    document.getElementById("dep-modal-backdrop").classList.add("is-visible");
+    document.getElementById("dep-modal").classList.add("is-visible");
+    document.body.classList.add("modal-open");
+  }
+  window.closeDepModal = function () {
+    document.getElementById("dep-modal-backdrop").classList.remove("is-visible");
+    document.getElementById("dep-modal").classList.remove("is-visible");
+    document.body.classList.remove("modal-open");
+  };
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function ansiToHtml(t) {
+    return t
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/\x1b\[32m(.*?)\x1b\[0m/g,'<span style="color:#34d399">$1</span>')
+      .replace(/\x1b\[31m(.*?)\x1b\[0m/g,'<span style="color:#f87171">$1</span>')
+      .replace(/\x1b\[36m(.*?)\x1b\[0m/g,'<span style="color:#67e8f9">$1</span>')
+      .replace(/\x1b\[\d+m/g,"");
+  }
+  function esc(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  // ── Search / filter ───────────────────────────────────────────
+  window.filterPackages = function (query) {
+    var q = query.trim().toLowerCase();
+    var clearBtn = document.getElementById("pkg-search-clear");
+    clearBtn.style.display = q ? "" : "none";
+
+    var rows = document.querySelectorAll(".pkg-row");
+    var groups = document.querySelectorAll("#pkg-list > div");  // category cards
+    var anyVisible = false;
+
+    rows.forEach(function (row) {
+      var name = (row.querySelector(".text-ink") || {}).textContent || "";
+      var desc = (row.querySelector(".text-muted") || {}).textContent || "";
+      var match = !q || name.toLowerCase().includes(q) || desc.toLowerCase().includes(q);
+      row.style.display = match ? "" : "none";
+      if (match) anyVisible = true;
+    });
+
+    // Hide category cards that have zero visible rows
+    groups.forEach(function (card) {
+      var visibleRows = Array.from(card.querySelectorAll(".pkg-row"))
+        .filter(function (r) { return r.style.display !== "none"; });
+      card.style.display = visibleRows.length ? "" : "none";
+    });
+
+    document.getElementById("pkg-no-results").style.display = (!anyVisible && q) ? "" : "none";
+  };
+
+  window.clearSearch = function () {
+    var input = document.getElementById("pkg-search");
+    input.value = "";
+    filterPackages("");
+    input.focus();
+  };
+
+  // ── Load ────────────────────────────────────────────
+  function loadPackages() {
+    document.getElementById("pkg-loading").style.display = "";
+    document.getElementById("pkg-list").style.display = "none";
+    fetch("/api/settings/packages")
+      .then(function (r) { return r.json(); })
+      .then(function (d) { renderPackages(d.packages, d.categories); renderHardware(d.packages, d.categories); })
+      .catch(function (e) {
+        document.getElementById("pkg-loading").textContent = "Error: " + e;
+      });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    setTab("software");
+    loadPackages();
+  });
+})();
+</script>
+{% endblock %}

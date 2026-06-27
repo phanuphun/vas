@@ -1,42 +1,45 @@
-{% extends "base.html" %}
+{% extends base_template %}
 {% block header_title %}บันทึกระบบ{% endblock %}
 
 {% block header_actions %}
-<button class="cf-btn" id="refreshSystemLogs" type="button">Refresh</button>
-<button class="cf-btn cf-btn-primary" id="collectSystemLog" type="button">Collect Snapshot</button>
+<button class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors" id="refreshSystemLogs" type="button">Refresh</button>
+<button class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors" id="collectSystemLog" type="button">Collect Snapshot</button>
 {% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <p class="cf-eyebrow">VAS · บันทึกระบบ</p>
-  <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">System Logs</h1>
-  <p style="color:rgb(var(--c-muted));font-size:0.82rem;margin-top:0.25rem">{{ system_snapshot_dir }}</p>
+<div class="mb-1">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · บันทึกระบบ</p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1">System Logs</h1>
+  <p class="text-[0.82rem] text-muted mt-0.5">{{ system_snapshot_dir }}</p>
 </div>
 
-<div class="cf-card" style="overflow:hidden;">
-  <div class="log-split">
-    <div class="log-list-pane">
+<div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+  <div class="flex flex-col lg:flex-row" style="min-height:520px;">
+
+    <!-- Snapshot list -->
+    <div class="w-full lg:w-64 lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-line/10 overflow-y-auto">
       <div id="systemSnapshotList">
         {% for snapshot in system_snapshots %}
-        <button class="log-entry-button" data-system-snapshot="{{ snapshot.id }}" type="button"
-          style="width:100%;display:flex;flex-direction:column;gap:2px;padding:0.65rem 1rem;background:none;border:none;border-bottom:1px solid rgb(var(--c-line)/0.06);cursor:pointer;text-align:left;font-family:inherit;">
-          <span>
-            <strong style="font-size:0.78rem;font-weight:600;color:rgb(var(--c-ink));display:block;">{{ snapshot.id }}</strong>
-            <small style="font-size:0.68rem;color:rgb(var(--c-faint));">{{ snapshot.path }} | {{ snapshot.size }} bytes</small>
-          </span>
+        <button class="w-full flex flex-col gap-0.5 px-4 py-3 text-left hover:bg-surface transition-colors border-b border-line/7 last:border-b-0 focus:outline-none focus:bg-surface"
+                data-system-snapshot="{{ snapshot.id }}" type="button">
+          <strong class="text-[0.78rem] font-semibold text-ink block">{{ snapshot.id }}</strong>
+          <small class="text-[0.68rem] text-faint">{{ snapshot.path }} | {{ snapshot.size }} bytes</small>
         </button>
         {% else %}
-        <p class="muted" style="padding:1rem;font-size:0.82rem;">No system log snapshots collected yet.</p>
+        <p class="text-muted text-[0.82rem] px-4 py-4">No system log snapshots collected yet.</p>
         {% endfor %}
       </div>
     </div>
-    <div class="log-viewer-pane">
-      <div class="log-viewer-header">
-        <strong class="log-viewer-title" id="systemLogTitle">Select a snapshot</strong>
-        <span class="log-viewer-path" id="systemLogPath"></span>
+
+    <!-- Log viewer -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <div class="flex items-baseline gap-3 px-4 py-2.5 border-b border-line/10 flex-shrink-0">
+        <strong class="text-[0.82rem] font-semibold text-ink" id="systemLogTitle">Select a snapshot</strong>
+        <span class="text-[0.7rem] text-faint truncate" id="systemLogPath"></span>
       </div>
-      <pre class="log-content config-file-content" id="systemLogContent">System log content will appear here.</pre>
+      <pre class="flex-1 overflow-auto px-4 py-3 font-mono text-[0.75rem] leading-relaxed text-ink whitespace-pre bg-surface" id="systemLogContent">System log content will appear here.</pre>
     </div>
+
   </div>
 </div>
 
@@ -48,16 +51,14 @@ const systemContent = document.getElementById("systemLogContent");
 
 function renderSystemSnapshots(snapshots) {
   if (!snapshots.length) {
-    systemList.innerHTML = '<p class="muted">No system log snapshots collected yet.</p>';
+    systemList.innerHTML = '<p class="text-muted text-[0.82rem] px-4 py-4">No system log snapshots collected yet.</p>';
     return;
   }
   systemList.innerHTML = snapshots.map((snapshot) => `
-    <button class="log-entry log-entry-button" data-system-snapshot="${escapeHtml(snapshot.id || "")}" type="button"
-      style="width:100%;display:flex;flex-direction:column;gap:2px;padding:0.65rem 1rem;background:none;border:none;border-bottom:1px solid rgb(var(--c-line)/0.06);cursor:pointer;text-align:left;font-family:inherit;">
-      <span>
-        <strong style="font-size:0.78rem;font-weight:600;color:rgb(var(--c-ink));display:block;">${escapeHtml(snapshot.id || "")}</strong>
-        <small style="font-size:0.68rem;color:rgb(var(--c-faint));">${escapeHtml(snapshot.path || "")} | ${Number(snapshot.size || 0)} bytes</small>
-      </span>
+    <button class="w-full flex flex-col gap-0.5 px-4 py-3 text-left hover:bg-surface transition-colors border-b border-line/7 last:border-b-0 focus:outline-none focus:bg-surface"
+            data-system-snapshot="${escapeHtml(snapshot.id || "")}" type="button">
+      <strong class="text-[0.78rem] font-semibold text-ink block">${escapeHtml(snapshot.id || "")}</strong>
+      <small class="text-[0.68rem] text-faint">${escapeHtml(snapshot.path || "")} | ${Number(snapshot.size || 0)} bytes</small>
     </button>
   `).join("");
 }
@@ -72,10 +73,7 @@ async function collectSystemLog() {
   systemContent.textContent = "Collecting system logs...";
   const response = await fetch("{{ url_for('logs_system_snapshot_api') }}", { method: "POST" });
   const data = await response.json();
-  if (!response.ok) {
-    systemContent.textContent = (data.errors || ["Failed to collect system logs."]).join("\n");
-    return;
-  }
+  if (!response.ok) { systemContent.textContent = (data.errors || ["Failed to collect system logs."]).join("\n"); return; }
   await refreshSystemLogs();
   await showSystemSnapshot(data.snapshot.id);
 }
@@ -84,8 +82,7 @@ async function showSystemSnapshot(snapshotId) {
   const response = await fetch(`/api/logs/system/${encodeURIComponent(snapshotId)}`);
   const data = await response.json();
   if (!response.ok) {
-    systemTitle.textContent = "Read error";
-    systemPath.textContent = "";
+    systemTitle.textContent = "Read error"; systemPath.textContent = "";
     systemContent.textContent = (data.errors || ["Failed to read system snapshot."]).join("\n");
     return;
   }
@@ -95,21 +92,14 @@ async function showSystemSnapshot(snapshotId) {
 }
 
 function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 }
 
 document.getElementById("refreshSystemLogs").addEventListener("click", refreshSystemLogs);
 document.getElementById("collectSystemLog").addEventListener("click", collectSystemLog);
 systemList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-system-snapshot]");
-  if (button) {
-    showSystemSnapshot(button.dataset.systemSnapshot);
-  }
+  if (button) showSystemSnapshot(button.dataset.systemSnapshot);
 });
 </script>
 {% endblock %}

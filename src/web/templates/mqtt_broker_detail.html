@@ -1,0 +1,533 @@
+{% extends base_template %}
+{% block page_title %}{{ broker.name }} — MQTT — VAS{% endblock %}
+{% block header_title %}{{ broker.name }}{% endblock %}
+
+{% block header_actions %}
+<div class="flex items-center gap-2">
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
+    {% if conn_status.connected %}bg-safe/8 border-safe/22 text-[#0f766e]
+    {% elif not broker.enabled %}bg-surface border-line/12 text-muted
+    {% else %}bg-surface border-line/12 text-muted{% endif %}" id="header-badge">
+    {% if conn_status.connected %}เชื่อมต่อแล้ว
+    {% elif not broker.enabled %}ปิดใช้งาน
+    {% else %}ไม่ได้เชื่อมต่อ{% endif %}
+  </span>
+  <a href="/mqtt/broker/{{ broker.id }}/edit"
+     class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </svg>
+    แก้ไข
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  .toggle-switch { position:relative; display:inline-flex; align-items:center; gap:0.5rem; cursor:pointer; }
+  .toggle-switch input { position:absolute; opacity:0; width:0; height:0; }
+  .toggle-track { width:36px; height:20px; border-radius:10px; background:rgb(var(--c-faint)/0.4); transition:background 0.2s; border:1px solid rgb(var(--c-line)/0.14); position:relative; }
+  .toggle-switch input:checked + .toggle-track { background:rgb(var(--c-safe)); border-color:rgb(var(--c-safe)); }
+  .toggle-thumb { position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.15); transition:left 0.2s; }
+  .toggle-switch input:checked + .toggle-track .toggle-thumb { left:18px; }
+  .tab-panel { display: none; }
+  .tab-panel.is-active { display: flex; flex-direction: column; }
+</style>
+
+<!-- Page header -->
+<div class="border-b border-line/10 pb-4">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">
+    VAS · MQTT · <a href="/mqtt" class="hover:text-muted transition-colors">Brokers</a>
+  </p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">{{ broker.name }}</h1>
+  <code class="text-[0.78rem] text-faint font-display mt-0.5">{{ broker.broker_url }}</code>
+</div>
+
+<!-- Section menu -->
+<nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+  <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+    <button data-tab="tab-status"
+            class="tab-btn px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors bg-accent/8 text-accent font-semibold">
+      <svg class="inline-block mr-1" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+      </svg>
+      สถานะ
+    </button>
+    <button data-tab="tab-topics"
+            class="tab-btn px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+      <svg class="inline-block mr-1" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+        <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+      </svg>
+      Topics
+      <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.65rem] font-bold bg-accent/10 border border-accent/20 text-accent font-display">{{ topics | length }}</span>
+    </button>
+    <button data-tab="tab-info"
+            class="tab-btn px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+      <svg class="inline-block mr-1" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8h.01M12 12v4"/>
+      </svg>
+      ข้อมูล
+    </button>
+  </div>
+</nav>
+
+<!-- Content panels -->
+<div>
+
+  <!-- ── Tab: Status ───────────────────────────────────────── -->
+  <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
+
+    <!-- Stat row -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-1">
+        <span class="font-display text-[1.4rem] font-bold leading-none {{ 'text-safe' if conn_status.connected else 'text-faint' }}" id="stat-connected">
+          {{ 'ใช่' if conn_status.connected else 'ไม่' }}
+        </span>
+        <span class="text-[0.72rem] text-faint">Connected</span>
+      </div>
+      <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-1">
+        <span class="font-display text-[1.4rem] font-bold leading-none {{ 'text-safe' if conn_status.is_active else 'text-faint' }}" id="stat-active">
+          {{ 'ใช่' if conn_status.is_active else 'ไม่' }}
+        </span>
+        <span class="text-[0.72rem] text-faint">Active Client</span>
+      </div>
+      <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-1">
+        <span class="font-display text-[1.4rem] font-bold leading-none">{{ topics | length }}</span>
+        <span class="text-[0.72rem] text-faint">Topics</span>
+      </div>
+      <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-1">
+        <span class="font-display text-[1.1rem] font-bold leading-none {{ 'text-safe' if paho_available else 'text-caution' }}">
+          {{ 'OK' if paho_available else 'N/A' }}
+        </span>
+        <span class="text-[0.72rem] text-faint">paho-mqtt</span>
+      </div>
+    </div>
+
+    <!-- Connection status card -->
+    <div class="bg-card border border-line/10 rounded-xl">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+        <h2 class="text-[0.9rem] font-semibold text-ink">การเชื่อมต่อ</h2>
+        <button onclick="refreshStatus()" class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+      <div class="divide-y divide-line/7">
+        <div class="flex items-start gap-3 px-5 py-2.5">
+          <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Broker URL</span>
+          <code class="flex-1 text-[0.78rem] font-display text-muted break-all">{{ broker.broker_url }}</code>
+        </div>
+        <div class="flex items-start gap-3 px-5 py-2.5">
+          <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Connected</span>
+          <span id="conn-badge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
+            {{ 'bg-safe/8 border-safe/22 text-[#0f766e]' if conn_status.connected else 'bg-surface border-line/12 text-muted' }}">
+            {{ 'เชื่อมต่อแล้ว' if conn_status.connected else 'ไม่ได้เชื่อมต่อ' }}
+          </span>
+        </div>
+        <div class="flex items-start gap-3 px-5 py-2.5">
+          <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Active Client</span>
+          <span class="text-[0.82rem] {{ 'text-safe' if conn_status.is_active else 'text-faint' }}" id="stat-active-text">
+            {{ 'กำลังใช้งาน broker นี้' if conn_status.is_active else 'ไม่ใช่ active client' }}
+          </span>
+        </div>
+        {% if conn_status.last_error %}
+        <div class="flex items-start gap-3 px-5 py-2.5">
+          <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Last Error</span>
+          <span class="flex-1 text-[0.78rem] text-danger" id="conn-error">{{ conn_status.last_error }}</span>
+        </div>
+        {% else %}
+        <div class="flex items-start gap-3 px-5 py-2.5" id="conn-error-row" style="display:none">
+          <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Last Error</span>
+          <span class="flex-1 text-[0.78rem] text-danger" id="conn-error"></span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="flex gap-2 flex-wrap">
+      <button onclick="connectBroker()" id="btn-connect"
+        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors {{ 'opacity-50 cursor-not-allowed' if not broker.enabled else '' }}"
+        {{ 'disabled' if not broker.enabled else '' }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 8.32a7.43 7.43 0 0 1 12 0"/><path d="M2.5 4.46a12.45 12.45 0 0 1 19 0"/>
+          <path d="M10.67 16.31c-.38.37-.57.86-.57 1.38 0 1.1.9 2 2 2h.02c1.1 0 1.98-.9 1.98-2 0-.52-.19-1-.57-1.38"/>
+          <path d="M9.35 12.53a5.45 5.45 0 0 1 5.3 0"/>
+        </svg>
+        เชื่อมต่อ
+      </button>
+      <button onclick="disconnectBroker()" id="btn-disconnect"
+        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-caution text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+        </svg>
+        ตัดการเชื่อมต่อ
+      </button>
+      <button onclick="testPublish()" id="btn-test"
+        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        Test Publish
+      </button>
+      <span class="self-center text-[0.78rem]" id="action-result"></span>
+    </div>
+
+  </div>
+
+  <!-- ── Tab: Topics ───────────────────────────────────────── -->
+  <div id="tab-topics" class="tab-panel flex flex-col gap-4">
+
+    <!-- Add topic form -->
+    <div class="bg-card border border-line/10 rounded-xl">
+      <div class="px-5 py-3 border-b border-line/10">
+        <h2 class="text-[0.9rem] font-semibold text-ink">เพิ่ม Topic</h2>
+      </div>
+      <div class="p-5 flex flex-col gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted" for="new-topic">Topic Path <span class="text-danger">*</span></label>
+            <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition"
+              id="new-topic" type="text" placeholder="sterile/vending/qr/scan">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted" for="new-label">ชื่อ / คำอธิบาย</label>
+            <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition"
+              id="new-label" type="text" placeholder="ตัวอย่าง: QR Scan Events">
+          </div>
+        </div>
+        <div class="flex items-center gap-2 pt-1 border-t border-line/10">
+          <button onclick="addTopic()" id="btn-add-topic"
+            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            เพิ่ม Topic
+          </button>
+          <span class="text-[0.78rem]" id="topic-msg"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Topics list -->
+    <div class="bg-card border border-line/10 rounded-xl">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+        <h2 class="text-[0.9rem] font-semibold text-ink">Topics ทั้งหมด</h2>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-bold bg-accent/10 border border-accent/20 text-accent font-display" id="topic-count">{{ topics | length }}</span>
+      </div>
+
+      {% if topics %}
+      <div class="overflow-x-auto">
+        <table class="w-full border-collapse text-[0.82rem]">
+          <thead>
+            <tr>
+              <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">Topic</th>
+              <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10 hidden sm:table-cell">ชื่อ / คำอธิบาย</th>
+              <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">สถานะ</th>
+              <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10"></th>
+            </tr>
+          </thead>
+          <tbody id="topics-tbody">
+            {% for t in topics %}
+            <tr class="hover:bg-surface transition-colors" id="topic-row-{{ t.id }}">
+              <td class="px-4 py-3 border-b border-line/7 align-middle">
+                <code class="font-display text-[0.78rem] text-ink">{{ t.topic }}</code>
+              </td>
+              <td class="px-4 py-3 border-b border-line/7 align-middle text-muted hidden sm:table-cell">
+                {{ t.label or '—' }}
+              </td>
+              <td class="px-4 py-3 border-b border-line/7 align-middle">
+                {% if t.enabled %}
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-safe/8 border-safe/22 text-[#0f766e]">เปิด</span>
+                {% else %}
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-surface border-line/12 text-muted">ปิด</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 border-b border-line/7 align-middle">
+                <div class="flex items-center gap-1.5 justify-end">
+                  <button onclick="toggleTopic({{ t.id }}, {{ 'false' if t.enabled else 'true' }})"
+                    class="inline-flex items-center px-2.5 py-1 border border-line/15 rounded-md bg-card text-ink text-[0.75rem] font-semibold hover:bg-surface transition-colors">
+                    {{ 'ปิด' if t.enabled else 'เปิด' }}
+                  </button>
+                  <button onclick="deleteTopic({{ t.id }})"
+                    class="inline-flex items-center px-2.5 py-1 border border-danger/20 rounded-md bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors">
+                    ลบ
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="flex flex-col items-center justify-center py-10 gap-2" id="topics-empty">
+        <div class="text-[0.84rem] text-faint">ยังไม่มี Topic — เพิ่มด้านบนได้เลย</div>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- ── Tab: Info ─────────────────────────────────────────── -->
+  <div id="tab-info" class="tab-panel flex flex-col gap-4">
+    <div class="bg-card border border-line/10 rounded-xl">
+      <div class="px-5 py-3 border-b border-line/10">
+        <h2 class="text-[0.9rem] font-semibold text-ink">ข้อมูลการตั้งค่า</h2>
+      </div>
+      <div class="divide-y divide-line/7">
+        {% for label, value, mono in [
+          ('Name',         broker.name,          false),
+          ('Broker URL',   broker.broker_url,    true),
+          ('Username',     broker.username or '—', false),
+          ('Client ID',    broker.client_id or '(auto-generate)', true),
+          ('QoS',          broker.qos,           true),
+          ('Payload Mode', broker.payload_mode,  true),
+          ('Keep Alive',   broker.keep_alive ~ ' วินาที', false),
+          ('Reconnect',    broker.reconnect_min ~ '–' ~ broker.reconnect_max ~ ' วิ', false),
+          ('TLS Insecure', 'ใช่' if broker.tls_insecure else 'ไม่', false),
+          ('Retain',       'ใช่' if broker.retain else 'ไม่', false),
+          ('Primary',      'ใช่' if broker.is_primary else 'ไม่', false),
+          ('Enabled',      'ใช่' if broker.enabled else 'ไม่', false),
+          ('Created',      broker.created_at, false),
+          ('Updated',      broker.updated_at, false),
+        ] %}
+        <div class="flex items-start gap-3 px-5 py-2.5">
+          <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">{{ label }}</span>
+          {% if mono %}
+          <code class="flex-1 text-[0.78rem] font-display text-muted break-all">{{ value }}</code>
+          {% else %}
+          <span class="flex-1 text-[0.82rem] text-ink">{{ value }}</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+        {% if broker.notes %}
+        <div class="flex items-start gap-3 px-5 py-2.5">
+          <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">หมายเหตุ</span>
+          <span class="flex-1 text-[0.82rem] text-muted whitespace-pre-wrap">{{ broker.notes }}</span>
+        </div>
+        {% endif %}
+      </div>
+      <div class="px-5 py-3 border-t border-line/10 flex justify-end">
+        <a href="/mqtt/broker/{{ broker.id }}/edit"
+          class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          แก้ไขการตั้งค่า
+        </a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var BROKER_ID = {{ broker.id }};
+
+  // ── Tab navigation ──────────────────────────────────────────────
+  var tabs = document.querySelectorAll(".tab-btn");
+  tabs.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var target = btn.dataset.tab;
+      document.querySelectorAll(".tab-panel").forEach(function (p) { p.classList.remove("is-active"); });
+      var panel = document.getElementById(target);
+      if (panel) panel.classList.add("is-active");
+      tabs.forEach(function (b) {
+        b.classList.remove("bg-accent/8", "text-accent", "font-semibold");
+        b.classList.add("text-muted");
+      });
+      btn.classList.remove("text-muted");
+      btn.classList.add("bg-accent/8", "text-accent", "font-semibold");
+    });
+  });
+
+  // ── Status helpers ──────────────────────────────────────────────
+  function refreshStatus() {
+    fetch("/api/mqtt/brokers/" + BROKER_ID + "/status")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var badge = document.getElementById("conn-badge");
+        var hbadge = document.getElementById("header-badge");
+        var errEl  = document.getElementById("conn-error");
+        var errRow = document.getElementById("conn-error-row");
+        if (badge) {
+          badge.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border " +
+            (d.connected ? "bg-safe/8 border-safe/22 text-[#0f766e]" : "bg-surface border-line/12 text-muted");
+          badge.textContent = d.connected ? "เชื่อมต่อแล้ว" : "ไม่ได้เชื่อมต่อ";
+        }
+        if (hbadge) {
+          hbadge.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border " +
+            (d.connected ? "bg-safe/8 border-safe/22 text-[#0f766e]" : "bg-surface border-line/12 text-muted");
+          hbadge.textContent = d.connected ? "เชื่อมต่อแล้ว" : "ไม่ได้เชื่อมต่อ";
+        }
+        if (errEl) errEl.textContent = d.last_error || "";
+        if (errRow) errRow.style.display = d.last_error ? "" : "none";
+      })
+      .catch(function () {});
+  }
+  window.refreshStatus = refreshStatus;
+  setInterval(refreshStatus, 10000);
+
+  // ── Connect / Disconnect / Test ─────────────────────────────────
+  function connectBroker() {
+    setActionResult("กำลังเชื่อมต่อ...");
+    document.getElementById("btn-connect").disabled = true;
+    fetch("/api/mqtt/brokers/" + BROKER_ID + "/connect", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === "ok") {
+          setActionResult("✓ เชื่อมต่อสำเร็จ", true);
+          setTimeout(refreshStatus, 1500);
+        } else {
+          setActionResult("Error: " + (d.errors || []).join(", "), false);
+        }
+      })
+      .catch(function (e) { setActionResult("Error: " + e, false); })
+      .finally(function () { document.getElementById("btn-connect").disabled = false; });
+  }
+  window.connectBroker = connectBroker;
+
+  function disconnectBroker() {
+    setActionResult("กำลังตัดการเชื่อมต่อ...");
+    fetch("/api/mqtt/brokers/" + BROKER_ID + "/disconnect", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function () { setActionResult("✓ ตัดการเชื่อมต่อแล้ว", true); setTimeout(refreshStatus, 800); })
+      .catch(function (e) { setActionResult("Error: " + e, false); });
+  }
+  window.disconnectBroker = disconnectBroker;
+
+  function testPublish() {
+    setActionResult("กำลัง publish...");
+    var btn = document.getElementById("btn-test"); btn.disabled = true;
+    fetch("/api/mqtt/brokers/" + BROKER_ID + "/test", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === "ok") setActionResult("✓ Test publish สำเร็จ → " + d.topic, true);
+        else setActionResult("Error: " + (d.errors || []).join(", "), false);
+      })
+      .catch(function (e) { setActionResult("Error: " + e, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+  window.testPublish = testPublish;
+
+  function setActionResult(msg, ok) {
+    var el = document.getElementById("action-result");
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok === true ? "rgb(var(--c-safe))" : ok === false ? "rgb(var(--c-danger))" : "rgb(var(--c-muted))";
+    if (ok === true) setTimeout(function () { el.textContent = ""; }, 5000);
+  }
+
+  // ── Topics CRUD ─────────────────────────────────────────────────
+  function addTopic() {
+    var topic = document.getElementById("new-topic").value.trim();
+    var label = document.getElementById("new-label").value.trim();
+    if (!topic) { setTopicMsg("กรุณากรอก topic path", false); return; }
+    var btn = document.getElementById("btn-add-topic"); btn.disabled = true;
+    fetch("/api/mqtt/brokers/" + BROKER_ID + "/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: topic, label: label }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === "ok") {
+          setTopicMsg("✓ เพิ่ม topic แล้ว", true);
+          document.getElementById("new-topic").value = "";
+          document.getElementById("new-label").value = "";
+          appendTopicRow(d.id, topic, label, true);
+        } else {
+          setTopicMsg("Error: " + (d.errors || []).join(", "), false);
+        }
+      })
+      .catch(function (e) { setTopicMsg("Error: " + e, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+  window.addTopic = addTopic;
+
+  function appendTopicRow(id, topic, label, enabled) {
+    var tbody = document.getElementById("topics-tbody");
+    var empty = document.getElementById("topics-empty");
+    if (!tbody) {
+      // table ไม่มี (ยังไม่มี topic เลย) → reload ง่ายกว่า
+      location.reload();
+      return;
+    }
+    if (empty) empty.style.display = "none";
+    var tr = document.createElement("tr");
+    tr.id = "topic-row-" + id;
+    tr.className = "hover:bg-surface transition-colors";
+    tr.innerHTML = [
+      '<td class="px-4 py-3 border-b border-line/7 align-middle"><code class="font-display text-[0.78rem] text-ink">' + escHtml(topic) + '</code></td>',
+      '<td class="px-4 py-3 border-b border-line/7 align-middle text-muted hidden sm:table-cell">' + escHtml(label || '—') + '</td>',
+      '<td class="px-4 py-3 border-b border-line/7 align-middle"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-safe/8 border-safe/22 text-[#0f766e]">เปิด</span></td>',
+      '<td class="px-4 py-3 border-b border-line/7 align-middle"><div class="flex items-center gap-1.5 justify-end">',
+      '<button onclick="toggleTopic(' + id + ', false)" class="inline-flex items-center px-2.5 py-1 border border-line/15 rounded-md bg-card text-ink text-[0.75rem] font-semibold hover:bg-surface transition-colors">ปิด</button>',
+      '<button onclick="deleteTopic(' + id + ')" class="inline-flex items-center px-2.5 py-1 border border-danger/20 rounded-md bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors">ลบ</button>',
+      '</div></td>',
+    ].join("");
+    tbody.appendChild(tr);
+    updateTopicCount(1);
+  }
+
+  function toggleTopic(id, newEnabled) {
+    fetch("/api/mqtt/topics/" + id, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: newEnabled }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d.status === "ok") location.reload(); })
+      .catch(function () {});
+  }
+  window.toggleTopic = toggleTopic;
+
+  function deleteTopic(id) {
+    if (!confirm("ลบ topic นี้?")) return;
+    fetch("/api/mqtt/topics/" + id, { method: "DELETE" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === "ok") {
+          var row = document.getElementById("topic-row-" + id);
+          if (row) row.remove();
+          updateTopicCount(-1);
+        }
+      })
+      .catch(function () {});
+  }
+  window.deleteTopic = deleteTopic;
+
+  function updateTopicCount(delta) {
+    var el = document.getElementById("topic-count");
+    if (el) el.textContent = String(Math.max(0, parseInt(el.textContent || "0", 10) + delta));
+  }
+
+  function setTopicMsg(msg, ok) {
+    var el = document.getElementById("topic-msg");
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok ? "rgb(var(--c-safe))" : "rgb(var(--c-danger))";
+    if (ok) setTimeout(function () { el.textContent = ""; }, 4000);
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () { /* clearInterval if needed */ });
+})();
+</script>
+{% endblock %}

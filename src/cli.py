@@ -3,24 +3,24 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from config import APP_VERSION, DEFAULT_CONFIG, InstallConfig
-from display import ROTATION_MATRICES, DisplayConfigurator
-from installers import PhaseOneInstaller, count_install_operations
-from os_info import print_os_info
-from reset import (
+from core.config import APP_VERSION, DEFAULT_CONFIG, InstallConfig
+from features.display.display import ROTATION_MATRICES, DisplayConfigurator
+from features.packages.installers import PhaseOneInstaller, count_install_operations
+from system.info import print_os_info
+from services.reset import (
     INSTALL_COMPONENTS,
     RESET_COMPONENTS,
     LifecycleManager,
     count_reset_operations,
     count_uninstall_operations,
 )
-from runner import CommandRunner
-from mcp_service import McpConfig, McpServiceManager, default_mcp_config
-from server_service import ServerConfig, ServerServiceManager
-from status import print_status
-from system import require_linux, require_root
-from updater import DEFAULT_INSTALL_DIR, DEFAULT_REPO, SelfUpdater
-from wireguard import WireGuardManager
+from core.runner import CommandRunner
+from mcp.service import McpConfig, McpServiceManager, default_mcp_config
+from services.server_service import ServerConfig, ServerServiceManager
+from system.status import print_status
+from system.utils import require_linux, require_root
+from services.updater import DEFAULT_INSTALL_DIR, DEFAULT_REPO, SelfUpdater
+from features.wireguard.manager import WireGuardManager
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -358,7 +358,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 print(f"start MCP server {url}")
                 return 0
             try:
-                from mcp_server import run_server
+                from mcp.server import run_server
             except ImportError as error:
                 if error.name != "fastmcp":
                     raise
@@ -559,7 +559,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
         return 0
 
     if args.command == "qr":
-        from qr_reader import (
+        from features.qr.reader import (
             QrConfig,
             find_zkteco_hidraw_devices,
             get_reader,
@@ -568,7 +568,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             start_reader,
             stop_reader,
         )
-        from status import collect_qr_reader_status, _print_qr_reader_status
+        from system.status import collect_qr_reader_status, _print_qr_reader_status
 
         if args.qr_command == "status":
             _print_qr_reader_status(collect_qr_reader_status())
@@ -615,7 +615,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
 
         if args.qr_command == "test":
             import signal as _signal
-            from qr_reader import find_zkteco_evdev_devices, EvdevQrReaderThread, EVDEV_KEYMAP
+            from features.qr.reader import find_zkteco_evdev_devices, EvdevQrReaderThread, EVDEV_KEYMAP
             try:
                 import evdev as _evdev  # type: ignore[import]
             except ImportError:
@@ -683,7 +683,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
         if args.qr_command == "install-udev":
             require_linux()
             require_root()
-            from config import QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE
+            from core.config import QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE
             rule_content = (
                 f"{QR_UDEV_SIGNATURE}\n"
                 "# ZKTeco QR500-BM / ZKRFID R400 — allow plugdev group access\n"
@@ -700,11 +700,11 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             return 0
 
     if args.command == "mqtt":
-        from mqtt_client import load_mqtt_config, save_mqtt_config, MqttConfig
+        from features.mqtt.client import load_mqtt_config, save_mqtt_config, MqttConfig
 
         if args.mqtt_command == "status":
             cfg = load_mqtt_config()
-            from mqtt_client import get_mqtt_status, _paho_available
+            from features.mqtt.client import get_mqtt_status, _paho_available
             status = get_mqtt_status()
             print("[MQTT]")
             print(f"  enabled      : {'yes' if cfg.enabled else 'no'}")
@@ -720,7 +720,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             print(f"  paho-mqtt    : {'installed' if _paho_available() else 'NOT installed (sudo apt install -y python3-paho-mqtt)'}")
             if status.get("last_error"):
                 print(f"  last_error   : {status['last_error']}")
-            from config import main_config_path
+            from core.config import main_config_path
             print(f"  config file  : {main_config_path().as_posix()}")
             return 0
 
@@ -774,7 +774,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                     print(f"  {k:14}: {v}")
                 return 0
             save_mqtt_config(cfg)
-            from config import main_config_path
+            from core.config import main_config_path
             print(f"Config saved → {main_config_path().as_posix()}")
             for k, v in cfg.to_dict().items():
                 print(f"  {k:14}: {v}")
@@ -783,7 +783,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             return 0
 
         if args.mqtt_command == "test":
-            from mqtt_client import start_mqtt, get_mqtt_client, _paho_available
+            from features.mqtt.client import start_mqtt, get_mqtt_client, _paho_available
             import json as _json_mod
             from datetime import datetime, timezone
             if not _paho_available():
@@ -846,7 +846,7 @@ if __name__ == "__main__":
 
 
 def _print_qr_status(status: "QrReaderStatus") -> None:
-    from status import QrReaderStatus
+    from system.status import QrReaderStatus
     print("[QR Reader]")
     udev_marker = "OK" if status.udev_rule_has_signature else "WARN"
     print(f"{udev_marker:7} {'udev rule':12} {status.udev_rule_path.as_posix()}")

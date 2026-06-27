@@ -2,20 +2,317 @@
 
 ## Directory Structure
 
-<!-- TODO: document the project's directory layout and what lives where -->
+```
+vas/
+├── src/
+│   ├── server.py                        # Flask entry point — routes, SSE, context processors
+│   ├── cli.py                           # CLI entry point (vas command)
+│   │
+│   ├── core/                            # Infrastructure กลาง (ไม่ depend on อะไรใน project)
+│   │   ├── config.py                    # APP_VERSION, InstallConfig, DEFAULT_CONFIG
+│   │   ├── database.py                  # SQLite wrapper (WAL mode, thread-local connections)
+│   │   └── runner.py                    # CommandRunner — shell execution wrapper
+│   │
+│   ├── features/                        # Business logic แยกตาม domain
+│   │   ├── display/
+│   │   │   └── display.py               # DisplayConfigurator, xrandr, xinput, Xorg config
+│   │   ├── wireguard/
+│   │   │   └── manager.py               # WireGuardManager, config, history
+│   │   ├── mqtt/
+│   │   │   └── client.py                # MqttClient, publish_qr_scan
+│   │   ├── qr/
+│   │   │   ├── reader.py                # QR reader (evdev/hidraw), start/stop/get_reader
+│   │   │   └── registry.py              # Device catalog, integrations, install/uninstall
+│   │   └── packages/
+│   │       ├── settings.py              # Package manifest, install queue, status checker
+│   │       └── installers.py            # PhaseOneInstaller, apt/npm/docker install steps
+│   │
+│   ├── system/                          # OS/hardware layer
+│   │   ├── audit.py                     # System log snapshots (create/list/read)
+│   │   ├── clock.py                     # SystemClockPreflight, NTP sync check
+│   │   ├── info.py                      # collect_os_info, print_os_info
+│   │   ├── monitor.py                   # CPU/memory/disk/network metrics (SSE)
+│   │   ├── status.py                    # collect_status, VpnStatus, QrReaderStatus, etc.
+│   │   └── utils.py                     # require_linux, require_root, detect_ubuntu_codename
+│   │
+│   ├── services/                        # Process/daemon management
+│   │   ├── server_service.py            # SystemD service install/start/stop for vas server
+│   │   ├── reset.py                     # LifecycleManager, reset/uninstall components
+│   │   └── updater.py                   # SelfUpdater — GitHub release download & replace
+│   │
+│   ├── mcp/                             # MCP server layer
+│   │   ├── server.py                    # FastMCP app entry point
+│   │   ├── service.py                   # McpServiceManager, systemd integration
+│   │   └── tools/                       # MCP tool modules (mounted into FastMCP)
+│   │       ├── display.py
+│   │       ├── docker.py
+│   │       ├── logs.py
+│   │       ├── network.py
+│   │       └── system.py
+│   │
+│   └── web/                             # Flask static assets & Jinja2 templates
+│       ├── static/
+│       │   ├── js/app.js
+│       │   ├── app.css
+│       │   └── homeoffice.css
+│       └── templates/
+│           ├── base.html                # Full layout (sidebar, header, SPA router)
+│           ├── base_partial.html        # Partial layout for SPA fetch (X-VAS-Partial: 1)
+│           ├── dashboard.html
+│           ├── display.html
+│           ├── monitor.html
+│           ├── settings.html
+│           └── …
+│
+├── public/
+│   └── images/logo/                     # Package logos (wayland-logo.png, x11-logo.png, …)
+├── INSTRUCTIONS.md                      # ← this file
+├── CLAUDE.md                            # Claude project context
+└── AGENTS.md                            # Agent instructions
+```
+
+## Import Convention
+
+`PYTHONPATH=src` — ทุก import ใช้ path แบบ absolute จาก `src/`:
+
+```python
+from core.runner import CommandRunner
+from core.config import InstallConfig
+from core.database import init_db, log_audit
+
+from features.display.display import DisplayConfigurator
+from features.wireguard.manager import WireGuardManager
+from features.mqtt.client import start_mqtt
+from features.qr.reader import get_reader, start_reader
+from features.qr.registry import load_installed_devices
+from features.packages.settings import get_package_status
+from features.packages.installers import PhaseOneInstaller
+
+from system.status import collect_status, VpnStatus
+from system.audit import create_system_log_snapshot
+from system.clock import SystemClockPreflight
+from system.info import collect_os_info
+from system.utils import require_linux, require_root
+from system.monitor import ...   # SSE metrics
+
+from services.server_service import ServerServiceManager
+from services.reset import LifecycleManager
+from services.updater import SelfUpdater
+
+from mcp.service import McpServiceManager
+```
 
 ## Environment Variables
 
-<!-- TODO: list required and optional env vars, their purpose, and default values -->
+| Variable | Default | Purpose |
+|---|---|---|
+| `VAS_HOST` | `0.0.0.0` | Flask bind host |
+| `VAS_PORT` | `8080` | Flask bind port |
+| `VAS_DB` | `~/.config/vas/vas.db` | SQLite database path |
+| `VAS_DEBUG` | `false` | Enable Flask debug mode |
 
 ## Setup
 
-<!-- TODO: document how to set up a new development environment (install deps, run migrations, etc.) -->
+```bash
+pip install -r requirements.txt
+python -m src.server
+# → http://localhost:8080
+```
 
-## Testing
+## Page Structure
 
-<!-- TODO: document how to run tests, test conventions, and any test environment requirements -->
+Every content page is divided into **3 sections** stacked vertically with `gap-4`:
 
-## Code Style & Conventions
+```
+┌─────────────────────────────────────────────────┐
+│  1. PAGE HEADER                                  │
+│     Eyebrow · h1 · subtitle (static, never       │
+│     changes when switching sub-tabs)             │
+├─────────────────────────────────────────────────┤
+│  2. SECTION MENU  (optional)                     │
+│     Horizontal tab pills — shown only when page  │
+│     has sub-sections; omit on single-section     │
+│     pages                                        │
+├─────────────────────────────────────────────────┤
+│  3. CONTENT SECTION                              │
+│     Active tab panel. May contain its own        │
+│     nested sub-sections (cards, accordions, etc) │
+└─────────────────────────────────────────────────┘
+```
 
-<!-- TODO: document code style rules, linting config, naming conventions, and PR guidelines -->
+### 1 · Page Header
+
+Static — does **not** change when the user switches sub-tabs.
+
+```html
+<div class="border-b border-line/10 pb-4">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">
+    VAS · หน้าปัจจุบัน
+  </p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">ชื่อหน้า</h1>
+  <p class="text-[0.82rem] text-muted mt-1">คำอธิบายสั้นๆ</p>
+</div>
+```
+
+### 2 · Section Menu (Tab Nav)
+
+Horizontal pill row; omit entirely on pages with only one section.
+
+```html
+<nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+  <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+    <button data-tab="tab-id"
+            class="tab-btn px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap
+                   transition-colors bg-accent/8 text-accent font-semibold">
+      <iconify-icon icon="lucide:…" width="13" height="13"></iconify-icon>
+      Label
+    </button>
+    <!-- more tab buttons -->
+  </div>
+</nav>
+```
+
+**Rules:**
+- Tab buttons use `gap-0.5` between pills (micro-spacing exception)
+- Active pill: `bg-accent/8 text-accent font-semibold`
+- Inactive pill: `text-muted hover:bg-surface hover:text-ink`
+- Always `overflow-x-auto` for mobile scroll support
+
+### 3 · Content Section
+
+Wraps all tab panels. Only the active panel is visible.
+
+```html
+<div>
+  <div id="tab-foo" class="tab-panel is-active flex flex-col gap-4">
+    <!-- cards, forms, etc — nested as needed -->
+  </div>
+  <div id="tab-bar" class="tab-panel flex flex-col gap-4">
+    <!-- … -->
+  </div>
+</div>
+```
+
+**Critical CSS** (in `{% block extra_styles %}` or `<style>` tag):
+
+```css
+.tab-panel { display: none; }
+.tab-panel.is-active {
+  display: flex;
+  flex-direction: column;
+  /* do NOT use display:block — gap-* has no effect on block containers */
+}
+```
+
+**Content sub-sections** inside a tab panel use the same card pattern:
+
+```html
+<div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col gap-4">
+  <h2 class="text-[0.88rem] font-semibold text-ink">Section Title</h2>
+  <!-- content -->
+</div>
+```
+
+---
+
+## Shell Layout Convention
+
+### Sidebar (`base.html`)
+
+| Element | Class / value | Notes |
+|---|---|---|
+| Sidebar width | `w-60` (240 px) | Fixed; `sticky lg:h-screen` |
+| **Brand header** | `h-[52px]` exact | Must match nav bar height — use `flex items-center` not padding |
+| Brand icon | `w-7 h-7 rounded-lg bg-accent` | Smaller than `-9` to fit 52px |
+| Nav section label | `text-[0.56rem] uppercase tracking-[0.1em] text-faint` | `pt-3 pb-1` between sections |
+| Nav link | `px-2.5 py-1.5 rounded-lg text-[0.8rem]` | Compact; `py-1.5` not `py-2` |
+| **Footer** | version strip only | `VAS v0.1 · online` with green dot; no user info |
+
+### Top Nav Bar (`base.html`)
+
+| Element | Class / value | Notes |
+|---|---|---|
+| Background | `bg-white` | Pure white — no opacity/blur |
+| Height | `h-[52px]` | Matches sidebar brand header exactly |
+| Page title | `font-display text-[0.95rem] font-bold` | Injected by SPA router |
+| **Account pill** | Right side, always visible | Avatar initials + machine name + chevron |
+
+Account pill structure:
+
+```html
+<div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg
+            hover:bg-surface transition-colors cursor-pointer
+            border border-line/10">
+  <div class="w-5 h-5 rounded-full bg-accent/10 text-accent
+              text-[0.58rem] font-bold flex items-center justify-center">
+    VM
+  </div>
+  <span class="text-[0.78rem] font-semibold text-ink hidden sm:block">
+    {{ machine_name or "VAS" }}
+  </span>
+  <iconify-icon icon="lucide:chevron-down" width="12" height="12"
+                class="text-faint hidden sm:block"></iconify-icon>
+</div>
+```
+
+---
+
+## UI Spacing Convention
+
+**All layout-level spacing uses the `-4` scale (16 px).** This applies to:
+
+- Gaps between sections/cards: `gap-4`
+- Card internal padding: `px-4 py-4`
+- Card header padding: `px-4 py-4`
+- Tab panel gap: `flex flex-col gap-4`
+- Form field groups: `gap-4`
+
+**Micro-spacing exceptions (do not normalise to `-4`):**
+
+| Use case | Class | px |
+|---|---|---|
+| Inline icon + text | `gap-2` | 8 |
+| Form label → input | `gap-1.5` | 6 |
+| Tab pill row | `gap-0.5` | 2 |
+| List items (tight) | `gap-1` | 4 |
+| Button internal | `px-3 py-2` or `px-4 py-2.5` | — |
+| Form control | `px-3 py-2` | — |
+| Sidebar nav link | `px-2.5 py-1.5` | sidebar-specific |
+| Sidebar section gap | `pt-3 pb-1` per section | sidebar-specific |
+
+## SPA Navigation
+
+All pages extend `base_template` (injected by Flask context processor):
+
+```python
+# server.py
+@app.context_processor
+def inject_spa_context():
+    is_partial = request.headers.get("X-VAS-Partial") == "1"
+    return {
+        "is_partial": is_partial,
+        "base_template": "base_partial.html" if is_partial else "base.html",
+    }
+```
+
+Every template starts with:
+```html
+{% extends base_template %}
+```
+
+**Page cleanup** — pages with intervals or SSE must register cleanup:
+
+```javascript
+window.__vasCleanup = window.__vasCleanup || [];
+window.__vasCleanup.push(function () {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (evtSource) { evtSource.close(); evtSource = null; }
+});
+```
+
+## Code Style
+
+- **Python**: stdlib only where possible; type hints on public functions
+- **Templates**: Tailwind utility classes via Play CDN; Iconify for icons (`lucide:*`, `simple-icons:*`)
+- **JS**: vanilla ES5-compatible IIFE inside `{% block extra_scripts %}`; no bundler
+- **Colors**: always use CSS variable aliases (`text-ink`, `bg-card`, `border-line/10`) — never hardcode hex

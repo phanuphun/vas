@@ -1,9 +1,11 @@
-{% extends "base.html" %}
+{% extends base_template %}
 
 {% block content %}
-<section class="panel">
-  <h2>{{ title }}</h2>
-  <p class="muted">Commands are preview-only. Run them manually in a terminal on the vending machine.</p>
+<div class="bg-card border border-line/10 rounded-xl">
+  <div class="px-5 py-3 border-b border-line/10">
+    <h2 class="text-[0.9rem] font-semibold text-ink">{{ title }}</h2>
+    <p class="text-[0.8rem] text-muted mt-0.5">Commands are preview-only. Run them manually in a terminal on the vending machine.</p>
+  </div>
   {% include "_command_list.html" %}
-</section>
+</div>
 {% endblock %}

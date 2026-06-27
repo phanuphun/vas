@@ -3,25 +3,42 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
-from flask import Flask, render_template, request
 
-from audit_log import (
+class _IntegProxy:
+    """Wrap raw integration dict so templates can do integrations.webhook.enabled etc."""
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+
+    def __getattr__(self, name: str) -> "_IntegEntry":
+        return _IntegEntry(self._data.get(name, {}))
+
+
+class _IntegEntry:
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+
+    def __getattr__(self, name: str) -> Any:
+        return self._data.get(name)
+
+from flask import Flask, render_template, request, redirect
+
+from system.audit import (
     create_system_log_snapshot,
     list_system_snapshots,
     read_system_snapshot,
     system_snapshot_dir,
 )
-from display import (
+from features.display.display import (
     DisplayConfigurator,
     ROTATION_MATRICES,
     TouchDevice,
     get_udevadm_touchscreen_names,
     parse_xinput_device_map,
 )
-from runner import CommandExecutionError, CommandResult, CommandRunner
-from status import (
+from core.runner import CommandExecutionError, CommandResult, CommandRunner
+from system.status import (
     OpenSshStatus,
     QrReaderStatus,
     ToolStatus,
@@ -38,7 +55,7 @@ from status import (
     collect_web_server_status,
     collect_xorg_touchscreen_config_status,
 )
-from wireguard import (
+from features.wireguard.manager import (
     WireGuardValidationResult,
     WireGuardManager,
     chmod_private,
@@ -111,13 +128,82 @@ class WireGuardHistoryEntry:
     warnings: tuple[str, ...]
 
 
+def vpn_connection_label(vpn: "VpnStatus") -> str:  # type: ignore[name-defined]
+    """คืน label สั้นๆ แสดงสถานะ VPN สำหรับ Jinja2 templates"""
+    from system.status import VpnStatus as _VpnStatus  # noqa: F401 — used for type hint only
+    if not vpn.wg_installed:
+        return "ไม่ได้ติดตั้ง"
+    if not vpn.app_config_exists:
+        return "ยังไม่ได้ตั้งค่า"
+    if not vpn.interface_exists:
+        return "ไม่ได้เชื่อมต่อ"
+    if vpn.handshake_peers and vpn.handshake_peers > 0:
+        return f"เชื่อมต่อแล้ว ({vpn.handshake_peers} peer)"
+    return "เชื่อมต่อแล้ว"
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
         template_folder=str(WEB_DIR / "templates"),
         static_folder=str(WEB_DIR / "static"),
     )
+    # Secret key — ใช้ env var ถ้ามี, fallback เป็น random (dev only)
+    import secrets as _secrets
+    app.secret_key = os.environ.get("VAS_SECRET_KEY") or _secrets.token_hex(32)
     app.jinja_env.globals["vpn_connection_label"] = vpn_connection_label
+
+    # ── Auth: before_request ────────────────────────────────────────
+    # Routes ที่ไม่ต้อง login
+    _PUBLIC_ENDPOINTS = frozenset([
+        "auth_login", "auth_login_post",
+        "auth_logout",
+        "auth_setup", "auth_setup_post",
+        "static", "serve_logo",
+        "health",
+    ])
+
+    @app.before_request
+    def require_login() -> object:
+        from flask import session as flask_session, redirect, url_for as _url_for
+        from core.auth import is_first_run, get_user_by_id
+        # SSE / API prefix — allow through (checked per-route if needed)
+        if request.endpoint in _PUBLIC_ENDPOINTS:
+            return None
+        if request.path.startswith("/api/"):
+            return None  # API routes ตรวจสอบ auth เอง
+        # First run
+        if is_first_run():
+            return redirect(_url_for("auth_setup"))
+        # Check session
+        user_id = flask_session.get("vas_user_id")
+        if not user_id:
+            return redirect(_url_for("auth_login", next=request.path))
+        user = get_user_by_id(int(user_id))
+        if user is None:
+            flask_session.clear()
+            return redirect(_url_for("auth_login"))
+        return None
+
+    @app.context_processor
+    def inject_spa_context() -> dict[str, object]:
+        """Inject is_partial + current_user so every template can use them."""
+        from flask import session as flask_session
+        from core.auth import get_user_by_id, ROLE_BADGE_CLASS, ROLE_LABELS, can_manage_user
+        is_partial = request.headers.get("X-VAS-Partial") == "1"
+        base_template = "base_partial.html" if is_partial else "base.html"
+        current_user = None
+        user_id = flask_session.get("vas_user_id")
+        if user_id:
+            current_user = get_user_by_id(int(user_id))
+        return {
+            "is_partial": is_partial,
+            "base_template": base_template,
+            "current_user": current_user,
+            "role_badge": ROLE_BADGE_CLASS,
+            "role_labels": ROLE_LABELS,
+            "can_manage": can_manage_user,
+        }
 
     @app.get("/")
     def dashboard() -> str:
@@ -172,6 +258,11 @@ def create_app() -> Flask:
             snapshot = create_system_log_snapshot()
         except OSError as error:
             return {"status": "error", "errors": [str(error)]}, 500
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("snapshot_created", {"id": snapshot.get("id"), "size": snapshot.get("size"), "path": snapshot.get("path")})
+        except Exception:
+            pass
         return {"status": "ok", "snapshot": snapshot}
 
     @app.get("/api/logs/system/<snapshot_id>")
@@ -416,19 +507,72 @@ def create_app() -> Flask:
             },
         }
 
+    # ── Display simulation (Virtual Touchscreen) ──────────────────
+    _sim_proc: list["subprocess.Popen[bytes] | None"] = [None]  # mutable cell inside closure
+    _SIM_SCRIPT = Path(__file__).parent.parent / "scripts" / "dev" / "virtual_touchscreen.py"
+
+    @app.get("/api/display/sim/status")
+    def display_sim_status() -> dict[str, object]:
+        import subprocess as _sp
+        # lib check
+        lib_ok = _sp.run(
+            ["python3", "-c", "import evdev"],
+            capture_output=True, timeout=5,
+        ).returncode == 0
+        proc = _sim_proc[0]
+        running = proc is not None and proc.poll() is None
+        return {
+            "lib_ok":  lib_ok,
+            "running": running,
+            "pid":     proc.pid if running else None,
+        }
+
+    @app.post("/api/display/sim/start")
+    def display_sim_start() -> tuple[dict[str, object], int] | dict[str, object]:
+        import subprocess as _sp
+        proc = _sim_proc[0]
+        if proc is not None and proc.poll() is None:
+            return {"status": "ok", "message": "already_running", "pid": proc.pid}
+        if not _SIM_SCRIPT.exists():
+            return {"status": "error", "errors": ["Script not found"]}, 404
+        try:
+            _sim_proc[0] = _sp.Popen(
+                ["sudo", "python3", str(_SIM_SCRIPT)],
+                stdout=_sp.PIPE, stderr=_sp.STDOUT,
+            )
+            return {"status": "ok", "pid": _sim_proc[0].pid}
+        except OSError as exc:
+            return {"status": "error", "errors": [str(exc)]}, 500
+
+    @app.post("/api/display/sim/stop")
+    def display_sim_stop() -> dict[str, object]:
+        proc = _sim_proc[0]
+        if proc is not None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except Exception:
+                proc.kill()
+            _sim_proc[0] = None
+        return {"status": "ok"}
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    # ── Database init ────────────────────────────────────────────
+    from core.database import init_db as _init_db
+    _init_db()
+
     import atexit
-    from qr_reader import stop_reader as _stop_qr_reader
-    from mqtt_client import stop_mqtt as _stop_mqtt
+    from features.qr.reader import stop_reader as _stop_qr_reader
+    from features.mqtt.client import stop_mqtt as _stop_mqtt
     atexit.register(_stop_qr_reader)
     atexit.register(_stop_mqtt)
 
     # Auto-start QR reader เมื่อ server boot (ถ้ามี device ต่ออยู่)
     try:
-        from qr_reader import get_reader as _get_qr_reader, start_reader as _auto_start_qr
+        from features.qr.reader import get_reader as _get_qr_reader, start_reader as _auto_start_qr
         if _get_qr_reader() is None:
             _auto_start_qr()
     except Exception:
@@ -436,7 +580,7 @@ def create_app() -> Flask:
 
     # Auto-start MQTT ถ้า enabled
     try:
-        from mqtt_client import load_mqtt_config as _load_mqtt_cfg, start_mqtt as _auto_start_mqtt
+        from features.mqtt.client import load_mqtt_config as _load_mqtt_cfg, start_mqtt as _auto_start_mqtt
         _mqtt_boot_cfg = _load_mqtt_cfg()
         if _mqtt_boot_cfg.enabled:
             _auto_start_mqtt(_mqtt_boot_cfg)
@@ -445,7 +589,7 @@ def create_app() -> Flask:
 
     @app.get("/qr")
     def qr_reader_page() -> str:
-        from qr_reader import find_zkteco_evdev_devices, find_zkteco_hidraw_devices, load_qr_config
+        from features.qr.reader import find_zkteco_evdev_devices, find_zkteco_hidraw_devices, load_qr_config
         evdev_devices = find_zkteco_evdev_devices()
         hidraw_devices = find_zkteco_hidraw_devices()
         # รวม evdev ก่อน hidraw (evdev = HID keyboard Open mode ที่แนะนำ)
@@ -462,7 +606,7 @@ def create_app() -> Flask:
     @app.get("/api/qr/last-scan")
     def qr_last_scan_api() -> dict[str, object]:
         """Return: {"status":"ok","scan":<str|null>,"device":<str|null>,"running":<bool>}"""
-        from qr_reader import get_reader
+        from features.qr.reader import get_reader
         reader = get_reader()
         running = reader is not None and reader.is_alive()
         return {
@@ -480,7 +624,7 @@ def create_app() -> Flask:
         400: {"status":"error","errors":[...]}  -- device not found
         500: {"status":"error","errors":[...]}  -- OS error
         """
-        from qr_reader import start_reader
+        from features.qr.reader import start_reader
         payload = request.get_json(silent=True) or {}
         device = str(payload.get("device", "")).strip() or None
         try:
@@ -494,15 +638,15 @@ def create_app() -> Flask:
     @app.post("/api/qr/stop")
     def qr_stop_api() -> dict[str, object]:
         """Return: {"status":"ok","running":false}"""
-        from qr_reader import stop_reader
+        from features.qr.reader import stop_reader
         stop_reader()
         return {"status": "ok", "running": False}
 
     @app.get("/api/qr/config")
     def qr_config_get_api() -> dict[str, object]:
         """Return: {"status":"ok","config":{"device_path":<str|null>},"path":<file_path>}"""
-        from qr_reader import load_qr_config
-        from config import qr_config_path
+        from features.qr.reader import load_qr_config
+        from core.config import qr_config_path
         config = load_qr_config()
         return {
             "status": "ok",
@@ -517,16 +661,22 @@ def create_app() -> Flask:
         200: {"status":"ok","config":{...}}
         500: {"status":"error","errors":[...]}
         """
-        from qr_reader import QrConfig, save_qr_config
+        from features.qr.reader import QrConfig, save_qr_config, load_qr_config
         payload = request.get_json(silent=True) or {}
         device_path = payload.get("device_path") or None
         if device_path is not None:
             device_path = str(device_path).strip() or None
+        old_config = load_qr_config()
         config = QrConfig(device_path=device_path)
         try:
             save_qr_config(config)
         except OSError as error:
             return {"status": "error", "errors": [str(error)]}, 500
+        try:
+            from core.database import log_config_change as _db_cfg
+            _db_cfg("qr", "*", old_value=old_config.to_dict(), new_value=config.to_dict())
+        except Exception:
+            pass
         return {"status": "ok", "config": config.to_dict()}
 
     @app.get("/api/qr/stream")
@@ -550,7 +700,7 @@ def create_app() -> Flask:
         from datetime import datetime, timezone
 
         def generate():
-            from qr_reader import get_reader, start_reader
+            from features.qr.reader import get_reader, start_reader
 
             def _try_start():
                 """Auto-start reader ถ้ายังไม่ทำงาน — ไม่ raise"""
@@ -607,9 +757,15 @@ def create_app() -> Flask:
                             last_seen = scan
                             ts = datetime.now(timezone.utc).isoformat()
                             yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts})}\n\n"
+                            # Log QR scan ลง DB
+                            try:
+                                from core.database import log_qr_scan as _db_log_qr
+                                _db_log_qr(scan, reader.device_path, ts)
+                            except Exception:
+                                pass
                             # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่
                             try:
-                                from mqtt_client import publish_qr_scan as _mqtt_publish
+                                from features.mqtt.client import publish_qr_scan as _mqtt_publish
                                 scan_raw = getattr(reader, "last_scan_raw", None)
                                 _mqtt_publish(scan, reader.device_path, ts, scan_raw=scan_raw)
                             except Exception:
@@ -627,33 +783,312 @@ def create_app() -> Flask:
             },
         )
 
+    # ── QR Device catalog & integration routes ──────────────────
+
+    @app.get("/qr/devices")
+    def qr_devices_page() -> str:
+        from features.qr.registry import load_installed_devices, DEVICE_CATALOG
+        installed = load_installed_devices()
+        installed_ids = {d["id"] for d in installed}
+        installed_list = [
+            {
+                "id": d["id"],
+                "name": d["name"],
+                "brand": d["brand"],
+                "page_endpoint": d["page_endpoint"],
+            }
+            for d in DEVICE_CATALOG if d["id"] in installed_ids
+        ]
+        return render_template(
+            "qr_devices.html",
+            installed_devices=installed_list,
+            installed_device_ids=installed_ids,
+        )
+
+    @app.get("/qr/device/zkteco/qr500")
+    def qr_device_zkteco_qr500_page() -> str:
+        from features.qr.reader import find_zkteco_evdev_devices, find_zkteco_hidraw_devices, load_qr_config
+        from features.qr.registry import load_integrations
+        from features.mqtt.client import load_mqtt_config
+        evdev_devices = find_zkteco_evdev_devices()
+        hidraw_devices = find_zkteco_hidraw_devices()
+        integrations_raw = load_integrations("zkteco-qr500")
+        integration_count = sum(1 for v in integrations_raw.values() if v.get("enabled"))
+        return render_template(
+            "qr_device_zkteco_qr500.html",
+            qr_reader=collect_qr_reader_status(),
+            evdev_devices=evdev_devices,
+            hidraw_devices=hidraw_devices,
+            config=load_qr_config(),
+            integrations=_IntegProxy(integrations_raw),
+            integration_count=integration_count,
+            mqtt_config=load_mqtt_config(),
+        )
+
+    @app.post("/api/qr/devices/<device_id>/install")
+    def qr_device_install_api(device_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from features.qr.registry import install_device, DEVICE_CATALOG
+        valid_ids = {d["id"] for d in DEVICE_CATALOG}
+        if device_id not in valid_ids:
+            return {"status": "error", "error": "unknown device id"}, 404
+        try:
+            install_device(device_id)
+        except Exception as e:
+            return {"status": "error", "error": str(e)}, 500
+        return {"status": "ok", "device_id": device_id}
+
+    @app.post("/api/qr/devices/<device_id>/uninstall")
+    def qr_device_uninstall_api(device_id: str) -> dict[str, object]:
+        from features.qr.registry import uninstall_device
+        try:
+            uninstall_device(device_id)
+        except Exception as e:
+            return {"status": "error", "error": str(e)}, 500
+        return {"status": "ok", "device_id": device_id}
+
+    @app.get("/api/qr/integrations")
+    def qr_integrations_get_api() -> dict[str, object]:
+        from features.qr.registry import load_integrations
+        raw = load_integrations("zkteco-qr500")
+        integ_list: list[dict[str, object]] = []
+        for t in ("webhook", "mqtt", "pipe"):
+            cfg = dict(raw.get(t, {}))
+            cfg["type"] = t
+            integ_list.append(cfg)
+        return {"status": "ok", "integrations": integ_list}
+
+    @app.post("/api/qr/integrations/<integ_type>")
+    def qr_integration_save_api(integ_type: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from features.qr.registry import load_integrations, save_integrations
+        if integ_type not in ("webhook", "mqtt", "pipe"):
+            return {"status": "error", "error": "unknown integration type"}, 400
+        payload = request.get_json(silent=True) or {}
+        try:
+            data = load_integrations("zkteco-qr500")
+            data[integ_type] = {k: v for k, v in payload.items() if k != "type"}
+            save_integrations("zkteco-qr500", data)
+        except Exception as e:
+            return {"status": "error", "error": str(e)}, 500
+        count = sum(1 for v in data.values() if v.get("enabled"))
+        return {"status": "ok", "integration_count": count}
+
+    @app.post("/api/qr/integrations/pipe/create")
+    def qr_pipe_create_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        import os as _os
+        payload = request.get_json(silent=True) or {}
+        path = str(payload.get("path", "/tmp/vas_qr_pipe")).strip()
+        if not path:
+            return {"status": "error", "error": "path required"}, 400
+        try:
+            if not _os.path.exists(path):
+                _os.mkfifo(path, 0o666)
+            elif not _os.path.isfifo(path):
+                return {"status": "error", "error": f"{path} exists but is not a pipe"}, 400
+        except OSError as e:
+            return {"status": "error", "error": str(e)}, 500
+        return {"status": "ok", "path": path}
+
     # ── MQTT routes ─────────────────────────────────────────────
 
     @app.get("/mqtt")
     def mqtt_page() -> str:
-        from mqtt_client import load_mqtt_config, get_mqtt_status
-        from config import main_config_path
+        from core.database import list_mqtt_brokers
+        from features.mqtt.client import get_mqtt_client, _paho_available
+        c = get_mqtt_client()
+        active_url = c.config.broker_url if c else None
+        brokers = list_mqtt_brokers()
         return render_template(
             "mqtt.html",
-            mqtt_config=load_mqtt_config(),
-            mqtt_status=get_mqtt_status(),
-            config_path=main_config_path().as_posix(),
+            brokers=brokers,
+            active_broker_url=active_url,
+            active_client=c,
+            paho_available=_paho_available(),
         )
+
+    @app.get("/mqtt/broker/add")
+    def mqtt_broker_add_page() -> str:
+        return render_template("mqtt_broker_form.html", broker=None, edit=False)
+
+    @app.get("/mqtt/broker/<int:broker_id>")
+    def mqtt_broker_detail_page(broker_id: int) -> str:
+        from core.database import get_mqtt_broker, list_mqtt_topics
+        from features.mqtt.client import get_broker_connection_status, _paho_available
+        broker = get_mqtt_broker(broker_id)
+        if broker is None:
+            return render_template("mqtt.html", brokers=[], active_broker_url=None,
+                                   active_client=None, paho_available=_paho_available()), 404  # type: ignore[return-value]
+        topics = list_mqtt_topics(broker_id)
+        conn_status = get_broker_connection_status(broker_id)
+        return render_template(
+            "mqtt_broker_detail.html",
+            broker=broker,
+            topics=topics,
+            conn_status=conn_status,
+            paho_available=_paho_available(),
+        )
+
+    @app.get("/mqtt/broker/<int:broker_id>/edit")
+    def mqtt_broker_edit_page(broker_id: int) -> str:
+        from core.database import get_mqtt_broker
+        broker = get_mqtt_broker(broker_id)
+        if broker is None:
+            return redirect("/mqtt")  # type: ignore[return-value]
+        return render_template("mqtt_broker_form.html", broker=broker, edit=True)
+
+    # ── MQTT API ─────────────────────────────────────────────────
 
     @app.get("/api/mqtt/status")
     def mqtt_status_api() -> dict[str, object]:
-        from mqtt_client import get_mqtt_status
+        from features.mqtt.client import get_mqtt_status
         return {"status": "ok", **get_mqtt_status()}
+
+    @app.post("/api/mqtt/brokers")
+    def mqtt_broker_create_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        """สร้าง broker ใหม่"""
+        from core.database import create_mqtt_broker, get_mqtt_broker
+        from features.mqtt.client import start_mqtt_broker
+        payload = request.get_json(silent=True) or {}
+        try:
+            new_id = create_mqtt_broker(payload)
+            broker = get_mqtt_broker(new_id)
+            if broker and broker.get("enabled") and broker.get("is_primary"):
+                try:
+                    start_mqtt_broker(new_id)
+                except Exception:
+                    pass
+            return {"status": "ok", "id": new_id}
+        except Exception as e:
+            return {"status": "error", "errors": [str(e)]}, 500
+
+    @app.put("/api/mqtt/brokers/<int:broker_id>")
+    def mqtt_broker_update_api(broker_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
+        """อัปเดต broker"""
+        from core.database import update_mqtt_broker, get_mqtt_broker
+        from features.mqtt.client import start_mqtt_broker, stop_mqtt
+        payload = request.get_json(silent=True) or {}
+        try:
+            ok = update_mqtt_broker(broker_id, payload)
+            if not ok:
+                return {"status": "error", "errors": ["update ไม่สำเร็จ"]}, 500
+            broker = get_mqtt_broker(broker_id)
+            if broker and broker.get("is_primary"):
+                stop_mqtt()
+                if broker.get("enabled"):
+                    try:
+                        start_mqtt_broker(broker_id)
+                    except Exception:
+                        pass
+            return {"status": "ok", "id": broker_id}
+        except Exception as e:
+            return {"status": "error", "errors": [str(e)]}, 500
+
+    @app.delete("/api/mqtt/brokers/<int:broker_id>")
+    def mqtt_broker_delete_api(broker_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
+        """ลบ broker"""
+        from core.database import delete_mqtt_broker, get_mqtt_broker
+        from features.mqtt.client import stop_mqtt, get_mqtt_client
+        broker = get_mqtt_broker(broker_id)
+        if broker and broker.get("is_primary"):
+            c = get_mqtt_client()
+            if c and c.config.broker_url == broker.get("broker_url"):
+                stop_mqtt()
+        ok = delete_mqtt_broker(broker_id)
+        if not ok:
+            return {"status": "error", "errors": ["ลบไม่สำเร็จ"]}, 500
+        return {"status": "ok"}
+
+    @app.get("/api/mqtt/brokers/<int:broker_id>/status")
+    def mqtt_broker_status_api(broker_id: int) -> dict[str, object]:
+        from features.mqtt.client import get_broker_connection_status
+        return {"status": "ok", **get_broker_connection_status(broker_id)}
+
+    @app.post("/api/mqtt/brokers/<int:broker_id>/connect")
+    def mqtt_broker_connect_api(broker_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
+        """เชื่อมต่อ broker ที่ระบุ (set as active)"""
+        from features.mqtt.client import start_mqtt_broker
+        try:
+            start_mqtt_broker(broker_id)
+            return {"status": "ok", "broker_id": broker_id}
+        except ImportError as e:
+            return {"status": "error", "errors": [str(e)]}, 500
+        except Exception as e:
+            return {"status": "error", "errors": [str(e)]}, 500
+
+    @app.post("/api/mqtt/brokers/<int:broker_id>/disconnect")
+    def mqtt_broker_disconnect_api(broker_id: int) -> dict[str, object]:
+        from features.mqtt.client import stop_mqtt, get_mqtt_client
+        from core.database import get_mqtt_broker
+        broker = get_mqtt_broker(broker_id)
+        c = get_mqtt_client()
+        if broker and c and c.config.broker_url == broker.get("broker_url"):
+            stop_mqtt()
+        return {"status": "ok", "connected": False}
+
+    @app.post("/api/mqtt/brokers/<int:broker_id>/test")
+    def mqtt_broker_test_api(broker_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
+        """Test publish ไปยัง broker ที่ระบุ"""
+        from features.mqtt.client import get_mqtt_client, get_broker_connection_status
+        from core.database import get_mqtt_broker, list_mqtt_topics
+        import json as _j
+        from datetime import datetime, timezone
+        broker = get_mqtt_broker(broker_id)
+        if broker is None:
+            return {"status": "error", "errors": ["ไม่พบ broker"]}, 404
+        c = get_mqtt_client()
+        conn = get_broker_connection_status(broker_id)
+        if not conn.get("is_active") or not conn.get("connected"):
+            return {"status": "error", "errors": ["broker นี้ไม่ได้ active หรือยังไม่เชื่อมต่อ"]}, 400
+        topics = list_mqtt_topics(broker_id)
+        test_topic = next(
+            (t["topic"] for t in topics if t.get("enabled")),
+            "vas/test",
+        )
+        payload_str = _j.dumps({
+            "scan": "TEST-VAS-QR",
+            "device": "test",
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }, ensure_ascii=False)
+        ok = c.publish(str(test_topic), payload_str)  # type: ignore[union-attr]
+        if not ok:
+            return {"status": "error", "errors": ["publish ไม่สำเร็จ — ตรวจสอบ connection"]}, 500
+        return {"status": "ok", "topic": test_topic, "payload": payload_str}
+
+    # ── MQTT Topic API ────────────────────────────────────────────
+
+    @app.post("/api/mqtt/brokers/<int:broker_id>/topics")
+    def mqtt_topic_add_api(broker_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
+        from core.database import add_mqtt_topic, get_mqtt_broker
+        payload = request.get_json(silent=True) or {}
+        if not get_mqtt_broker(broker_id):
+            return {"status": "error", "errors": ["broker ไม่พบ"]}, 404
+        topic = str(payload.get("topic") or "").strip()
+        if not topic:
+            return {"status": "error", "errors": ["topic ห้ามว่าง"]}, 400
+        label = str(payload.get("label") or "").strip()
+        new_id = add_mqtt_topic(broker_id, topic, label)
+        return {"status": "ok", "id": new_id}
+
+    @app.put("/api/mqtt/topics/<int:topic_id>")
+    def mqtt_topic_update_api(topic_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
+        from core.database import update_mqtt_topic
+        payload = request.get_json(silent=True) or {}
+        ok = update_mqtt_topic(topic_id, payload)
+        return {"status": "ok"} if ok else ({"status": "error", "errors": ["update ไม่สำเร็จ"]}, 500)
+
+    @app.delete("/api/mqtt/topics/<int:topic_id>")
+    def mqtt_topic_delete_api(topic_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
+        from core.database import delete_mqtt_topic
+        ok = delete_mqtt_topic(topic_id)
+        return {"status": "ok"} if ok else ({"status": "error", "errors": ["ลบไม่สำเร็จ"]}, 500)
+
+    # ── Legacy single-config MQTT API (kept for backward compat) ──
 
     @app.post("/api/mqtt/config")
     def mqtt_config_save_api() -> tuple[dict[str, object], int] | dict[str, object]:
-        """
-        Payload: MqttConfig fields (camelCase หรือ snake_case ก็ได้)
-        บันทึก config และ restart MQTT client ทันที
-        """
-        from mqtt_client import MqttConfig, save_mqtt_config, start_mqtt, stop_mqtt
+        from features.mqtt.client import MqttConfig, save_mqtt_config, start_mqtt, stop_mqtt, load_mqtt_config
         payload = request.get_json(silent=True) or {}
         try:
+            old_config = load_mqtt_config()
             config = MqttConfig.from_dict(payload)
             save_mqtt_config(config)
             stop_mqtt()
@@ -663,35 +1098,452 @@ def create_app() -> Flask:
             return {"status": "error", "errors": [str(e)]}, 500
         except Exception as e:
             return {"status": "error", "errors": [str(e)]}, 500
-        from mqtt_client import get_mqtt_status
+        try:
+            from core.database import log_config_change as _db_cfg
+            old_d = {k: v for k, v in old_config.to_dict().items() if k != "password"}
+            new_d = {k: v for k, v in config.to_dict().items() if k != "password"}
+            _db_cfg("mqtt", "*", old_value=old_d, new_value=new_d)
+        except Exception:
+            pass
+        from features.mqtt.client import get_mqtt_status
         return {"status": "ok", "mqtt": get_mqtt_status()}
 
     @app.post("/api/mqtt/test")
     def mqtt_test_api() -> tuple[dict[str, object], int] | dict[str, object]:
-        """Publish test message ไปยัง topic ที่ config ไว้"""
-        from mqtt_client import get_mqtt_client, get_mqtt_status
+        from features.mqtt.client import get_mqtt_client
         from datetime import datetime, timezone
+        import json as _j
         c = get_mqtt_client()
         if c is None:
             return {"status": "error", "errors": ["MQTT client ยังไม่ได้เชื่อมต่อ"]}, 400
         if not c.is_connected:
             return {"status": "error", "errors": ["ยังไม่ได้เชื่อมต่อกับ broker"]}, 400
-        import json as _j
         payload = _j.dumps({
-            "scan": "TEST-VAS-QR",
-            "device": "test",
+            "scan": "TEST-VAS-QR", "device": "test",
             "ts": datetime.now(timezone.utc).isoformat(),
         }, ensure_ascii=False)
         ok = c.publish(c.config.topic, payload)
         if not ok:
-            return {"status": "error", "errors": ["publish ไม่สำเร็จ — ตรวจสอบ connection"]}, 500
+            return {"status": "error", "errors": ["publish ไม่สำเร็จ"]}, 500
         return {"status": "ok", "topic": c.config.topic, "payload": payload}
 
     @app.post("/api/mqtt/disconnect")
     def mqtt_disconnect_api() -> dict[str, object]:
-        from mqtt_client import stop_mqtt
+        from features.mqtt.client import stop_mqtt
         stop_mqtt()
         return {"status": "ok", "connected": False}
+
+    # ── MQTT Monitor (background subscriber for live testing) ─────
+
+    @app.post("/api/mqtt/monitor/start")
+    def mqtt_monitor_start_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        from features.mqtt.client import get_monitor_session
+        data = request.get_json(silent=True) or {}
+        broker_id = data.get("broker_id")
+        topic = data.get("topic", "#")
+        if not broker_id:
+            return {"status": "error", "errors": ["broker_id required"]}, 400
+        result = get_monitor_session().start(int(broker_id), topic)
+        if result["ok"]:
+            return {"status": "ok"}
+        return {"status": "error", "errors": [result.get("error", "unknown")]}, 500
+
+    @app.post("/api/mqtt/monitor/stop")
+    def mqtt_monitor_stop_api() -> dict[str, object]:
+        from features.mqtt.client import get_monitor_session
+        get_monitor_session().stop()
+        return {"status": "ok"}
+
+    @app.get("/api/mqtt/monitor/status")
+    def mqtt_monitor_status_api() -> dict[str, object]:
+        from features.mqtt.client import get_monitor_session
+        return get_monitor_session().status()
+
+    @app.get("/api/mqtt/monitor/messages")
+    def mqtt_monitor_messages_api() -> dict[str, object]:
+        from features.mqtt.client import get_monitor_session
+        since = int(request.args.get("since", 0))
+        return {"messages": get_monitor_session().get_messages(since)}
+
+    @app.post("/api/mqtt/monitor/clear")
+    def mqtt_monitor_clear_api() -> dict[str, object]:
+        from features.mqtt.client import get_monitor_session
+        get_monitor_session().clear()
+        return {"status": "ok"}
+
+    # ── Logo static files ────────────────────────────────────────
+
+    @app.get("/api/nav/status")
+    def nav_status_api() -> dict[str, object]:
+        import shutil as _shutil
+        from features.qr.registry import load_installed_devices
+        installed_devices = {d["id"]: True for d in load_installed_devices()}
+        return {
+            "status": "ok",
+            "installed": {
+                "wireguard": _shutil.which("wg") is not None,
+                "anydesk":   _shutil.which("anydesk") is not None,
+                "openssh":   _shutil.which("sshd") is not None,
+            },
+            "devices": installed_devices,
+        }  # type: ignore[return-value]
+
+    @app.get("/public/images/logo/<path:filename>")
+    def serve_logo(filename: str):  # type: ignore[return]
+        from flask import send_from_directory
+        logo_dir = Path(__file__).parent.parent / "public" / "images" / "logo"
+        return send_from_directory(str(logo_dir), filename)
+
+    # ── Settings routes ──────────────────────────────────────────
+
+    @app.get("/settings")
+    def settings_page() -> str:
+        return render_template("settings.html", active_tab="software")
+
+    @app.get("/api/settings/packages")
+    def settings_packages_api() -> dict[str, object]:
+        from features.packages.settings import get_package_status, CATEGORIES
+        return {
+            "status":     "ok",
+            "packages":   get_package_status(),
+            "categories": CATEGORIES,
+        }  # type: ignore[return-value]
+
+    @app.get("/api/settings/packages/<pkg_id>/status")
+    def settings_package_status_api(pkg_id: str) -> dict[str, object]:
+        from features.packages.settings import get_package_status
+        pkgs = get_package_status(pkg_id)
+        if not pkgs:
+            return {"status": "error", "errors": [f"Unknown package: {pkg_id}"]}, 404  # type: ignore[return-value]
+        return {"status": "ok", "package": pkgs[0]}  # type: ignore[return-value]
+
+    @app.post("/api/settings/install/<pkg_id>")
+    def settings_install_api(pkg_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from features.packages.settings import start_install
+        ok, err = start_install(pkg_id)
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok", "pkg_id": pkg_id}
+
+    @app.get("/api/settings/install/<pkg_id>/stream")
+    def settings_install_stream_api(pkg_id: str):  # type: ignore[return]
+        """SSE stream ของ install output"""
+        from flask import stream_with_context, Response
+        from features.packages.settings import get_install_queue, is_installing
+        import time as _time
+
+        def generate():
+            # รอให้ queue พร้อม (อาจยังไม่ start)
+            deadline = _time.monotonic() + 5.0
+            while _time.monotonic() < deadline:
+                q = get_install_queue(pkg_id)
+                if q is not None:
+                    break
+                _time.sleep(0.1)
+                yield "event: heartbeat\ndata: {}\n\n"
+            else:
+                yield f"event: error\ndata: {_json_dumps({'msg': 'Install queue not found'})}\n\n"
+                return
+
+            while True:
+                try:
+                    line = q.get(timeout=30)
+                except Exception:
+                    yield "event: heartbeat\ndata: {}\n\n"
+                    continue
+                if line is None:  # sentinel — done
+                    yield f"event: done\ndata: {_json_dumps({'pkg_id': pkg_id})}\n\n"
+                    return
+                yield f"event: line\ndata: {_json_dumps({'text': line})}\n\n"
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # ── System Monitor routes ────────────────────────────────────
+
+    @app.get("/monitor")
+    def monitor_page() -> str:
+        return render_template("monitor.html")
+
+    @app.get("/api/monitor/metrics")
+    def monitor_metrics_api() -> dict[str, object]:
+        from system.monitor import collect_metrics
+        try:
+            return collect_metrics()  # type: ignore[return-value]
+        except Exception as exc:
+            return {"error": str(exc)}  # type: ignore[return-value]
+
+    # ── Database routes ──────────────────────────────────────────
+
+    @app.get("/database")
+    def database_page() -> str:
+        from core.database import get_stats
+        return render_template("database.html", stats=get_stats())
+
+    @app.get("/api/database/<table>")
+    def database_table_api(table: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from core.database import get_rows
+        limit  = int(request.args.get("limit",  50))
+        offset = int(request.args.get("offset",  0))
+        search = request.args.get("search", "").strip() or None
+        result = get_rows(table, limit=limit, offset=offset, search=search)
+        if "error" in result:
+            return result, 400  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
+
+    @app.post("/api/database/<table>/clear")
+    def database_clear_api(table: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from core.database import clear_table, log_audit
+        result = clear_table(table)
+        if result.get("status") == "ok":
+            try:
+                log_audit("table_cleared", {"table": table})
+            except Exception:
+                pass
+        if result.get("status") == "error":
+            return result, 400  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
+
+    @app.get("/api/database/stats")
+    def database_stats_api() -> dict[str, object]:
+        from core.database import get_stats
+        return {"status": "ok", "stats": get_stats()}
+
+
+    # ════════════════════════════════════════════════════════════════
+    # Auth routes
+    # ════════════════════════════════════════════════════════════════
+
+    @app.get("/setup")
+    def auth_setup():
+        from flask import redirect as _redir, url_for as _url_for
+        from core.auth import is_first_run
+        if not is_first_run():
+            return _redir(_url_for("auth_login"))
+        return render_template("auth/setup.html")
+
+    @app.post("/setup")
+    def auth_setup_post():
+        from flask import redirect as _redir, url_for as _url_for, session as _sess
+        from core.auth import is_first_run, create_user, authenticate
+        if not is_first_run():
+            return _redir(_url_for("auth_login"))
+        username = request.form.get("username", "").strip()
+        display_name = request.form.get("display_name", "").strip()
+        password = request.form.get("password", "")
+        password_confirm = request.form.get("password_confirm", "")
+        if password != password_confirm:
+            return render_template("auth/setup.html", error="รหัสผ่านไม่ตรงกัน",
+                                   username=username, display_name=display_name)
+        ok, err = create_user(username, password, display_name=display_name, role="root")
+        if not ok:
+            return render_template("auth/setup.html", error=err,
+                                   username=username, display_name=display_name)
+        user, _ = authenticate(username, password)
+        if user:
+            _sess["vas_user_id"] = user["id"]
+        return _redir(_url_for("dashboard"))
+
+    @app.get("/login")
+    def auth_login():
+        from flask import redirect as _redir, url_for as _url_for, session as _sess
+        from core.auth import is_first_run
+        if is_first_run():
+            return _redir(_url_for("auth_setup"))
+        if _sess.get("vas_user_id"):
+            return _redir(_url_for("dashboard"))
+        return render_template("auth/login.html", next=request.args.get("next", ""))
+
+    @app.post("/login")
+    def auth_login_post():
+        from flask import redirect as _redir, url_for as _url_for, session as _sess
+        from core.auth import authenticate
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        next_url = request.form.get("next", "").strip()
+        user, err = authenticate(username, password)
+        if user is None:
+            return render_template("auth/login.html", error=err, username=username, next=next_url)
+        _sess["vas_user_id"] = user["id"]
+        # Redirect to next or dashboard — ป้องกัน open redirect
+        if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+            return _redir(next_url)
+        return _redir(_url_for("dashboard"))
+
+    @app.post("/logout")
+    def auth_logout():
+        from flask import redirect as _redir, url_for as _url_for, session as _sess
+        _sess.clear()
+        return _redir(_url_for("auth_login"))
+
+    # ════════════════════════════════════════════════════════════════
+    # User management routes
+    # ════════════════════════════════════════════════════════════════
+
+    @app.get("/users")
+    def users_page():
+        from flask import session as _sess
+        from core.auth import list_users, get_user_by_id, ROLE_BADGE_CLASS, ROLE_LABELS, can_manage_user, count_users
+        user_id = _sess.get("vas_user_id")
+        current_user = get_user_by_id(int(user_id)) if user_id else None
+        if current_user is None or current_user["role"] not in ("root", "admin"):
+            from flask import abort
+            abort(403)
+        users = list_users()
+        # role stats
+        from collections import Counter
+        role_counts = Counter(u["role"] for u in users)
+        stats = [
+            {"label": "ทั้งหมด", "count": len(users)},
+            {"label": "Admin", "count": role_counts.get("admin", 0)},
+            {"label": "User", "count": role_counts.get("user", 0)},
+        ]
+        return render_template(
+            "users.html",
+            users=users,
+            stats=stats,
+            role_badge=ROLE_BADGE_CLASS,
+            role_labels=ROLE_LABELS,
+            can_manage=can_manage_user,
+            current_user=current_user,
+        )
+
+    @app.get("/api/users")
+    def api_users_list():
+        from flask import session as _sess
+        from core.auth import list_users, get_user_by_id
+        user_id = _sess.get("vas_user_id")
+        current_user = get_user_by_id(int(user_id)) if user_id else None
+        if not current_user or current_user["role"] not in ("root", "admin"):
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        return {"status": "ok", "users": list_users()}
+
+    @app.post("/api/users")
+    def api_users_create():
+        from flask import session as _sess
+        from core.auth import create_user, get_user_by_id, ROLE_WEIGHT
+        user_id = _sess.get("vas_user_id")
+        current_user = get_user_by_id(int(user_id)) if user_id else None
+        if not current_user or current_user["role"] not in ("root", "admin"):
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        body = request.get_json(silent=True) or {}
+        role = str(body.get("role", "user"))
+        # admin สร้างได้เฉพาะ user, root สร้างได้ admin/user
+        if ROLE_WEIGHT.get(role, 0) >= ROLE_WEIGHT.get(current_user["role"], 0):
+            return {"status": "error", "errors": ["ไม่สามารถสร้าง role ที่สูงกว่าหรือเท่ากับตัวเองได้"]}, 403
+        ok, err = create_user(
+            str(body.get("username", "")),
+            str(body.get("password", "")),
+            display_name=str(body.get("display_name", "")),
+            role=role,
+        )
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok"}
+
+    @app.put("/api/users/<int:target_id>")
+    def api_users_update(target_id: int):
+        from flask import session as _sess
+        from core.auth import update_user, get_user_by_id, can_manage_user
+        user_id = _sess.get("vas_user_id")
+        current_user = get_user_by_id(int(user_id)) if user_id else None
+        target = get_user_by_id(target_id)
+        if not current_user or not target:
+            return {"status": "error", "errors": ["ไม่พบข้อมูล"]}, 404
+        if not can_manage_user(current_user["role"], target["role"]):
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์แก้ไขผู้ใช้งานนี้"]}, 403
+        body = request.get_json(silent=True) or {}
+        kwargs: dict = {}
+        if "display_name" in body:
+            kwargs["display_name"] = str(body["display_name"])
+        if "role" in body and target["role"] != "root":
+            kwargs["role"] = str(body["role"])
+        ok, err = update_user(target_id, **kwargs)
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok"}
+
+    @app.delete("/api/users/<int:target_id>")
+    def api_users_delete(target_id: int):
+        from flask import session as _sess
+        from core.auth import delete_user, get_user_by_id, can_manage_user
+        user_id = _sess.get("vas_user_id")
+        current_user = get_user_by_id(int(user_id)) if user_id else None
+        target = get_user_by_id(target_id)
+        if not current_user or not target:
+            return {"status": "error", "errors": ["ไม่พบข้อมูล"]}, 404
+        if not can_manage_user(current_user["role"], target["role"]):
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์ลบผู้ใช้งานนี้"]}, 403
+        ok, err = delete_user(target_id)
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok"}
+
+    @app.post("/api/users/<int:target_id>/reset-password")
+    def api_users_reset_password(target_id: int):
+        from flask import session as _sess
+        from core.auth import change_password, get_user_by_id, can_manage_user
+        user_id = _sess.get("vas_user_id")
+        current_user = get_user_by_id(int(user_id)) if user_id else None
+        target = get_user_by_id(target_id)
+        if not current_user or not target:
+            return {"status": "error", "errors": ["ไม่พบข้อมูล"]}, 404
+        # ต้องเป็นตัวเอง หรือมีสิทธิ์จัดการ target
+        is_self = current_user["id"] == target_id
+        if not is_self and not can_manage_user(current_user["role"], target["role"]):
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์รีเซ็ตรหัสผ่านผู้ใช้งานนี้"]}, 403
+        body = request.get_json(silent=True) or {}
+        ok, err = change_password(target_id, str(body.get("password", "")))
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok"}
+
+    # ── Profile (self) API ────────────────────────────────────────
+
+    @app.get("/api/profile")
+    def api_profile_get():
+        from flask import session as _sess
+        from core.auth import get_user_by_id
+        user_id = _sess.get("vas_user_id")
+        if not user_id:
+            return {"status": "error", "errors": ["ไม่ได้เข้าสู่ระบบ"]}, 401
+        user = get_user_by_id(int(user_id))
+        if not user:
+            return {"status": "error", "errors": ["ไม่พบผู้ใช้"]}, 404
+        return {"status": "ok", "user": user}
+
+    @app.put("/api/profile")
+    def api_profile_update():
+        from flask import session as _sess
+        from core.auth import update_user, get_user_by_id
+        user_id = _sess.get("vas_user_id")
+        if not user_id:
+            return {"status": "error", "errors": ["ไม่ได้เข้าสู่ระบบ"]}, 401
+        body = request.get_json(silent=True) or {}
+        ok, err = update_user(int(user_id), display_name=str(body.get("display_name", "")))
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok"}
+
+    @app.post("/api/profile/password")
+    def api_profile_password():
+        from flask import session as _sess
+        from core.auth import change_password, verify_current_password, get_user_by_id
+        user_id = _sess.get("vas_user_id")
+        if not user_id:
+            return {"status": "error", "errors": ["ไม่ได้เข้าสู่ระบบ"]}, 401
+        body = request.get_json(silent=True) or {}
+        current_pw = str(body.get("current_password", ""))
+        new_pw = str(body.get("new_password", ""))
+        if not verify_current_password(int(user_id), current_pw):
+            return {"status": "error", "errors": ["รหัสผ่านปัจจุบันไม่ถูกต้อง"]}, 400
+        ok, err = change_password(int(user_id), new_pw)
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok"}
 
     return app
 
@@ -922,7 +1774,6 @@ def _allowed_config_paths() -> dict[str, Path]:
 
 def _system_snapshot_dir_label() -> str:
     return system_snapshot_dir().as_posix()
-
 
 def _default_x_display() -> str:
     return ":0"

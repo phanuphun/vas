@@ -1,0 +1,490 @@
+{% extends base_template %}
+
+{% block page_title %}จัดการผู้ใช้งาน — VAS{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">ระบบ · ผู้ใช้งาน</p>
+  <h1 class="font-display text-[1.25rem] font-bold text-ink mt-0.5">จัดการผู้ใช้งาน</h1>
+  <p class="text-[0.8rem] text-muted mt-0.5">เพิ่ม ลบ และจัดการสิทธิ์ผู้ใช้งานในระบบ</p>
+</div>
+
+<!-- Stats row -->
+<div class="grid grid-cols-3 gap-3 mb-5">
+  {% for stat in stats %}
+  <div class="bg-card border border-line/10 rounded-xl px-4 py-3">
+    <div class="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-faint mb-1">{{ stat.label }}</div>
+    <div class="font-display text-[1.4rem] font-bold text-ink">{{ stat.count }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Table card -->
+<div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+  <!-- Card header -->
+  <div class="flex items-center justify-between px-5 py-3.5 border-b border-line/10">
+    <span class="font-display text-[0.85rem] font-bold text-ink">ผู้ใช้งานทั้งหมด</span>
+    {% if current_user.role in ('root', 'admin') %}
+    <button onclick="openAddModal()"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white text-[0.78rem] font-semibold rounded-lg hover:bg-blue-700 transition-colors">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      เพิ่มผู้ใช้งาน
+    </button>
+    {% endif %}
+  </div>
+
+  <!-- Table -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-[0.82rem]">
+      <thead>
+        <tr class="border-b border-line/10 bg-surface">
+          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint">ผู้ใช้งาน</th>
+          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint">สิทธิ์</th>
+          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint hidden md:table-cell">เข้าสู่ระบบล่าสุด</th>
+          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint hidden sm:table-cell">สร้างเมื่อ</th>
+          <th class="px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint text-right">จัดการ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr class="border-b border-line/8 hover:bg-surface/60 transition-colors group" data-user-id="{{ u.id }}">
+          <td class="px-5 py-3">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full bg-accent/10 text-accent text-[0.65rem] font-bold font-display
+                          grid place-items-center flex-shrink-0
+                          {% if u.role == 'root' %}bg-danger/10 text-danger{% elif u.role == 'admin' %}bg-caution/10 text-[#92660b]{% endif %}">
+                {{ u.display_name[:2].upper() if u.display_name else u.username[:2].upper() }}
+              </div>
+              <div>
+                <div class="font-semibold text-ink flex items-center gap-1.5">
+                  {{ u.display_name or u.username }}
+                  {% if u.id == current_user.id %}
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[0.58rem] font-bold bg-accent/10 text-accent leading-none">คุณ</span>
+                  {% endif %}
+                </div>
+                <div class="text-[0.72rem] text-faint">@{{ u.username }}</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-5 py-3">
+            <span class="zone {{ role_badge[u.role] }}">
+              {% if u.role == 'root' %}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+              </svg>
+              {% elif u.role == 'admin' %}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              {% endif %}
+              {{ role_labels[u.role] }}
+            </span>
+          </td>
+          <td class="px-5 py-3 text-muted hidden md:table-cell">
+            {{ u.last_login[:16].replace('T',' ') if u.last_login else '—' }}
+          </td>
+          <td class="px-5 py-3 text-muted hidden sm:table-cell">
+            {{ u.created_at[:10] if u.created_at else '—' }}
+          </td>
+          <td class="px-5 py-3 text-right">
+            <div class="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <!-- Reset Password -->
+              {% if current_user.id == u.id or can_manage(current_user.role, u.role) %}
+              <button onclick="openResetModal({{ u.id }}, '{{ u.display_name or u.username }}')"
+                      class="w-7 h-7 rounded-lg border border-line/15 bg-card text-faint hover:text-caution hover:border-caution/30 transition-colors flex items-center justify-center"
+                      title="รีเซ็ตรหัสผ่าน">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                </svg>
+              </button>
+              {% endif %}
+
+              <!-- Edit -->
+              {% if can_manage(current_user.role, u.role) %}
+              <button onclick="openEditModal({{ u.id }}, '{{ u.username }}', '{{ u.display_name }}', '{{ u.role }}')"
+                      class="w-7 h-7 rounded-lg border border-line/15 bg-card text-faint hover:text-ink transition-colors flex items-center justify-center"
+                      title="แก้ไขข้อมูล">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+              {% endif %}
+
+              <!-- Delete -->
+              {% if u.role != 'root' and can_manage(current_user.role, u.role) and current_user.id != u.id %}
+              <button onclick="openDeleteModal({{ u.id }}, '{{ u.display_name or u.username }}')"
+                      class="w-7 h-7 rounded-lg border border-line/15 bg-card text-faint hover:text-danger hover:border-danger/30 transition-colors flex items-center justify-center"
+                      title="ลบผู้ใช้งาน">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════
+     MODAL: เพิ่มผู้ใช้งาน
+═══════════════════════════════════════════════════════ -->
+<div id="modal-add" class="modal-backdrop">
+  <div class="modal-dialog w-[min(460px,calc(100vw-2rem))]">
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <h2 class="modal-dialog-title">เพิ่มผู้ใช้งานใหม่</h2>
+        <p class="modal-dialog-message">กรอกข้อมูลผู้ใช้งานที่ต้องการเพิ่ม</p>
+      </div>
+      <button onclick="closeModal('modal-add')" class="text-faint hover:text-ink transition-colors mt-0.5">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form id="form-add" class="flex flex-col gap-3.5" onsubmit="submitAdd(event)">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.75rem] font-semibold text-ink">ชื่อผู้ใช้ <span class="text-danger">*</span></label>
+          <input type="text" name="username" placeholder="username" required minlength="3"
+                 class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.75rem] font-semibold text-ink">ชื่อแสดง</label>
+          <input type="text" name="display_name" placeholder="ชื่อที่แสดง"
+                 class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+        </div>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-ink">สิทธิ์ <span class="text-danger">*</span></label>
+        <select name="role"
+                class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+          {% if current_user.role == 'root' %}
+          <option value="admin">Admin — ดูแลระบบ</option>
+          {% endif %}
+          <option value="user" selected>User — ผู้ใช้งานทั่วไป</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.75rem] font-semibold text-ink">รหัสผ่าน <span class="text-danger">*</span></label>
+          <input type="password" name="password" placeholder="อย่างน้อย 6 ตัว" required minlength="6"
+                 class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.75rem] font-semibold text-ink">ยืนยัน <span class="text-danger">*</span></label>
+          <input type="password" name="password_confirm" placeholder="กรอกอีกครั้ง" required
+                 class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+        </div>
+      </div>
+      <div id="add-error" class="text-[0.78rem] text-danger hidden px-3 py-2 rounded-lg bg-danger/8 border border-danger/20"></div>
+      <div class="modal-dialog-actions mt-1">
+        <button type="button" onclick="closeModal('modal-add')"
+                class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">ยกเลิก</button>
+        <button type="submit" id="add-submit-btn"
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+          เพิ่มผู้ใช้งาน
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════
+     MODAL: แก้ไขผู้ใช้งาน
+═══════════════════════════════════════════════════════ -->
+<div id="modal-edit" class="modal-backdrop">
+  <div class="modal-dialog w-[min(400px,calc(100vw-2rem))]">
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <h2 class="modal-dialog-title">แก้ไขผู้ใช้งาน</h2>
+        <p class="modal-dialog-message" id="edit-subtitle">กำลังแก้ไข —</p>
+      </div>
+      <button onclick="closeModal('modal-edit')" class="text-faint hover:text-ink transition-colors">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form id="form-edit" class="flex flex-col gap-3.5" onsubmit="submitEdit(event)">
+      <input type="hidden" id="edit-user-id">
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-ink">ชื่อแสดง</label>
+        <input type="text" id="edit-display-name" placeholder="ชื่อที่แสดง"
+               class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+      </div>
+      <div class="flex flex-col gap-1.5" id="edit-role-row">
+        <label class="text-[0.75rem] font-semibold text-ink">สิทธิ์</label>
+        <select id="edit-role"
+                class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+          {% if current_user.role == 'root' %}
+          <option value="admin">Admin</option>
+          {% endif %}
+          <option value="user">User</option>
+        </select>
+      </div>
+      <div id="edit-error" class="text-[0.78rem] text-danger hidden px-3 py-2 rounded-lg bg-danger/8 border border-danger/20"></div>
+      <div class="modal-dialog-actions mt-1">
+        <button type="button" onclick="closeModal('modal-edit')"
+                class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">ยกเลิก</button>
+        <button type="submit"
+                class="inline-flex items-center px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+          บันทึก
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════
+     MODAL: Reset รหัสผ่าน
+═══════════════════════════════════════════════════════ -->
+<div id="modal-reset" class="modal-backdrop">
+  <div class="modal-dialog w-[min(400px,calc(100vw-2rem))]">
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <h2 class="modal-dialog-title">รีเซ็ตรหัสผ่าน</h2>
+        <p class="modal-dialog-message" id="reset-subtitle">—</p>
+      </div>
+      <button onclick="closeModal('modal-reset')" class="text-faint hover:text-ink transition-colors">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form id="form-reset" class="flex flex-col gap-3.5" onsubmit="submitReset(event)">
+      <input type="hidden" id="reset-user-id">
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-ink">รหัสผ่านใหม่ <span class="text-danger">*</span></label>
+        <input type="password" id="reset-pw1" placeholder="อย่างน้อย 6 ตัวอักษร" required minlength="6"
+               class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-ink">ยืนยันรหัสผ่าน <span class="text-danger">*</span></label>
+        <input type="password" id="reset-pw2" placeholder="กรอกอีกครั้ง" required
+               class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+      </div>
+      <div id="reset-error" class="text-[0.78rem] text-danger hidden px-3 py-2 rounded-lg bg-danger/8 border border-danger/20"></div>
+      <div class="modal-dialog-actions mt-1">
+        <button type="button" onclick="closeModal('modal-reset')"
+                class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">ยกเลิก</button>
+        <button type="submit"
+                class="inline-flex items-center px-3.5 py-1.5 border border-caution/40 rounded-lg bg-caution/10 text-[#7a5800] text-[0.82rem] font-semibold hover:bg-caution/20 transition-colors">
+          รีเซ็ตรหัสผ่าน
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════
+     MODAL: ยืนยันลบ
+═══════════════════════════════════════════════════════ -->
+<div id="modal-delete" class="modal-backdrop">
+  <div class="modal-dialog w-[min(380px,calc(100vw-2rem))]">
+    <div class="modal-dialog-head">
+      <div class="w-9 h-9 border border-danger/30 rounded-lg bg-danger/8 text-danger grid place-items-center flex-shrink-0">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+        </svg>
+      </div>
+      <div class="modal-dialog-body">
+        <h2 class="modal-dialog-title">ยืนยันการลบ</h2>
+        <p class="modal-dialog-message">ลบผู้ใช้งาน <strong id="delete-username" class="text-ink"></strong>? การกระทำนี้ไม่สามารถย้อนกลับได้</p>
+      </div>
+    </div>
+    <div id="delete-error" class="text-[0.78rem] text-danger hidden mt-3 px-3 py-2 rounded-lg bg-danger/8 border border-danger/20"></div>
+    <div class="modal-dialog-actions">
+      <button onclick="closeModal('modal-delete')"
+              class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">ยกเลิก</button>
+      <button id="delete-confirm-btn" onclick="submitDelete()"
+              class="inline-flex items-center px-3.5 py-1.5 border border-danger/40 rounded-lg bg-danger/8 text-danger text-[0.82rem] font-semibold hover:bg-danger/15 transition-colors">
+        ลบผู้ใช้งาน
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-wrap" class="toast-wrap"></div>
+
+<script>
+var _deleteUserId = null;
+
+// ── Modal helpers ────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById(id).classList.add('is-visible');
+  document.getElementById(id).querySelector('.modal-dialog').classList.add('is-visible');
+  document.body.classList.add('modal-open');
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('is-visible');
+  document.getElementById(id).querySelector('.modal-dialog').classList.remove('is-visible');
+  document.body.classList.remove('modal-open');
+}
+document.querySelectorAll('.modal-backdrop').forEach(function(el) {
+  el.addEventListener('click', function(e) {
+    if (e.target === el) closeModal(el.id);
+  });
+});
+
+// ── Toast ─────────────────────────────────────────────────────
+function showToast(msg, type) {
+  var wrap = document.getElementById('toast-wrap');
+  var t = document.createElement('div');
+  var color = type === 'ok' ? 'bg-safe/10 border-safe/30 text-[#0f766e]' : 'bg-danger/10 border-danger/30 text-danger';
+  t.className = 'px-4 py-2.5 rounded-lg border text-[0.82rem] font-medium shadow-md ' + color;
+  t.textContent = msg;
+  wrap.appendChild(t);
+  setTimeout(function() { t.remove(); }, 3500);
+}
+
+function setErr(id, msg) {
+  var el = document.getElementById(id);
+  if (msg) { el.textContent = msg; el.classList.remove('hidden'); }
+  else { el.classList.add('hidden'); }
+}
+
+// ── Add user ──────────────────────────────────────────────────
+function openAddModal() {
+  document.getElementById('form-add').reset();
+  setErr('add-error', '');
+  openModal('modal-add');
+  document.querySelector('#form-add input[name=username]').focus();
+}
+
+function submitAdd(e) {
+  e.preventDefault();
+  var f = document.getElementById('form-add');
+  var pw = f.querySelector('[name=password]').value;
+  var pw2 = f.querySelector('[name=password_confirm]').value;
+  if (pw !== pw2) { setErr('add-error', 'รหัสผ่านไม่ตรงกัน'); return; }
+
+  var btn = document.getElementById('add-submit-btn');
+  btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
+
+  fetch('/api/users', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      username: f.querySelector('[name=username]').value,
+      display_name: f.querySelector('[name=display_name]').value,
+      role: f.querySelector('[name=role]').value,
+      password: pw,
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    btn.disabled = false; btn.textContent = 'เพิ่มผู้ใช้งาน';
+    if (d.status === 'ok') {
+      closeModal('modal-add');
+      showToast('เพิ่มผู้ใช้งานเรียบร้อย', 'ok');
+      setTimeout(function(){ location.reload(); }, 800);
+    } else {
+      setErr('add-error', (d.errors || [d.message || 'เกิดข้อผิดพลาด']).join(', '));
+    }
+  })
+  .catch(function(){ btn.disabled = false; btn.textContent = 'เพิ่มผู้ใช้งาน'; setErr('add-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ'); });
+}
+
+// ── Edit user ─────────────────────────────────────────────────
+function openEditModal(id, username, displayName, role) {
+  document.getElementById('edit-user-id').value = id;
+  document.getElementById('edit-display-name').value = displayName;
+  document.getElementById('edit-subtitle').textContent = 'กำลังแก้ไข @' + username;
+  var roleEl = document.getElementById('edit-role');
+  if (roleEl) roleEl.value = role;
+  // ซ่อน role selector ถ้าเป็น root หรือแก้ไขตัวเอง
+  var roleRow = document.getElementById('edit-role-row');
+  if (roleRow) roleRow.style.display = (role === 'root') ? 'none' : '';
+  setErr('edit-error', '');
+  openModal('modal-edit');
+  document.getElementById('edit-display-name').focus();
+}
+
+function submitEdit(e) {
+  e.preventDefault();
+  var id = document.getElementById('edit-user-id').value;
+  var roleEl = document.getElementById('edit-role');
+  var body = {
+    display_name: document.getElementById('edit-display-name').value,
+  };
+  if (roleEl && document.getElementById('edit-role-row').style.display !== 'none') {
+    body.role = roleEl.value;
+  }
+  fetch('/api/users/' + id, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    if (d.status === 'ok') {
+      closeModal('modal-edit');
+      showToast('บันทึกข้อมูลเรียบร้อย', 'ok');
+      setTimeout(function(){ location.reload(); }, 800);
+    } else {
+      setErr('edit-error', (d.errors || ['เกิดข้อผิดพลาด']).join(', '));
+    }
+  })
+  .catch(function(){ setErr('edit-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ'); });
+}
+
+// ── Reset password ────────────────────────────────────────────
+function openResetModal(id, name) {
+  document.getElementById('reset-user-id').value = id;
+  document.getElementById('reset-subtitle').textContent = 'ตั้งรหัสผ่านใหม่สำหรับ ' + name;
+  document.getElementById('reset-pw1').value = '';
+  document.getElementById('reset-pw2').value = '';
+  setErr('reset-error', '');
+  openModal('modal-reset');
+  document.getElementById('reset-pw1').focus();
+}
+
+function submitReset(e) {
+  e.preventDefault();
+  var id = document.getElementById('reset-user-id').value;
+  var pw1 = document.getElementById('reset-pw1').value;
+  var pw2 = document.getElementById('reset-pw2').value;
+  if (pw1 !== pw2) { setErr('reset-error', 'รหัสผ่านไม่ตรงกัน'); return; }
+  fetch('/api/users/' + id + '/reset-password', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ password: pw1 })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    if (d.status === 'ok') {
+      closeModal('modal-reset');
+      showToast('รีเซ็ตรหัสผ่านเรียบร้อย', 'ok');
+    } else {
+      setErr('reset-error', (d.errors || ['เกิดข้อผิดพลาด']).join(', '));
+    }
+  })
+  .catch(function(){ setErr('reset-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ'); });
+}
+
+// ── Delete user ───────────────────────────────────────────────
+function openDeleteModal(id, name) {
+  _deleteUserId = id;
+  document.getElementById('delete-username').textContent = name;
+  setErr('delete-error', '');
+  openModal('modal-delete');
+}
+
+function submitDelete() {
+  if (!_deleteUserId) return;
+  fetch('/api/users/' + _deleteUserId, { method: 'DELETE' })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    if (d.status === 'ok') {
+      closeModal('modal-delete');
+      showToast('ลบผู้ใช้งานเรียบร้อย', 'ok');
+      setTimeout(function(){ location.reload(); }, 800);
+    } else {
+      setErr('delete-error', (d.errors || ['เกิดข้อผิดพลาด']).join(', '));
+    }
+  })
+  .catch(function(){ setErr('delete-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ'); });
+}
+</script>
+{% endblock %}

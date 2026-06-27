@@ -1,0 +1,603 @@
+{% extends base_template %}
+{% block page_title %}Monitor — VAS{% endblock %}
+{% block header_title %}System Monitor{% endblock %}
+
+{% block header_actions %}
+<div class="flex items-center gap-2">
+  <!-- Refresh interval selector -->
+  <div class="flex items-center gap-0.5 border border-line/10 rounded-lg bg-surface px-1 py-1">
+    <button class="interval-btn px-2.5 py-1 rounded-md text-[0.72rem] font-semibold transition-colors text-muted hover:bg-card hover:text-ink" data-sec="3">3s</button>
+    <button class="interval-btn px-2.5 py-1 rounded-md text-[0.72rem] font-semibold transition-colors text-muted hover:bg-card hover:text-ink" data-sec="5">5s</button>
+    <button class="interval-btn px-2.5 py-1 rounded-md text-[0.72rem] font-semibold transition-colors text-muted hover:bg-card hover:text-ink" data-sec="10">10s</button>
+  </div>
+  <button id="btn-refresh"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors"
+          onclick="mon.load()">
+    <iconify-icon icon="lucide:refresh-cw" width="13" height="13" id="refresh-icon"></iconify-icon>
+    Refresh
+  </button>
+  <span class="text-[0.72rem] text-faint tabular-nums" id="last-update">—</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Bar ── */
+  .bar-track { width:100%; height:5px; border-radius:9999px; background:rgb(var(--c-line)/0.07); overflow:hidden; }
+  .bar-fill  { height:100%; border-radius:9999px; transition:width 0.5s ease; }
+  .bar-safe    { background:rgb(var(--c-safe)); }
+  .bar-caution { background:rgb(var(--c-caution)); }
+  .bar-danger  { background:rgb(var(--c-danger)); }
+  .bar-accent  { background:rgb(var(--c-accent)); }
+
+  /* ── Micro bar (per-core) ── */
+  .micro-bar-track { height:3px; border-radius:9999px; background:rgb(var(--c-line)/0.07); overflow:hidden; }
+  .micro-bar-fill  { height:100%; border-radius:9999px; transition:width 0.4s ease; }
+
+  /* ── Metric value (monospace numbers) ── */
+  .metric-val { font-family:'Bai Jamjuree',monospace; font-weight:700; }
+
+  /* ── Spinning animation ── */
+  @keyframes spin-once { to { transform:rotate(360deg); } }
+  .spinning { animation:spin-once 0.5s linear; }
+
+  /* ── Loading skeleton pulse ── */
+  @keyframes pulse { 0%,100%{opacity:0.5} 50%{opacity:1} }
+  .skeleton { background:rgb(var(--c-line)/0.06); border-radius:6px; animation:pulse 1.6s ease-in-out infinite; }
+</style>
+
+<!-- 1. PAGE HEADER -->
+<div class="border-b border-line/10 pb-4">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · ระบบ</p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">System Monitor</h1>
+  <p class="text-[0.82rem] text-muted mt-1">ตรวจสอบสถานะ CPU, RAM, ดิสก์ และเครือข่ายแบบ real-time</p>
+</div>
+
+<!-- 3. CONTENT SECTION -->
+<!-- Loading state -->
+<div id="mon-loading" class="flex flex-col gap-4">
+  <!-- OS bar skeleton -->
+  <div class="bg-card border border-line/10 rounded-xl px-5 py-3 h-[44px] skeleton"></div>
+  <!-- Stat row skeleton -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div class="skeleton h-[80px] rounded-xl"></div>
+    <div class="skeleton h-[80px] rounded-xl"></div>
+    <div class="skeleton h-[80px] rounded-xl"></div>
+    <div class="skeleton h-[80px] rounded-xl"></div>
+  </div>
+  <!-- Main grid skeleton -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="skeleton h-[320px] rounded-xl"></div>
+    <div class="skeleton h-[320px] rounded-xl"></div>
+  </div>
+  <div class="skeleton h-[160px] rounded-xl"></div>
+  <div class="skeleton h-[120px] rounded-xl"></div>
+</div>
+
+<!-- Main content (hidden until first load) -->
+<div id="mon-content" style="display:none;" class="flex flex-col gap-4">
+
+  <!-- ── OS Info Strip ── -->
+  <div class="bg-card border border-line/10 rounded-xl px-5 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+    <div class="flex items-center gap-1.5">
+      <iconify-icon icon="lucide:layers" width="13" height="13" class="text-faint"></iconify-icon>
+      <span class="text-[0.72rem] text-faint">OS</span>
+      <span class="text-[0.78rem] font-semibold text-ink font-display" id="os-name">—</span>
+    </div>
+    <div class="w-px h-3 bg-line/10 hidden sm:block"></div>
+    <div class="flex items-center gap-1.5">
+      <iconify-icon icon="lucide:terminal" width="13" height="13" class="text-faint"></iconify-icon>
+      <span class="text-[0.72rem] text-faint">Kernel</span>
+      <span class="text-[0.78rem] font-display text-ink" id="os-kernel">—</span>
+    </div>
+    <div class="w-px h-3 bg-line/10 hidden sm:block"></div>
+    <div class="flex items-center gap-1.5">
+      <iconify-icon icon="lucide:server" width="13" height="13" class="text-faint"></iconify-icon>
+      <span class="text-[0.72rem] text-faint">Host</span>
+      <span class="text-[0.78rem] font-semibold text-ink" id="os-host">—</span>
+    </div>
+    <div class="w-px h-3 bg-line/10 hidden sm:block"></div>
+    <div class="flex items-center gap-1.5">
+      <iconify-icon icon="lucide:clock" width="13" height="13" class="text-faint"></iconify-icon>
+      <span class="text-[0.72rem] text-faint">Uptime</span>
+      <span class="text-[0.78rem] text-ink font-display" id="os-uptime">—</span>
+    </div>
+    <div class="w-px h-3 bg-line/10 hidden sm:block"></div>
+    <div class="flex items-center gap-1.5">
+      <iconify-icon icon="lucide:cpu" width="13" height="13" class="text-faint"></iconify-icon>
+      <span class="text-[0.72rem] text-faint">Arch</span>
+      <span class="text-[0.78rem] font-display text-ink" id="os-arch">—</span>
+    </div>
+  </div>
+
+  <!-- ── Summary Stat Row ── -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <!-- CPU stat -->
+    <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-3">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:cpu" width="16" height="16" class="text-muted"></iconify-icon>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-[0.68rem] text-faint mb-0.5">CPU Usage</div>
+        <div class="metric-val text-[1.25rem] leading-none text-ink" id="stat-cpu">—%</div>
+      </div>
+    </div>
+    <!-- RAM stat -->
+    <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-3">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:memory-stick" width="16" height="16" class="text-muted"></iconify-icon>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-[0.68rem] text-faint mb-0.5">RAM Usage</div>
+        <div class="metric-val text-[1.25rem] leading-none text-ink" id="stat-ram">—%</div>
+      </div>
+    </div>
+    <!-- Load avg stat -->
+    <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-3">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:activity" width="16" height="16" class="text-muted"></iconify-icon>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-[0.68rem] text-faint mb-0.5">Load Avg (1m)</div>
+        <div class="metric-val text-[1.25rem] leading-none text-ink" id="stat-load">—</div>
+      </div>
+    </div>
+    <!-- Temp stat -->
+    <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-3">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:thermometer" width="16" height="16" class="text-muted"></iconify-icon>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-[0.68rem] text-faint mb-0.5">Temperature</div>
+        <div class="metric-val text-[1.25rem] leading-none text-ink" id="stat-temp">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CPU + RAM (2-column) ── -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    <!-- ─── CPU Card ─── -->
+    <div class="bg-card border border-line/10 rounded-xl flex flex-col">
+      <!-- Card header -->
+      <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:cpu" width="14" height="14" class="text-faint"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">CPU</h2>
+        </div>
+        <span class="metric-val text-[1.4rem] leading-none text-ink" id="cpu-pct">—%</span>
+      </div>
+
+      <div class="px-5 pt-4 pb-3 flex flex-col gap-4">
+        <!-- Usage bar -->
+        <div>
+          <div class="bar-track">
+            <div class="bar-fill bar-accent" id="cpu-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- Model -->
+        <p class="text-[0.75rem] text-muted truncate -mt-1" id="cpu-model">—</p>
+
+        <!-- CPU info grid -->
+        <div class="grid grid-cols-3 gap-2">
+          <div class="bg-surface rounded-lg px-3 py-2.5">
+            <div class="text-[0.65rem] text-faint mb-0.5">Cores</div>
+            <div class="metric-val text-[0.95rem] text-ink" id="cpu-cores">—</div>
+          </div>
+          <div class="bg-surface rounded-lg px-3 py-2.5">
+            <div class="text-[0.65rem] text-faint mb-0.5">Threads</div>
+            <div class="metric-val text-[0.95rem] text-ink" id="cpu-threads">—</div>
+          </div>
+          <div class="bg-surface rounded-lg px-3 py-2.5">
+            <div class="text-[0.65rem] text-faint mb-0.5">MHz</div>
+            <div class="metric-val text-[0.95rem] text-ink" id="cpu-mhz">—</div>
+          </div>
+        </div>
+
+        <!-- Load average -->
+        <div>
+          <div class="text-[0.65rem] text-faint mb-1.5 uppercase tracking-[0.06em]">Load Average</div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="bg-surface rounded-lg px-3 py-2.5">
+              <div class="text-[0.65rem] text-faint mb-0.5">1 min</div>
+              <div class="metric-val text-[0.95rem] text-ink" id="load-1">—</div>
+            </div>
+            <div class="bg-surface rounded-lg px-3 py-2.5">
+              <div class="text-[0.65rem] text-faint mb-0.5">5 min</div>
+              <div class="metric-val text-[0.95rem] text-ink" id="load-5">—</div>
+            </div>
+            <div class="bg-surface rounded-lg px-3 py-2.5">
+              <div class="text-[0.65rem] text-faint mb-0.5">15 min</div>
+              <div class="metric-val text-[0.95rem] text-ink" id="load-15">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Per-core usage -->
+        <div id="per-core-area"></div>
+      </div>
+    </div>
+
+    <!-- ─── RAM Card ─── -->
+    <div class="bg-card border border-line/10 rounded-xl flex flex-col">
+      <!-- Card header -->
+      <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:memory-stick" width="14" height="14" class="text-faint"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Memory</h2>
+        </div>
+        <span class="metric-val text-[1.4rem] leading-none text-ink" id="ram-pct">—%</span>
+      </div>
+
+      <div class="px-5 pt-4 pb-3 flex flex-col gap-4">
+        <!-- RAM bar -->
+        <div>
+          <div class="flex justify-between items-center text-[0.7rem] text-faint mb-1.5">
+            <span>RAM</span>
+            <span id="ram-used-label" class="font-display">—</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill bar-accent" id="ram-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- RAM stat grid -->
+        <div class="grid grid-cols-2 gap-2">
+          <div class="bg-surface rounded-lg px-3 py-2.5">
+            <div class="text-[0.65rem] text-faint mb-0.5">Total</div>
+            <div class="metric-val text-[0.9rem] text-ink" id="ram-total">—</div>
+          </div>
+          <div class="bg-surface rounded-lg px-3 py-2.5">
+            <div class="text-[0.65rem] text-faint mb-0.5">Used</div>
+            <div class="metric-val text-[0.9rem] text-ink" id="ram-used">—</div>
+          </div>
+          <div class="bg-surface rounded-lg px-3 py-2.5">
+            <div class="text-[0.65rem] text-faint mb-0.5">Available</div>
+            <div class="metric-val text-[0.9rem] text-ink" id="ram-avail">—</div>
+          </div>
+          <div class="bg-surface rounded-lg px-3 py-2.5">
+            <div class="text-[0.65rem] text-faint mb-0.5">Cached</div>
+            <div class="metric-val text-[0.9rem] text-ink" id="ram-cached">—</div>
+          </div>
+        </div>
+
+        <!-- Swap -->
+        <div id="swap-area">
+          <div class="flex justify-between items-center text-[0.7rem] text-faint mb-1.5">
+            <span class="uppercase tracking-[0.06em]">Swap</span>
+            <span id="swap-label" class="font-display">—</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill bar-caution" id="swap-bar" style="width:0%"></div>
+          </div>
+          <div class="flex justify-between mt-1.5">
+            <span class="text-[0.7rem] text-faint" id="swap-used-label">—</span>
+            <span class="text-[0.7rem] text-faint" id="swap-total-label">—</span>
+          </div>
+        </div>
+
+        <!-- Temperature sensors -->
+        <div id="temp-area" class="flex flex-col gap-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Disk Card ── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <div class="flex items-center gap-2">
+        <iconify-icon icon="lucide:hard-drive" width="14" height="14" class="text-faint"></iconify-icon>
+        <h2 class="text-[0.88rem] font-semibold text-ink">Disk</h2>
+      </div>
+      <div class="flex items-center gap-1.5 flex-wrap justify-end" id="block-badges"></div>
+    </div>
+    <div class="divide-y divide-line/7" id="disk-list">
+      <div class="px-5 py-4 text-faint text-[0.82rem] flex items-center gap-2">
+        <span class="spin"></span> กำลังโหลด...
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Network I/O Card ── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center gap-2 px-5 py-3 border-b border-line/10">
+      <iconify-icon icon="lucide:network" width="14" height="14" class="text-faint"></iconify-icon>
+      <h2 class="text-[0.88rem] font-semibold text-ink">Network I/O</h2>
+      <span class="text-[0.68rem] text-faint ml-1 border border-line/10 rounded-md px-1.5 py-0.5">cumulative since boot</span>
+    </div>
+    <div class="divide-y divide-line/7" id="net-list">
+      <div class="px-5 py-4 text-faint text-[0.82rem] flex items-center gap-2">
+        <span class="spin"></span> กำลังโหลด...
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var intervalSec = 5;
+  var timer = null;
+
+  // ── Format helpers ──
+  function fmtBytes(n) {
+    if (!n) return "0 B";
+    var units = ["B","KB","MB","GB","TB"];
+    var u = 0;
+    while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
+    return n.toFixed(u === 0 ? 0 : 1) + " " + units[u];
+  }
+  function barClass(pct) {
+    if (pct >= 90) return "bar-danger";
+    if (pct >= 70) return "bar-caution";
+    return "bar-accent";
+  }
+  function microBarClass(pct) {
+    if (pct >= 90) return "background:rgb(var(--c-danger))";
+    if (pct >= 70) return "background:rgb(var(--c-caution))";
+    return "background:rgb(var(--c-accent))";
+  }
+  function tempClass(c) {
+    if (c >= 80) return "text-danger font-bold";
+    if (c >= 65) return "text-caution font-semibold";
+    return "text-safe";
+  }
+  function statColorClass(pct) {
+    if (pct >= 90) return "text-danger";
+    if (pct >= 70) return "text-caution";
+    return "text-ink";
+  }
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = val;
+  }
+  function setBar(id, pct) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.style.width = Math.min(pct, 100) + "%";
+    el.className = "bar-fill " + barClass(pct);
+  }
+  function setStatColor(id, pct) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.className = "metric-val text-[1.25rem] leading-none " + statColorClass(pct);
+  }
+
+  // ── Render ──
+  function render(d) {
+    // OS strip
+    setText("os-name",   d.os.os_name);
+    setText("os-kernel", d.os.kernel);
+    setText("os-host",   d.os.hostname);
+    setText("os-uptime", d.uptime.human);
+    setText("os-arch",   d.os.arch);
+
+    // ── CPU ──
+    var cpu = d.cpu;
+    setText("cpu-pct",     cpu.usage_pct + "%");
+    setText("stat-cpu",    cpu.usage_pct + "%");
+    setStatColor("stat-cpu", cpu.usage_pct);
+    setBar("cpu-bar", cpu.usage_pct);
+    document.getElementById("cpu-pct").className =
+      "metric-val text-[1.4rem] leading-none " + statColorClass(cpu.usage_pct);
+
+    setText("cpu-model",   cpu.model);
+    setText("cpu-cores",   cpu.cores);
+    setText("cpu-threads", cpu.threads);
+    setText("cpu-mhz",     cpu.mhz ? cpu.mhz.toLocaleString() : "—");
+    setText("load-1",  cpu.load_1.toFixed(2));
+    setText("load-5",  cpu.load_5.toFixed(2));
+    setText("load-15", cpu.load_15.toFixed(2));
+    setText("stat-load", cpu.load_1.toFixed(2));
+
+    // Per-core bars (compact grid)
+    var coreArea = document.getElementById("per-core-area");
+    if (cpu.per_core_pct && cpu.per_core_pct.length > 0) {
+      var html = '<div class="text-[0.65rem] text-faint mb-2 uppercase tracking-[0.06em]">Per-core</div>';
+      html += '<div class="grid gap-x-3 gap-y-2" style="grid-template-columns:repeat(auto-fill,minmax(4.5rem,1fr))">';
+      cpu.per_core_pct.forEach(function(p, i) {
+        html += '<div>' +
+          '<div class="flex justify-between text-[0.62rem] text-faint mb-1">' +
+            '<span>cpu' + i + '</span>' +
+            '<span class="font-display">' + p + '%</span>' +
+          '</div>' +
+          '<div class="micro-bar-track">' +
+            '<div class="micro-bar-fill" style="width:' + Math.min(p,100) + '%;' + microBarClass(p) + '"></div>' +
+          '</div>' +
+        '</div>';
+      });
+      html += '</div>';
+      coreArea.innerHTML = html;
+    } else {
+      coreArea.innerHTML = "";
+    }
+
+    // ── RAM ──
+    var mem = d.memory;
+    setText("ram-pct",        mem.used_pct + "%");
+    setText("stat-ram",       mem.used_pct + "%");
+    setStatColor("stat-ram", mem.used_pct);
+    setBar("ram-bar", mem.used_pct);
+    document.getElementById("ram-pct").className =
+      "metric-val text-[1.4rem] leading-none " + statColorClass(mem.used_pct);
+
+    setText("ram-used-label", fmtBytes(mem.used) + " / " + fmtBytes(mem.total));
+    setText("ram-total",      fmtBytes(mem.total));
+    setText("ram-used",       fmtBytes(mem.used));
+    setText("ram-avail",      fmtBytes(mem.available));
+    setText("ram-cached",     fmtBytes(mem.cached));
+
+    // Swap
+    if (mem.swap_total > 0) {
+      setText("swap-label",       mem.swap_pct + "%");
+      setBar("swap-bar", mem.swap_pct);
+      setText("swap-used-label",  fmtBytes(mem.swap_used) + " used");
+      setText("swap-total-label", fmtBytes(mem.swap_total) + " total");
+      document.getElementById("swap-area").style.display = "";
+    } else {
+      document.getElementById("swap-area").style.display = "none";
+    }
+
+    // Temperature
+    var tempArea = document.getElementById("temp-area");
+    if (d.temps && d.temps.length > 0) {
+      // First temp for the stat card
+      var firstTemp = d.temps[0];
+      var statTempEl = document.getElementById("stat-temp");
+      if (statTempEl) {
+        statTempEl.textContent = firstTemp.temp_c + "°C";
+        statTempEl.className = "metric-val text-[1.25rem] leading-none " +
+          (firstTemp.temp_c >= 80 ? "text-danger" : firstTemp.temp_c >= 65 ? "text-caution" : "text-safe");
+      }
+      tempArea.innerHTML = d.temps.map(function(t) {
+        return '<div class="flex items-center justify-between py-1 border-b border-line/7 last:border-0">' +
+          '<div class="flex items-center gap-1.5">' +
+            '<iconify-icon icon="lucide:thermometer" width="12" height="12" class="text-faint"></iconify-icon>' +
+            '<span class="text-[0.75rem] text-muted">' + t.label + '</span>' +
+          '</div>' +
+          '<span class="metric-val text-[0.88rem] ' + tempClass(t.temp_c) + '">' + t.temp_c + '°C</span>' +
+          '</div>';
+      }).join("");
+    } else {
+      setText("stat-temp", "N/A");
+      tempArea.innerHTML = "";
+    }
+
+    // ── Disk ──
+    var diskList = document.getElementById("disk-list");
+    if (d.disk && d.disk.length > 0) {
+      diskList.innerHTML = d.disk.map(function(p) {
+        var pctColor = p.used_pct >= 90 ? "text-danger" : p.used_pct >= 70 ? "text-caution" : "text-ink";
+        var barCls   = barClass(p.used_pct);
+        return '<div class="px-5 py-3.5 flex flex-col gap-2">' +
+          '<div class="flex items-center justify-between gap-3">' +
+            '<div class="flex items-center gap-2 min-w-0">' +
+              '<iconify-icon icon="lucide:folder" width="13" height="13" class="text-faint flex-shrink-0"></iconify-icon>' +
+              '<span class="text-[0.85rem] font-semibold text-ink font-display">' + p.mount + '</span>' +
+              '<span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[0.62rem] font-semibold border bg-surface border-line/10 text-faint">' + p.fstype + '</span>' +
+              '<span class="text-[0.68rem] text-faint truncate hidden sm:inline">' + p.device + '</span>' +
+            '</div>' +
+            '<span class="metric-val text-[1rem] flex-shrink-0 ' + pctColor + '">' + p.used_pct + '%</span>' +
+          '</div>' +
+          '<div class="bar-track">' +
+            '<div class="bar-fill ' + barCls + '" style="width:' + Math.min(p.used_pct,100) + '%"></div>' +
+          '</div>' +
+          '<div class="flex justify-between text-[0.68rem] text-faint">' +
+            '<span>' + fmtBytes(p.used) + ' used</span>' +
+            '<span>' + fmtBytes(p.free) + ' free · ' + fmtBytes(p.total) + ' total</span>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+    } else {
+      diskList.innerHTML = '<div class="px-5 py-5 text-faint text-[0.82rem]">ไม่พบ mount points</div>';
+    }
+
+    // Block device badges
+    var blockBadges = document.getElementById("block-badges");
+    if (d.block && d.block.length > 0) {
+      blockBadges.innerHTML = d.block.map(function(b) {
+        var icon = b.tran === "nvme" ? "lucide:zap" : b.tran === "usb" ? "lucide:usb" : "lucide:hard-drive";
+        return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-line/10 bg-surface text-[0.68rem] text-muted">' +
+          '<iconify-icon icon="' + icon + '" width="10" height="10"></iconify-icon>' +
+          b.name + ' · ' + b.size_gb + 'GB' + (b.model ? ' · ' + b.model : '') +
+          '</span>';
+      }).join("");
+    } else {
+      blockBadges.innerHTML = "";
+    }
+
+    // ── Network ──
+    var netList = document.getElementById("net-list");
+    if (d.network && d.network.length > 0) {
+      netList.innerHTML = d.network.map(function(n) {
+        return '<div class="flex items-center gap-5 px-5 py-3">' +
+          '<div class="flex items-center gap-2 w-20 flex-shrink-0">' +
+            '<iconify-icon icon="lucide:wifi" width="13" height="13" class="text-faint"></iconify-icon>' +
+            '<span class="text-[0.82rem] font-semibold text-ink font-display">' + n.iface + '</span>' +
+          '</div>' +
+          '<div class="flex items-center gap-1.5 text-[0.78rem]">' +
+            '<iconify-icon icon="lucide:arrow-down" width="11" height="11" class="text-safe flex-shrink-0"></iconify-icon>' +
+            '<span class="text-faint">RX</span>' +
+            '<span class="metric-val text-ink text-[0.82rem]">' + fmtBytes(n.rx_bytes) + '</span>' +
+          '</div>' +
+          '<div class="flex items-center gap-1.5 text-[0.78rem]">' +
+            '<iconify-icon icon="lucide:arrow-up" width="11" height="11" class="text-accent flex-shrink-0"></iconify-icon>' +
+            '<span class="text-faint">TX</span>' +
+            '<span class="metric-val text-ink text-[0.82rem]">' + fmtBytes(n.tx_bytes) + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+    } else {
+      netList.innerHTML = '<div class="px-5 py-5 text-faint text-[0.82rem]">ไม่พบ network interfaces</div>';
+    }
+
+    // Timestamp
+    var now = new Date();
+    setText("last-update", "อัปเดต " + now.toLocaleTimeString("th-TH", { hour12: false }));
+  }
+
+  // ── Load ──
+  var firstLoad = true;
+
+  window.mon = {
+    load: function () {
+      var icon = document.getElementById("refresh-icon");
+      if (icon) icon.classList.add("spinning");
+
+      fetch("/api/monitor/metrics")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (firstLoad) {
+            document.getElementById("mon-loading").style.display = "none";
+            document.getElementById("mon-content").style.display = "";
+            firstLoad = false;
+          }
+          render(d);
+        })
+        .catch(function (e) {
+          setText("last-update", "Error: " + e);
+        })
+        .finally(function () {
+          if (icon) {
+            setTimeout(function () { icon.classList.remove("spinning"); }, 500);
+          }
+        });
+    },
+  };
+
+  // ── Interval buttons ──
+  function setInterval_(sec) {
+    intervalSec = sec;
+    document.querySelectorAll(".interval-btn").forEach(function (btn) {
+      var active = parseInt(btn.dataset.sec) === sec;
+      btn.className = "interval-btn px-2.5 py-1 rounded-md text-[0.72rem] font-semibold transition-colors " +
+        (active
+          ? "bg-accent text-white"
+          : "text-muted hover:bg-card hover:text-ink");
+    });
+    if (timer) clearInterval(timer);
+    timer = setInterval(mon.load, sec * 1000);
+  }
+
+  document.querySelectorAll(".interval-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () { setInterval_(parseInt(btn.dataset.sec)); });
+  });
+
+  document.addEventListener("DOMContentLoaded", function () {
+    mon.load();
+    setInterval_(5); // default 5s
+  });
+
+  // SPA cleanup
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () {
+    if (timer) { clearInterval(timer); timer = null; }
+  });
+})();
+</script>
+{% endblock %}

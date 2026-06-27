@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ตั้งค่าครั้งแรก — VAS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;500;600;700&family=Anuphan:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink:     'rgb(var(--c-ink)     / <alpha-value>)',
+            muted:   'rgb(var(--c-muted)   / <alpha-value>)',
+            faint:   'rgb(var(--c-faint)   / <alpha-value>)',
+            accent:  'rgb(var(--c-accent)  / <alpha-value>)',
+            card:    'rgb(var(--c-card)    / <alpha-value>)',
+            surface: 'rgb(var(--c-surface) / <alpha-value>)',
+            page:    'rgb(var(--c-page)    / <alpha-value>)',
+            danger:  'rgb(var(--c-danger)  / <alpha-value>)',
+            safe:    'rgb(var(--c-safe)    / <alpha-value>)',
+            line:    'rgb(var(--c-line)    / <alpha-value>)',
+          },
+          fontFamily: {
+            display: ['Bai Jamjuree', 'sans-serif'],
+            body: ['Anuphan', 'system-ui', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    :root {
+      --c-ink:     26 32 50;
+      --c-muted:   74 80 99;
+      --c-faint:  140 146 165;
+      --c-line:    26 32 50;
+      --c-accent:  37 99 235;
+      --c-card:   255 255 255;
+      --c-surface: 248 249 251;
+      --c-page:   246 247 250;
+      --c-danger:  239 68 68;
+      --c-safe:    16 185 129;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Anuphan', system-ui, sans-serif; font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeUp 0.3s ease forwards; }
+  </style>
+</head>
+<body class="bg-page text-ink min-h-screen flex items-center justify-center px-4 py-8">
+
+  <div class="w-full max-w-[420px] fade-up">
+
+    <!-- Brand -->
+    <div class="flex flex-col items-center mb-8">
+      <div class="w-12 h-12 rounded-xl bg-accent flex items-center justify-center mb-3">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+      </div>
+      <h1 class="font-display text-[1.4rem] font-bold text-ink">VAS</h1>
+      <p class="text-[0.8rem] text-faint mt-0.5">ยินดีต้อนรับ — ตั้งค่าระบบครั้งแรก</p>
+    </div>
+
+    <!-- Info banner -->
+    <div class="flex items-start gap-3 px-4 py-3 rounded-xl bg-accent/6 border border-accent/15 mb-5">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(37 99 235)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 mt-px">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <div>
+        <p class="text-[0.82rem] font-semibold text-ink mb-0.5">สร้างบัญชี Root</p>
+        <p class="text-[0.78rem] text-muted leading-relaxed">บัญชีนี้มีสิทธิ์สูงสุดในระบบ ไม่สามารถลบได้ และใช้สำหรับจัดการผู้ใช้งานทั้งหมด</p>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-card border border-line/10 rounded-xl p-6">
+      <h2 class="font-display text-[1rem] font-bold text-ink mb-1">สร้างบัญชีผู้ดูแลระบบ</h2>
+      <p class="text-[0.8rem] text-muted mb-5">กำหนดชื่อผู้ใช้และรหัสผ่านสำหรับ Root</p>
+
+      {% if error %}
+      <div class="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-danger/8 border border-danger/20 mb-4">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(239 68 68)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span class="text-[0.82rem] text-danger font-medium">{{ error }}</span>
+      </div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('auth_setup') }}" class="flex flex-col gap-4">
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.78rem] font-semibold text-ink">ชื่อผู้ใช้ <span class="text-danger">*</span></label>
+          <input type="text" name="username" value="{{ username or '' }}" autocomplete="username"
+                 placeholder="เช่น admin, root" required autofocus minlength="3"
+                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.875rem]
+                        outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10
+                        placeholder:text-faint transition">
+          <span class="text-[0.72rem] text-faint">อย่างน้อย 3 ตัวอักษร</span>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.78rem] font-semibold text-ink">ชื่อแสดง</label>
+          <input type="text" name="display_name" value="{{ display_name or '' }}"
+                 placeholder="เช่น Administrator"
+                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.875rem]
+                        outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10
+                        placeholder:text-faint transition">
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.78rem] font-semibold text-ink">รหัสผ่าน <span class="text-danger">*</span></label>
+          <div class="relative">
+            <input type="password" name="password" id="pw1" autocomplete="new-password"
+                   placeholder="อย่างน้อย 6 ตัวอักษร" required minlength="6"
+                   class="w-full px-3 py-2 pr-10 border border-line/15 rounded-lg bg-card text-ink text-[0.875rem]
+                          outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10
+                          placeholder:text-faint transition">
+            <button type="button" onclick="togglePw('pw1','eye1o','eye1c')" tabindex="-1"
+                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-ink transition-colors">
+              <svg id="eye1o" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg id="eye1c" class="hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.78rem] font-semibold text-ink">ยืนยันรหัสผ่าน <span class="text-danger">*</span></label>
+          <div class="relative">
+            <input type="password" name="password_confirm" id="pw2" autocomplete="new-password"
+                   placeholder="กรอกรหัสผ่านอีกครั้ง" required
+                   class="w-full px-3 py-2 pr-10 border border-line/15 rounded-lg bg-card text-ink text-[0.875rem]
+                          outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10
+                          placeholder:text-faint transition">
+            <button type="button" onclick="togglePw('pw2','eye2o','eye2c')" tabindex="-1"
+                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-ink transition-colors">
+              <svg id="eye2o" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg id="eye2c" class="hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
+          <p id="pw-match-msg" class="text-[0.72rem] hidden"></p>
+        </div>
+
+        <button type="submit" id="submit-btn"
+                class="w-full py-2.5 bg-accent text-white font-semibold text-[0.875rem] rounded-lg
+                       hover:bg-blue-700 active:scale-[0.99] transition-all mt-1">
+          สร้างบัญชี Root และเริ่มใช้งาน
+        </button>
+      </form>
+    </div>
+
+    <p class="text-center text-[0.72rem] text-faint mt-5">VAS · Vending Auto Setup</p>
+  </div>
+
+  <script>
+    function togglePw(fieldId, openId, closeId) {
+      var f = document.getElementById(fieldId);
+      var open = document.getElementById(openId);
+      var closed = document.getElementById(closeId);
+      if (f.type === 'password') {
+        f.type = 'text';
+        open.classList.add('hidden');
+        closed.classList.remove('hidden');
+      } else {
+        f.type = 'password';
+        open.classList.remove('hidden');
+        closed.classList.add('hidden');
+      }
+    }
+
+    // Real-time password match validation
+    var pw1 = document.getElementById('pw1');
+    var pw2 = document.getElementById('pw2');
+    var msg = document.getElementById('pw-match-msg');
+    function checkMatch() {
+      if (!pw2.value) { msg.classList.add('hidden'); return; }
+      msg.classList.remove('hidden');
+      if (pw1.value === pw2.value) {
+        msg.textContent = '✓ รหัสผ่านตรงกัน';
+        msg.className = 'text-[0.72rem] text-safe';
+      } else {
+        msg.textContent = '✗ รหัสผ่านไม่ตรงกัน';
+        msg.className = 'text-[0.72rem] text-danger';
+      }
+    }
+    pw1.addEventListener('input', checkMatch);
+    pw2.addEventListener('input', checkMatch);
+  </script>
+</body>
+</html>

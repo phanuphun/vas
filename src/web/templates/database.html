@@ -1,0 +1,339 @@
+{% extends base_template %}
+{% block page_title %}Database — VAS{% endblock %}
+{% block header_title %}Database{% endblock %}
+
+{% block header_actions %}
+<button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors" onclick="db.refresh()">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+  </svg>
+  Refresh
+</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Tab bar -->
+<div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+  <div class="flex items-center border-b border-line/10 overflow-x-auto" id="tab-bar">
+    {% set tables = [
+      ("qr_scans",       "QR Scans",       "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"),
+      ("mqtt_events",    "MQTT Events",     "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 12 19.79 19.79 0 0 1 1.07 3.4 2 2 0 0 1 3.04 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16z"),
+      ("audit_log",      "Audit Log",       "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8"),
+      ("config_history", "Config History",  "M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"),
+    ] %}
+    {% for table_id, table_label, icon_path in tables %}
+    <button
+      class="tab-btn flex items-center gap-2 px-4 py-3 text-[0.82rem] font-semibold border-b-2 whitespace-nowrap transition-colors flex-shrink-0"
+      data-table="{{ table_id }}"
+      onclick="db.switchTab('{{ table_id }}')"
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="{{ icon_path }}"/>
+      </svg>
+      {{ table_label }}
+      <span class="tab-count inline-flex items-center justify-center min-w-[1.4rem] h-5 px-1.5 rounded-full text-[0.68rem] font-bold tabular-nums bg-surface text-faint" data-table="{{ table_id }}">
+        {{ stats.get(table_id, 0) }}
+      </span>
+    </button>
+    {% endfor %}
+  </div>
+
+  <!-- Toolbar -->
+  <div class="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-line/10 bg-surface/50">
+    <div class="flex items-center gap-2 flex-1 min-w-0">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-faint flex-shrink-0">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input
+        type="text"
+        id="search-input"
+        placeholder="ค้นหา..."
+        class="flex-1 min-w-0 bg-transparent text-[0.82rem] text-ink outline-none placeholder:text-faint"
+        oninput="db.onSearch(this.value)"
+      />
+    </div>
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <span class="text-[0.72rem] text-faint tabular-nums" id="row-info">—</span>
+      <button
+        class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/20 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"
+        onclick="db.clearTable()"
+        id="btn-clear"
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        </svg>
+        ล้างตาราง
+      </button>
+    </div>
+  </div>
+
+  <!-- Table area -->
+  <div class="overflow-x-auto" style="min-height:320px;">
+    <div id="table-loading" class="flex items-center justify-center py-16 gap-2 text-faint text-[0.82rem]">
+      <span class="spin"></span> กำลังโหลด...
+    </div>
+    <table class="w-full border-collapse text-[0.8rem]" id="data-table" style="display:none;">
+      <thead>
+        <tr class="border-b border-line/10 bg-surface/60" id="table-head"></tr>
+      </thead>
+      <tbody id="table-body" class="divide-y divide-line/7"></tbody>
+    </table>
+    <div id="table-empty" class="flex flex-col items-center justify-center py-16 text-faint text-[0.84rem] gap-2" style="display:none;">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+      </svg>
+      ยังไม่มีข้อมูล
+    </div>
+    <div id="table-error" class="hidden px-5 py-4 text-[0.8rem] text-danger" ></div>
+  </div>
+
+  <!-- Pagination -->
+  <div class="flex items-center justify-between px-4 py-2.5 border-t border-line/10 bg-surface/30" id="pagination" style="display:none;">
+    <button
+      class="inline-flex items-center gap-1 px-3 py-1.5 border border-line/14 rounded-md bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      id="btn-prev" onclick="db.prevPage()" disabled
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      ก่อนหน้า
+    </button>
+    <span class="text-[0.78rem] text-muted" id="page-info">หน้า 1</span>
+    <button
+      class="inline-flex items-center gap-1 px-3 py-1.5 border border-line/14 rounded-md bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      id="btn-next" onclick="db.nextPage()"
+    >
+      ถัดไป
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var LIMIT = 50;
+
+  var state = {
+    table:  "qr_scans",
+    offset: 0,
+    total:  0,
+    search: "",
+    searchTimer: null,
+  };
+
+  // ---- Column display config ----
+  var COL_CONFIG = {
+    qr_scans:       { maxLen: { payload: 60, details: 80 } },
+    mqtt_events:    { maxLen: { payload: 80 } },
+    audit_log:      { maxLen: { details: 100 } },
+    config_history: { maxLen: { old_value: 60, new_value: 60 } },
+  };
+
+  function truncate(s, n) {
+    if (typeof s !== "string") return s;
+    return s.length > n ? s.slice(0, n) + "…" : s;
+  }
+  function esc(s) {
+    return String(s == null ? "—" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function fmtCell(col, val, table) {
+    if (val == null || val === "") return '<span class="text-faint">—</span>';
+    var maxLen = (COL_CONFIG[table] || {}).maxLen || {};
+    var len = maxLen[col] || 120;
+    if (col === "ok") {
+      return val ? '<span class="zone zone-safe">✓ ok</span>' : '<span class="zone zone-caution">✗ fail</span>';
+    }
+    if (col === "ts") {
+      try {
+        var d = new Date(val);
+        return '<span class="font-display text-[0.75rem] text-muted tabular-nums">' + esc(d.toLocaleString("th-TH", { hour12:false })) + "</span>";
+      } catch (_) { return esc(val); }
+    }
+    if (col === "payload" || col === "old_value" || col === "new_value" || col === "details") {
+      var short = truncate(String(val), len);
+      return '<span title="' + esc(String(val)) + '" class="font-display text-[0.72rem] text-muted cursor-help">' + esc(short) + "</span>";
+    }
+    return esc(truncate(String(val), len));
+  }
+
+  function setTab(table) {
+    document.querySelectorAll(".tab-btn").forEach(function (btn) {
+      var active = btn.dataset.table === table;
+      btn.classList.toggle("border-accent", active);
+      btn.classList.toggle("text-accent",   active);
+      btn.classList.toggle("border-transparent", !active);
+      btn.classList.toggle("text-muted",    !active);
+      btn.classList.toggle("hover:text-ink", !active);
+    });
+  }
+
+  function setRowInfo(total, offset, rows) {
+    var el = document.getElementById("row-info");
+    if (!el) return;
+    if (total === 0) { el.textContent = "ว่าง"; return; }
+    var from = offset + 1;
+    var to   = offset + rows;
+    el.textContent = from + "–" + to + " จาก " + total.toLocaleString() + " rows";
+  }
+
+  function setPagination(total, offset) {
+    var pg = document.getElementById("pagination");
+    var prev = document.getElementById("btn-prev");
+    var next = document.getElementById("btn-next");
+    var info = document.getElementById("page-info");
+    if (total <= LIMIT) { pg.style.display = "none"; return; }
+    pg.style.display = "";
+    var page = Math.floor(offset / LIMIT) + 1;
+    var totalPages = Math.ceil(total / LIMIT);
+    info.textContent = "หน้า " + page + " / " + totalPages;
+    prev.disabled = offset <= 0;
+    next.disabled = offset + LIMIT >= total;
+  }
+
+  function showLoading() {
+    document.getElementById("table-loading").style.display = "";
+    document.getElementById("data-table").style.display    = "none";
+    document.getElementById("table-empty").style.display  = "none";
+    document.getElementById("table-error").classList.add("hidden");
+  }
+
+  function showError(msg) {
+    document.getElementById("table-loading").style.display = "none";
+    document.getElementById("data-table").style.display    = "none";
+    document.getElementById("table-empty").style.display  = "none";
+    var el = document.getElementById("table-error");
+    el.classList.remove("hidden");
+    el.textContent = "Error: " + msg;
+  }
+
+  function render(data) {
+    var loading = document.getElementById("table-loading");
+    var table   = document.getElementById("data-table");
+    var empty   = document.getElementById("table-empty");
+    var head    = document.getElementById("table-head");
+    var body    = document.getElementById("table-body");
+
+    loading.style.display = "none";
+    document.getElementById("table-error").classList.add("hidden");
+
+    if (!data.rows || data.rows.length === 0) {
+      table.style.display = "none";
+      empty.style.display = "";
+      setRowInfo(0, 0, 0);
+      setPagination(0, 0);
+      return;
+    }
+
+    empty.style.display = "none";
+    table.style.display = "";
+
+    // Header
+    head.innerHTML = data.columns.map(function (col) {
+      return '<th class="text-left px-4 py-2 text-[0.72rem] font-bold uppercase tracking-[0.06em] text-faint whitespace-nowrap">' + esc(col) + "</th>";
+    }).join("");
+
+    // Body
+    body.innerHTML = data.rows.map(function (row) {
+      var cells = row.map(function (val, i) {
+        var col = data.columns[i];
+        return '<td class="px-4 py-2 text-[0.8rem] text-ink align-top max-w-[280px]">' + fmtCell(col, val, state.table) + "</td>";
+      }).join("");
+      return "<tr class='hover:bg-surface/60 transition-colors'>" + cells + "</tr>";
+    }).join("");
+
+    setRowInfo(data.total, data.offset, data.rows.length);
+    setPagination(data.total, data.offset);
+    state.total = data.total;
+  }
+
+  function load() {
+    showLoading();
+    var url = "/api/database/" + encodeURIComponent(state.table) +
+              "?limit=" + LIMIT +
+              "&offset=" + state.offset +
+              (state.search ? "&search=" + encodeURIComponent(state.search) : "");
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) { showError(d.error); return; }
+        render(d);
+      })
+      .catch(function (e) { showError(String(e)); });
+  }
+
+  function refreshStats() {
+    fetch("/api/database/stats")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        Object.keys(d.stats || {}).forEach(function (t) {
+          document.querySelectorAll(".tab-count[data-table='" + t + "']").forEach(function (el) {
+            el.textContent = d.stats[t].toLocaleString();
+          });
+        });
+      })
+      .catch(function () {});
+  }
+
+  window.db = {
+    switchTab: function (table) {
+      state.table  = table;
+      state.offset = 0;
+      state.search = "";
+      var inp = document.getElementById("search-input");
+      if (inp) inp.value = "";
+      setTab(table);
+      load();
+    },
+    refresh: function () {
+      load();
+      refreshStats();
+    },
+    prevPage: function () {
+      state.offset = Math.max(0, state.offset - LIMIT);
+      load();
+    },
+    nextPage: function () {
+      state.offset += LIMIT;
+      load();
+    },
+    onSearch: function (val) {
+      clearTimeout(state.searchTimer);
+      state.searchTimer = setTimeout(function () {
+        state.search = val.trim();
+        state.offset = 0;
+        load();
+      }, 350);
+    },
+    clearTable: function () {
+      if (!confirm("ลบข้อมูลทั้งหมดใน " + state.table + "?")) return;
+      fetch("/api/database/" + encodeURIComponent(state.table) + "/clear", { method: "POST" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.status === "ok") { state.offset = 0; load(); refreshStats(); }
+          else { alert("Error: " + (d.errors || []).join(", ")); }
+        })
+        .catch(function (e) { alert("Error: " + e); });
+    },
+  };
+
+  var _statsTimer = null;
+
+  document.addEventListener("DOMContentLoaded", function () {
+    db.switchTab("qr_scans");
+    _statsTimer = setInterval(refreshStats, 15000);
+  });
+
+  // SPA cleanup
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () {
+    if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; }
+  });
+})();
+</script>
+{% endblock %}

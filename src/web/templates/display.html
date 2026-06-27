@@ -1,395 +1,670 @@
-{% extends "base.html" %}
-{% set title = "Display" %}
+{% extends base_template %}
+{% block page_title %}จอแสดงผล — VAS{% endblock %}
 {% block header_title %}จอแสดงผล{% endblock %}
 
-{% block header_actions %}
-<button class="cf-btn cf-btn-primary" id="applyDisplay" type="button">Apply</button>
-{% endblock %}
+{% block header_actions %}{% endblock %}
 
 {% block content %}
-<section class="display-tool" data-default-display="{{ default_display }}">
+<style>
+  /* Monitor preview */
+  .monitor-preview {
+    position:relative; width:88px; height:60px;
+    border:2px solid rgb(var(--c-ink)/0.7); border-radius:4px;
+    background:rgb(var(--c-surface)); display:flex; align-items:center; justify-content:center;
+    transition:transform 0.35s cubic-bezier(0.4,0,0.2,1);
+    box-shadow:0 2px 8px rgb(26 32 50/0.10);
+  }
+  .monitor-preview .corner { position:absolute; width:8px; height:8px; border-color:rgb(var(--c-accent)); border-style:solid; }
+  .monitor-preview .corner.top-left    { top:3px;    left:3px;  border-width:2px 0 0 2px; }
+  .monitor-preview .corner.top-right   { top:3px;    right:3px; border-width:2px 2px 0 0; }
+  .monitor-preview .corner.bottom-left { bottom:3px; left:3px;  border-width:0 0 2px 2px; }
+  .monitor-preview .corner.bottom-right{ bottom:3px; right:3px; border-width:0 2px 2px 0; }
+  .rotation-btn {
+    padding:0.3rem 0.85rem; font-size:0.75rem; font-weight:600; border-radius:0.4rem; cursor:pointer;
+    border:1px solid rgb(var(--c-line)/0.14); background:rgb(var(--c-card));
+    color:rgb(var(--c-muted)); transition:all 0.15s; font-family:inherit;
+  }
+  .rotation-btn:hover { background:rgb(var(--c-surface)); color:rgb(var(--c-ink)); }
+  .rotation-btn.active { background:rgb(var(--c-accent)); border-color:rgb(var(--c-accent)); color:#fff; }
 
-  <div class="page-head">
-    <p class="cf-eyebrow">VAS · จอแสดงผล</p>
-    <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">Display Settings</h1>
+  /* Protocol cards */
+  .proto-card {
+    border:2px solid rgb(var(--c-line)/0.1); border-radius:0.875rem;
+    padding:1.25rem; transition:border-color 0.2s, box-shadow 0.2s;
+    cursor:default; background:rgb(var(--c-card));
+  }
+  .proto-card.active {
+    border-color:rgb(var(--c-accent)/0.5);
+    box-shadow:0 0 0 4px rgb(var(--c-accent)/0.06);
+  }
+
+  /* Config file tabs */
+  .tab-panel { display:none; }
+  .tab-panel.is-active { display:flex; flex-direction:column; animation:tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+
+  /* Config viewer */
+  .config-pre {
+    font-family:'Bai Jamjuree',monospace; font-size:0.76rem; line-height:1.7;
+    background:#0f1117; color:#e2e8f0; border-radius:0 0 0.75rem 0.75rem;
+    padding:1rem 1.25rem; overflow:auto; max-height:360px; white-space:pre; margin:0;
+  }
+  .config-pre::-webkit-scrollbar { width:4px; height:4px; }
+  .config-pre::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.15); border-radius:2px; }
+</style>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── Static page header ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · จอแสดงผล</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">จอแสดงผล</h1>
+    <p class="text-[0.82rem] text-muted mt-1">ตั้งค่าจอแสดงผล, display protocol และไฟล์ config สำหรับ vending machine</p>
   </div>
 
-  <!-- Display Details panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h2>Display Details</h2>
+  <!-- ── Tab nav (horizontal row) ── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    {% set tabs = [
+      ("monitor",  "lucide:monitor",      "จอแสดงผล"),
+      ("protocol", "lucide:layers",       "Display Protocol"),
+      ("configs",  "lucide:file-text",    "Config Files"),
+      ("testmode", "lucide:flask-conical","ทดสอบจอ"),
+    ] %}
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      {% for tid, icon, label in tabs %}
+      <button type="button" data-tab="{{ tid }}" onclick="switchTab('{{ tid }}')"
+              class="disp-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+        <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>{{ label }}</span>
+      </button>
+      {% endfor %}
     </div>
-    <div class="status-dl">
-      <div class="status-dl-row">
-        <span class="status-dl-key">Session</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if session.is_x11 else 'cf-zone-caution' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>{{ session.session_type }} via {{ session.source }}</span>
-      </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">GDM Wayland</span>
-        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
-          <span>
-            <span class="badge {{ 'ok' if gdm_wayland.disabled else 'warn' }}" id="gdmWaylandBadge">{{ 'OK' if gdm_wayland.disabled else 'WARN' }}</span>
-            <span id="gdmWaylandText">{{ 'disabled' if gdm_wayland.disabled else 'enabled/default' }}{% if gdm_wayland.value %} (WaylandEnable={{ gdm_wayland.value }}){% endif %} - {{ gdm_wayland.path.as_posix() }}</span>
+  </nav>
+
+  <!-- ── Content ── -->
+  <div>
+
+    <!-- ════════════ TAB: Monitor ════════════ -->
+    <div id="tab-monitor" class="tab-panel is-active flex flex-col gap-4">
+
+      <!-- Status strip: monitors + touchscreens detected -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:monitor" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Monitors:</span>
+          <span class="text-[0.78rem] text-ink">
+            {% if outputs %}{{ outputs | join(", ") }}{% else %}<span class="text-caution">none detected</span>{% endif %}
           </span>
-          <span style="display:flex;gap:0.35rem;flex-wrap:wrap;">
-            <button class="cf-btn" data-wayland-action="disable" type="button">Disable</button>
-            <button class="cf-btn" data-wayland-action="enable" type="button">Enable</button>
-            <button class="cf-btn config-view-btn" data-config-key="gdm_custom" data-config-title="GDM custom.conf" type="button">View</button>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:touchpad" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Touchscreens:</span>
+          <span class="text-[0.78rem] text-ink">
+            {% if touch_devices %}
+              {% for t in touch_devices %}{{ t.name }}{% if t.xinput_id is not none %} ({{ t.xinput_id }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+            {% else %}<span class="text-caution">none detected</span>{% endif %}
           </span>
-        </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:layers" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Session:</span>
+          <span class="text-[0.78rem] {% if session.is_x11 %}text-safe{% else %}text-caution{% endif %}">
+            {{ session.session_type }} via {{ session.source }}
+          </span>
+        </div>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Monitors</span>
-        <span class="status-dl-val">
-          {% if outputs %}
-            {% for output in outputs %}
-            {{ output }}{% if not loop.last %}, {% endif %}
-            {% endfor %}
-          {% else %}
-            <span class="cf-zone cf-zone-caution">WARN</span>none detected
-          {% endif %}
-        </span>
-      </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Touchscreens</span>
-        <span class="status-dl-val">
-          {% if touch_devices %}
-            {% for t in touch_devices %}
-            {{ t.name }}{% if t.xinput_id is not none %} (id: {{ t.xinput_id }}){% endif %}{% if not loop.last %}, {% endif %}
-            {% endfor %}
-          {% else %}
-            <span class="cf-zone cf-zone-caution">WARN</span>none detected
-          {% endif %}
-        </span>
-      </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">.xprofile</span>
-        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
-          <span><span class="cf-zone {{ 'cf-zone-safe' if display_config.has_signature else 'cf-zone-caution' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>{{ display_config.path.as_posix() }}</span>
-          <button class="cf-btn config-view-btn" data-config-key="xprofile" data-config-title=".xprofile" type="button">View</button>
-        </span>
-      </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Session script</span>
-        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
-          <span><span class="cf-zone {{ 'cf-zone-safe' if display_script.has_signature and display_script.executable else 'cf-zone-caution' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>{{ display_script.path.as_posix() }}</span>
-          <button class="cf-btn config-view-btn" data-config-key="display_script" data-config-title="display-session.sh" type="button">View</button>
-        </span>
-      </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Xorg touchscreen</span>
-        <span class="status-dl-val" style="flex-wrap:wrap;gap:0.5rem;">
-          <span><span class="cf-zone {{ 'cf-zone-safe' if xorg_touchscreen.has_signature else 'cf-zone-caution' }}">{{ 'OK' if xorg_touchscreen.has_signature else 'WARN' }}</span>{{ xorg_touchscreen.path.as_posix() }}</span>
-          <button class="cf-btn config-view-btn" data-config-key="xorg_touchscreen" data-config-title="Xorg touchscreen" type="button">View</button>
-        </span>
-      </div>
-    </div>
-  </div>
 
-  <!-- Config file viewer -->
-  <div class="cf-card config-file-viewer" id="configFileViewer" hidden>
-    <div class="card-head hair-b" style="justify-content:space-between;">
-      <div>
-        <h2 id="configFileTitle">Config file</h2>
-        <p style="font-size:0.72rem;color:rgb(var(--c-faint));margin-top:2px;" id="configFilePath"></p>
-      </div>
-      <button class="cf-btn" id="configViewerClose" type="button" aria-label="Close config viewer">Close</button>
-    </div>
-    <pre class="config-file-content" id="configFileContent" style="margin:0;padding:1rem;font-family:'JetBrains Mono','Fira Code','Courier New',monospace;font-size:0.78rem;line-height:1.6;white-space:pre;overflow-x:auto;background:rgb(var(--c-surface));max-height:380px;overflow-y:auto;border-radius:0 0 0.75rem 0.75rem;"></pre>
-  </div>
+      <!-- Settings card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10">
+          <h2 class="text-[0.9rem] font-semibold text-ink">Monitor Setting</h2>
+        </div>
+        <div class="flex flex-col lg:flex-row gap-4 p-4">
+          <!-- Preview -->
+          <div class="flex flex-col items-center gap-4 flex-shrink-0">
+            <div class="flex items-center justify-center w-[120px] h-[120px]">
+              <div class="monitor-preview" id="monitorPreview" data-rotation="normal">
+                <div class="corner top-left"></div><div class="corner top-right"></div>
+                <div class="corner bottom-left"></div><div class="corner bottom-right"></div>
+                <span class="text-[0.6rem] font-bold text-faint uppercase tracking-wide" id="previewLabel">Normal</span>
+              </div>
+            </div>
+            <div class="flex gap-1.5 flex-wrap justify-center">
+              {% for value, label in rotations %}
+              <button class="rotation-btn {{ 'active' if value == 'normal' else '' }}" data-rotation="{{ value }}" type="button">{{ label }}</button>
+              {% endfor %}
+            </div>
+          </div>
 
-  <!-- Monitor Setting panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h2>Monitor Setting</h2>
-    </div>
-    <div class="display-layout">
-      <div class="monitor-workspace">
-        <div class="monitor-frame">
-          <div class="monitor-preview-stage">
-            <div class="monitor-preview" id="monitorPreview" data-rotation="normal">
-              <div class="corner top-left"></div>
-              <div class="corner top-right"></div>
-              <div class="corner bottom-left"></div>
-              <div class="corner bottom-right"></div>
-              <div class="preview-label" id="previewLabel">Normal</div>
+          <!-- Options -->
+          <div class="flex-1 flex flex-col gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted" for="displayOutput">Display</label>
+              <select id="displayOutput" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+                {% for output in outputs %}<option value="{{ output }}">{{ output }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted" for="touchDevice">Touchscreen</label>
+              <select id="touchDevice" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+                {% for t in touch_devices %}<option value="{{ t.name }}">{{ t.name }}{% if t.xinput_id is not none %} (id: {{ t.xinput_id }}){% endif %}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted" for="xDisplay">X display server</label>
+              <div class="flex gap-2">
+                <input id="xDisplay" value="{{ default_display }}" autocomplete="off"
+                       class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+                <button id="refreshDevices" type="button"
+                        class="inline-flex items-center gap-1.5 px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors flex-shrink-0">
+                  <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Refresh
+                </button>
+              </div>
+              <p class="text-[0.7rem] text-faint">Usually :0. Display output is the monitor name from xrandr.</p>
+            </div>
+            <div class="flex flex-col gap-2">
+              <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-ink select-none">
+                <input id="persistSession" type="checkbox" checked class="rounded"> Persist at login
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-ink select-none">
+                <input id="persistXorg" type="checkbox" class="rounded"> Persist touch in Xorg
+              </label>
             </div>
           </div>
         </div>
 
-        <div class="rotation-controls" role="group" aria-label="Rotation">
-          {% for value, label in rotations %}
-          <button class="rotation-button {{ 'selected' if value == 'normal' else '' }}" type="button" data-rotation="{{ value }}">{{ label }}</button>
-          {% endfor %}
+        <!-- Apply result -->
+        <div class="px-4 py-4 flex items-center justify-between gap-4">
+          <div class="msg text-[0.82rem]" id="applyResult" aria-live="polite"></div>
+          <button id="applyDisplayInline" type="button"
+                  class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+            <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════ TAB: Protocol ════════════ -->
+    <div id="tab-protocol" class="tab-panel flex flex-col gap-4">
+
+      <!-- Current session status -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-center gap-4">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0"></iconify-icon>
+        <div class="text-[0.82rem]">
+          <span class="text-muted">Session ปัจจุบัน: </span>
+          <span class="font-semibold {% if session.is_x11 %}text-safe{% else %}text-caution{% endif %}">
+            {{ session.session_type }}
+          </span>
+          <span class="text-faint"> · detected via {{ session.source }}</span>
+        </div>
+        <div class="ml-auto text-[0.72rem] text-faint">ใช้งานได้หลัง re-login</div>
+      </div>
+
+      <!-- Protocol cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- X11/Xorg card -->
+        <div class="proto-card {{ 'active' if gdm_wayland.disabled else '' }}" id="protoX11">
+          <div class="flex items-center gap-3 mb-3">
+            <img src="/public/images/logo/x11-logo.png" alt="X11" class="w-10 h-10 object-contain rounded-lg flex-shrink-0">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-display text-[1rem] font-bold text-ink">X11 / Xorg</span>
+                {% if gdm_wayland.disabled %}
+                <span class="zone zone-safe">Active</span>
+                {% endif %}
+              </div>
+              <div class="text-[0.72rem] text-faint mt-0.5">Classic Display Server</div>
+            </div>
+          </div>
+          <ul class="flex flex-col gap-1 mb-4">
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:check-circle" width="13" height="13" class="text-safe mt-0.5 flex-shrink-0"></iconify-icon>
+              รองรับ touchscreen calibration และ xinput mapping
+            </li>
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:check-circle" width="13" height="13" class="text-safe mt-0.5 flex-shrink-0"></iconify-icon>
+              เสถียรสำหรับ vending machine / kiosk
+            </li>
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:check-circle" width="13" height="13" class="text-safe mt-0.5 flex-shrink-0"></iconify-icon>
+              รองรับ xrandr rotation และ display script
+            </li>
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:info" width="13" height="13" class="text-faint mt-0.5 flex-shrink-0"></iconify-icon>
+              ตั้งค่าผ่าน <code class="text-[0.7rem] bg-surface px-1 rounded">/etc/gdm3/custom.conf</code>
+            </li>
+          </ul>
+          {% if gdm_wayland.disabled %}
+          <div class="flex items-center gap-2 px-3 py-2 bg-safe/8 border border-safe/20 rounded-lg">
+            <iconify-icon icon="lucide:check" width="14" height="14" class="text-safe"></iconify-icon>
+            <span class="text-[0.78rem] text-safe font-semibold">กำลังใช้งาน X11</span>
+          </div>
+          {% else %}
+          <button data-wayland-action="disable" type="button"
+                  class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+            <iconify-icon icon="lucide:arrow-right" width="14" height="14"></iconify-icon>
+            เปลี่ยนมาใช้ X11
+          </button>
+          {% endif %}
+        </div>
+
+        <!-- Wayland card -->
+        <div class="proto-card {{ 'active' if not gdm_wayland.disabled else '' }}" id="protoWayland">
+          <div class="flex items-center gap-3 mb-3">
+            <img src="/public/images/logo/wayland-logo.png" alt="Wayland" class="w-10 h-10 object-contain rounded-lg flex-shrink-0">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-display text-[1rem] font-bold text-ink">Wayland</span>
+                {% if not gdm_wayland.disabled %}
+                <span class="zone zone-safe">Active</span>
+                {% endif %}
+              </div>
+              <div class="text-[0.72rem] text-faint mt-0.5">Modern Display Protocol</div>
+            </div>
+          </div>
+          <ul class="flex flex-col gap-1 mb-4">
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:check-circle" width="13" height="13" class="text-safe mt-0.5 flex-shrink-0"></iconify-icon>
+              GPU-accelerated compositing
+            </li>
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:check-circle" width="13" height="13" class="text-safe mt-0.5 flex-shrink-0"></iconify-icon>
+              Security isolation ระหว่าง applications
+            </li>
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:alert-triangle" width="13" height="13" class="text-caution mt-0.5 flex-shrink-0"></iconify-icon>
+              xinput / xrandr <span class="font-semibold text-caution">ไม่รองรับ</span> — touchscreen mapping อาจมีปัญหา
+            </li>
+            <li class="flex items-start gap-2 text-[0.78rem] text-muted">
+              <iconify-icon icon="lucide:alert-triangle" width="13" height="13" class="text-caution mt-0.5 flex-shrink-0"></iconify-icon>
+              <span class="text-caution font-semibold">ไม่แนะนำ</span> สำหรับ vending machine
+            </li>
+          </ul>
+          {% if not gdm_wayland.disabled %}
+          <div class="flex items-center gap-2 px-3 py-2 bg-safe/8 border border-safe/20 rounded-lg">
+            <iconify-icon icon="lucide:check" width="14" height="14" class="text-safe"></iconify-icon>
+            <span class="text-[0.78rem] text-safe font-semibold">กำลังใช้งาน Wayland</span>
+          </div>
+          {% else %}
+          <button data-wayland-action="enable" type="button"
+                  class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:arrow-right" width="14" height="14"></iconify-icon>
+            เปลี่ยนมาใช้ Wayland
+          </button>
+          {% endif %}
         </div>
       </div>
 
-      <aside class="display-options">
-        <label class="cf-label" for="displayOutput">Display</label>
-        <select class="cf-select" id="displayOutput">
-          {% for output in outputs %}
-          <option value="{{ output }}">{{ output }}</option>
-          {% endfor %}
-        </select>
+      <!-- Wayland action result -->
+      <div id="waylandResult" class="text-[0.82rem]" aria-live="polite"></div>
 
-        <label class="cf-label" for="touchDevice">Touchscreen</label>
-        <select class="cf-select" id="touchDevice">
-          {% for touch in touch_devices %}
-          <option value="{{ touch.name }}">{{ touch.name }}{% if touch.xinput_id is not none %} (id: {{ touch.xinput_id }}){% endif %}</option>
-          {% endfor %}
-        </select>
+    </div>
 
-        <label class="cf-label" for="xDisplay">X display server</label>
-        <div class="inline-control">
-          <input class="cf-input" id="xDisplay" value="{{ default_display }}" autocomplete="off">
-          <button class="cf-btn" id="refreshDevices" type="button">Refresh</button>
+    <!-- ════════════ TAB: Config Files ════════════ -->
+    <div id="tab-configs" class="tab-panel flex flex-col gap-4">
+
+      <!-- Config file cards -->
+      {% set cfg_files = [
+        (
+          "gdm_custom",
+          "lucide:shield",
+          "/etc/gdm3/custom.conf",
+          "GDM Configuration",
+          "ไฟล์ config ของ GNOME Display Manager — ใช้ควบคุม <code class='text-[0.7rem] bg-surface px-1 py-px rounded font-mono'>WaylandEnable</code> เพื่อบังคับ GDM ให้เปิด session แบบ X11 แทน Wayland",
+          gdm_wayland.disabled,
+          "WaylandEnable=false ตั้งค่าถูกต้อง" if gdm_wayland.disabled else "WaylandEnable ยังไม่ถูก disable",
+          "gdm_custom"
+        ),
+        (
+          "xprofile",
+          "lucide:file-code",
+          display_config.path.as_posix(),
+          ".xprofile",
+          "Script ที่ X session รันทุกครั้งหลัง login — ใช้กำหนด display rotation ด้วย <code class='text-[0.7rem] bg-surface px-1 py-px rounded font-mono'>xrandr</code> และ touchscreen input mapping ด้วย <code class='text-[0.7rem] bg-surface px-1 py-px rounded font-mono'>xinput</code>",
+          display_config.has_signature,
+          "VAS signature พบในไฟล์" if display_config.has_signature else "ไม่พบ VAS signature",
+          "xprofile"
+        ),
+        (
+          "display_script",
+          "lucide:terminal",
+          display_script.path.as_posix(),
+          "display-session.sh",
+          "Shell script หลักสำหรับ display setup — ถูกเรียกโดย <code class='text-[0.7rem] bg-surface px-1 py-px rounded font-mono'>.xprofile</code> ตอน X session เริ่มต้น ทำหน้าที่ apply rotation และ input mapping แบบ atomic",
+          display_script.has_signature and display_script.executable,
+          "Script พร้อมใช้งาน (executable + signed)" if display_script.has_signature and display_script.executable else "Script ยังไม่ครบ — ตรวจสอบ executable flag",
+          "display_script"
+        ),
+        (
+          "xorg_touchscreen",
+          "lucide:settings-2",
+          xorg_touchscreen.path.as_posix(),
+          "99-vending-touchscreen.conf",
+          "Xorg configuration สำหรับ touchscreen — กำหนด input device mapping ให้ถาวรผ่าน X server โดยไม่ต้องรัน script ทุกครั้ง ใช้เมื่อ <em>Persist touch in Xorg</em> ถูก enable",
+          xorg_touchscreen.has_signature,
+          "ตั้งค่า Xorg config แล้ว" if xorg_touchscreen.has_signature else "ยังไม่ได้ตั้งค่า",
+          "xorg_touchscreen"
+        ),
+      ] %}
+
+      <div class="flex flex-col gap-4">
+        {% for key, icon, path, title, desc, ok, status_text, cfg_key in cfg_files %}
+        <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-{{ key }}">
+          <!-- Card header -->
+          <button type="button" onclick="toggleConfig('{{ key }}')"
+                  class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors group">
+            <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+              <iconify-icon icon="{{ icon }}" width="16" height="16" class="text-muted"></iconify-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[0.88rem] text-ink font-display">{{ title }}</span>
+                <span class="zone {{ 'zone-safe' if ok else 'zone-caution' }}">{{ 'OK' if ok else 'WARN' }}</span>
+              </div>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ path }}</code>
+              <p class="text-[0.73rem] text-muted mt-1 leading-snug">{{ desc | safe }}</p>
+              <div class="flex items-center gap-1 mt-1.5">
+                <iconify-icon icon="{{ 'lucide:check-circle' if ok else 'lucide:alert-circle' }}" width="11" height="11" class="{{ 'text-safe' if ok else 'text-caution' }}"></iconify-icon>
+                <span class="text-[0.68rem] {{ 'text-safe' if ok else 'text-caution' }}">{{ status_text }}</span>
+              </div>
+            </div>
+            <iconify-icon icon="lucide:chevron-down" width="15" height="15"
+                          class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-{{ key }}"></iconify-icon>
+          </button>
+
+          <!-- File content (hidden initially) -->
+          <div id="cfg-viewer-{{ key }}" class="hidden border-t border-line/8">
+            <div class="flex items-center justify-between px-4 py-4 bg-surface/40">
+              <span class="text-[0.72rem] font-semibold text-muted">เนื้อหาไฟล์</span>
+              <button onclick="loadConfig('{{ cfg_key }}', '{{ key }}')" type="button"
+                      class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+                <iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Reload
+              </button>
+            </div>
+            <pre class="config-pre" id="cfg-content-{{ key }}"><span class="text-faint">กำลังโหลด...</span></pre>
+          </div>
         </div>
-        <p class="field-hint">Usually :0. Display output is the monitor name from xrandr.</p>
+        {% endfor %}
+      </div>
 
-        <label class="check-row">
-          <input id="persistSession" type="checkbox" checked>
-          Persist at login
-        </label>
-
-        <label class="check-row">
-          <input id="persistXorg" type="checkbox">
-          Persist touch in Xorg
-        </label>
-      </aside>
     </div>
 
-    <div style="padding:0 1.25rem 1rem;">
-      <div class="apply-result" id="applyResult" aria-live="polite"></div>
+    <!-- ── ทดสอบจอ (Display Test) tab ──────────────────────────── -->
+    <div id="tab-testmode" class="tab-panel flex flex-col gap-4">
+
+      <!-- Library status card -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col gap-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-[0.88rem] font-semibold text-ink">Library ที่จำเป็น</h2>
+            <p class="text-[0.75rem] text-muted mt-0.5">Script จำลองจอต้องการ <code class="font-display text-[0.72rem] bg-surface px-1.5 py-0.5 rounded border border-line/10">python3-evdev</code></p>
+          </div>
+          <div id="sim-lib-badge" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.75rem] font-semibold">
+            <span class="spin" style="width:12px;height:12px;border-width:1.5px;"></span>
+            <span>ตรวจสอบ...</span>
+          </div>
+        </div>
+        <div id="sim-lib-missing" style="display:none;"
+             class="flex items-center justify-between gap-3 bg-caution/5 border border-caution/20 rounded-lg px-3 py-3">
+          <div class="flex items-center gap-2">
+            <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="text-caution flex-shrink-0"></iconify-icon>
+            <span class="text-[0.78rem] text-ink">ยังไม่ได้ติดตั้ง — ไปที่ Settings &gt; Software เพื่อติดตั้ง</span>
+          </div>
+          <a href="/settings" data-spa-link
+             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap flex-shrink-0">
+            <iconify-icon icon="lucide:arrow-right" width="12" height="12"></iconify-icon>
+            ไปติดตั้ง
+          </a>
+        </div>
+      </div>
+
+      <!-- Simulator control card -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col gap-4">
+        <div>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Virtual Touchscreen</h2>
+          <p class="text-[0.75rem] text-muted mt-0.5">จำลอง Touchscreen device ผ่าน Linux uinput — ปรากฏใน <code class="font-display text-[0.72rem] bg-surface px-1.5 py-0.5 rounded border border-line/10">xinput list</code> ทันที</p>
+        </div>
+
+        <!-- Status strip -->
+        <div class="flex items-center gap-3 bg-surface border border-line/10 rounded-lg px-3 py-2.5">
+          <span id="sim-status-dot" class="w-2 h-2 rounded-full bg-faint/40 flex-shrink-0"></span>
+          <span id="sim-status-text" class="text-[0.78rem] text-muted flex-1">กำลังตรวจสอบ...</span>
+          <span id="sim-pid" class="text-[0.68rem] font-display text-faint"></span>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex items-center gap-2.5">
+          <button id="sim-start-btn" onclick="simStart()"
+                  class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled>
+            <iconify-icon icon="lucide:play" width="13" height="13"></iconify-icon>
+            เริ่ม
+          </button>
+          <button id="sim-stop-btn" onclick="simStop()"
+                  class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-line/15 bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled>
+            <iconify-icon icon="lucide:square" width="13" height="13"></iconify-icon>
+            หยุด
+          </button>
+          <button onclick="simRefresh()"
+                  class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line/15 bg-card text-muted text-[0.8rem] hover:bg-surface transition-colors ml-auto">
+            <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>
+            รีเฟรช
+          </button>
+        </div>
+
+        <!-- Info note -->
+        <div class="flex items-start gap-2 text-[0.72rem] text-faint">
+          <iconify-icon icon="lucide:info" width="12" height="12" class="flex-shrink-0 mt-0.5"></iconify-icon>
+          <span>Script รันด้วย <strong>sudo</strong> — ต้องการสิทธิ์ root เพื่อสร้าง uinput device</span>
+        </div>
+      </div>
+
     </div>
+
   </div>
+</div>
 
-  <!-- Command Preview -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h3 style="font-size:0.9rem;font-weight:600;">Command Preview</h3>
-    </div>
-    <ul class="command-list" id="commandPreviewList" style="list-style:none;padding:0;margin:0;"></ul>
-  </div>
+{% endblock %}
 
-</section>
-
+{% block extra_scripts %}
 <script>
-const rotationLabels = {
-  normal: "Normal",
-  left: "Left",
-  right: "Right",
-  inverted: "Revert",
-};
+(function () {
+  "use strict";
 
-const rotationDegrees = {
-  normal: "0deg",
-  left: "-90deg",
-  right: "90deg",
-  inverted: "180deg",
-};
+  // ── Tab switching ─────────────────────────────────────────────────────────────
+  window.switchTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
 
-const preview = document.getElementById("monitorPreview");
-const previewLabel = document.getElementById("previewLabel");
-const commandPreviewList = document.getElementById("commandPreviewList");
-const applyResult = document.getElementById("applyResult");
-const outputSelect = document.getElementById("displayOutput");
-const touchSelect = document.getElementById("touchDevice");
-const xDisplayInput = document.getElementById("xDisplay");
-const persistSessionInput = document.getElementById("persistSession");
-const persistXorgInput = document.getElementById("persistXorg");
-const gdmWaylandBadge = document.getElementById("gdmWaylandBadge");
-const gdmWaylandText = document.getElementById("gdmWaylandText");
-let selectedRotation = "normal";
+    document.querySelectorAll(".disp-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent\/8",  on);
+      btn.classList.toggle("text-accent",    on);
+      btn.classList.toggle("font-semibold",  on);
+      btn.classList.toggle("text-muted",     !on);
+    });
 
-function shellQuote(value) {
-  return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
-}
-
-function selectedConfig() {
-  return {
-    output: outputSelect.value,
-    touch: touchSelect.value,
-    rotate: selectedRotation,
-    display: xDisplayInput.value.trim(),
-    persistSession: persistSessionInput.checked,
-    persistXorg: persistXorgInput.checked,
   };
-}
 
-function replaceOptions(select, values) {
-  const currentValue = select.value;
-  select.innerHTML = "";
-  values.forEach((item) => {
-    const option = document.createElement("option");
-    const name = typeof item === "string" ? item : item.name;
-    const idLabel = typeof item === "object" && item.id != null ? ` (id: ${item.id})` : "";
-    option.value = name;
-    option.textContent = name + idLabel;
-    select.appendChild(option);
+  // ── Monitor preview ───────────────────────────────────────────────────────────
+  var preview      = document.getElementById("monitorPreview");
+  var previewLabel = document.getElementById("previewLabel");
+  var outputSelect = document.getElementById("displayOutput");
+  var touchSelect  = document.getElementById("touchDevice");
+  var xDisplayInput   = document.getElementById("xDisplay");
+  var persistSession  = document.getElementById("persistSession");
+  var persistXorg     = document.getElementById("persistXorg");
+  var applyResult     = document.getElementById("applyResult");
+  var selectedRotation = "normal";
+
+  var rotDeg = { normal:"0deg", left:"-90deg", right:"90deg", inverted:"180deg" };
+  var rotLbl = { normal:"Normal", left:"Left", right:"Right", inverted:"Revert" };
+
+  function updatePreview() {
+    if (!preview) return;
+    preview.style.transform = "rotate(" + rotDeg[selectedRotation] + ")";
+    if (previewLabel) previewLabel.textContent = rotLbl[selectedRotation];
+  }
+
+  document.querySelectorAll(".rotation-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      selectedRotation = btn.dataset.rotation;
+      document.querySelectorAll(".rotation-btn").forEach(function (b) { b.classList.remove("active"); });
+      btn.classList.add("active");
+      updatePreview();
+    });
   });
-  const names = values.map((item) => (typeof item === "string" ? item : item.name));
-  if (names.includes(currentValue)) {
-    select.value = currentValue;
-  }
-}
 
-function commandItem(label, command, requiresRoot) {
-  const item = document.createElement("li");
-  const header = document.createElement("div");
-  const title = document.createElement("strong");
-  title.textContent = label;
-  header.appendChild(title);
-  if (requiresRoot) {
-    const badge = document.createElement("span");
-    badge.className = "badge warn";
-    badge.textContent = "sudo";
-    header.appendChild(badge);
-  }
-  const code = document.createElement("code");
-  code.textContent = command;
-  item.appendChild(header);
-  item.appendChild(code);
-  return item;
-}
-
-function updatePreview() {
-  const config = selectedConfig();
-  preview.style.transform = `rotate(${rotationDegrees[config.rotate]})`;
-  preview.dataset.rotation = config.rotate;
-  previewLabel.textContent = rotationLabels[config.rotate];
-
-  commandPreviewList.innerHTML = "";
-  if (!config.output || !config.touch) {
-    commandPreviewList.appendChild(commandItem("Select devices", "Select display output and touchscreen first.", false));
-    return;
+  function setResult(msg, status) {
+    if (!applyResult) return;
+    applyResult.className = "msg text-[0.82rem] " + (status === "success" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+    applyResult.textContent = msg;
   }
 
-  const displayArg = config.display ? ` --display ${shellQuote(config.display)}` : "";
-  const applyCommand = `vas display apply${displayArg} --output ${shellQuote(config.output)} --touch ${shellQuote(config.touch)} --rotate ${config.rotate}`;
-  commandPreviewList.appendChild(commandItem("Apply runtime", applyCommand, false));
-  if (config.persistSession) {
-    const persistSession = `vas display persist-session${displayArg} --output ${shellQuote(config.output)} --touch ${shellQuote(config.touch)} --rotate ${config.rotate}`;
-    commandPreviewList.appendChild(commandItem("Persist at login", persistSession, false));
+  function selectedConfig() {
+    return {
+      output: outputSelect ? outputSelect.value : "",
+      touch: touchSelect ? touchSelect.value : "",
+      rotate: selectedRotation,
+      display: xDisplayInput ? xDisplayInput.value.trim() : ":0",
+      persistSession: persistSession ? persistSession.checked : false,
+      persistXorg: persistXorg ? persistXorg.checked : false,
+    };
   }
-  if (config.persistXorg) {
-    const persistXorg = `sudo vas display persist-xorg --touch ${shellQuote(config.touch)} --rotate ${config.rotate}`;
-    commandPreviewList.appendChild(commandItem("Persist touch in Xorg", persistXorg, true));
+
+  function replaceOptions(sel, values) {
+    if (!sel) return;
+    var cur = sel.value;
+    sel.innerHTML = "";
+    values.forEach(function (item) {
+      var name = typeof item === "string" ? item : item.name;
+      var lbl  = name + (typeof item === "object" && item.id != null ? " (id: " + item.id + ")" : "");
+      var opt  = document.createElement("option");
+      opt.value = name; opt.textContent = lbl;
+      sel.appendChild(opt);
+    });
+    if (values.map(function (i) { return typeof i === "string" ? i : i.name; }).indexOf(cur) !== -1) sel.value = cur;
   }
-}
 
-async function refreshDevices() {
-  applyResult.textContent = "Refreshing devices...";
-  const params = new URLSearchParams({ display: xDisplayInput.value.trim() || ":0" });
-  const response = await fetch(`{{ url_for('display_devices') }}?${params.toString()}`);
-  const result = await response.json();
-  replaceOptions(outputSelect, result.outputs || []);
-  replaceOptions(touchSelect, result.touchDevices || []);
-  applyResult.textContent = "";
-  updatePreview();
-}
-
-function updateWaylandStatus(status) {
-  const disabled = Boolean(status.disabled);
-  gdmWaylandBadge.className = `badge ${disabled ? "ok" : "warn"}`;
-  gdmWaylandBadge.textContent = disabled ? "OK" : "WARN";
-  const mode = disabled ? "disabled" : "enabled/default";
-  const value = status.value ? ` (WaylandEnable=${status.value})` : "";
-  gdmWaylandText.textContent = `${mode}${value} - ${status.path}`;
-}
-
-async function setWayland(action) {
-  applyResult.textContent = `${action === "disable" ? "Disabling" : "Enabling"} Wayland...`;
-  applyResult.className = "apply-result";
-  const response = await fetch("{{ url_for('display_wayland') }}", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action }),
+  var refreshBtn = document.getElementById("refreshDevices");
+  if (refreshBtn) refreshBtn.addEventListener("click", function () {
+    setResult("โหลดใหม่...", "");
+    var params = new URLSearchParams({ display: (xDisplayInput ? xDisplayInput.value.trim() : ":0") || ":0" });
+    fetch("{{ url_for('display_devices') }}?" + params.toString())
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        replaceOptions(outputSelect, d.outputs || []);
+        replaceOptions(touchSelect, d.touchDevices || []);
+        setResult("", "");
+      });
   });
-  const result = await response.json();
-  if (!response.ok) {
-    applyResult.className = "apply-result error";
-    applyResult.textContent = (result.errors || ["Wayland control failed."]).join(" ");
-    return;
+
+  function doApply() {
+    setResult("Applying...", "");
+    fetch("{{ url_for('display_apply') }}", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload()),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ok) {
+        setResult("Applied successfully", "ok");
+        setTimeout(function () { setResult("", ""); }, 3000);
+      } else {
+        setResult("Error: " + (d.errors || []).join(", "), "error");
+      }
+    })
+    .catch(function (e) { setResult("Fetch error: " + e, "error"); });
   }
-  updateWaylandStatus(result.gdmWayland);
-  applyResult.className = "apply-result success";
-  applyResult.textContent = action === "disable" ? "Wayland disabled in GDM." : "Wayland enabled in GDM.";
-}
 
-document.querySelectorAll(".rotation-button").forEach((button) => {
-  button.addEventListener("click", () => {
-    selectedRotation = button.dataset.rotation;
-    document.querySelectorAll(".rotation-button").forEach((item) => item.classList.remove("selected"));
-    button.classList.add("selected");
-    applyResult.textContent = "";
-    updatePreview();
+  var applyBtn = document.getElementById("applyBtn");
+  if (applyBtn) applyBtn.addEventListener("click", doApply);
+
+  // ── Config file loading ──────────────────────────────────────
+  var _cfgLoaded = {};
+  document.querySelectorAll(".cfg-accordion-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var key = btn.dataset.key;
+      var body = document.getElementById("cfg-body-" + key);
+      var isOpen = body.style.display !== "none";
+      body.style.display = isOpen ? "none" : "";
+      btn.querySelector(".cfg-chevron").style.transform = isOpen ? "" : "rotate(180deg)";
+      if (!isOpen && !_cfgLoaded[key]) {
+        _cfgLoaded[key] = true;
+        var pre = document.getElementById("cfg-content-" + key);
+        fetch("/api/display/config-content?key=" + encodeURIComponent(key))
+          .then(function (r) { return r.json(); })
+          .then(function (d) { pre.textContent = d.content || "(empty)"; })
+          .catch(function (e) { pre.textContent = "Error: " + e; });
+      }
+    });
   });
-});
 
-[outputSelect, touchSelect, xDisplayInput, persistSessionInput, persistXorgInput].forEach((control) => {
-  control.addEventListener("change", updatePreview);
-  control.addEventListener("input", updatePreview);
-});
+  // ── Virtual Touchscreen Simulation ──────────────────────────
+  var _simLibOk = false;
 
-document.getElementById("refreshDevices").addEventListener("click", refreshDevices);
-xDisplayInput.addEventListener("change", refreshDevices);
-
-document.querySelectorAll("[data-wayland-action]").forEach((button) => {
-  button.addEventListener("click", () => {
-    setWayland(button.dataset.waylandAction);
-  });
-});
-
-document.getElementById("applyDisplay").addEventListener("click", async () => {
-  applyResult.textContent = "Applying...";
-  applyResult.className = "apply-result";
-  const response = await fetch("{{ url_for('display_apply') }}", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(selectedConfig()),
-  });
-  const result = await response.json();
-  if (!response.ok) {
-    applyResult.className = "apply-result error";
-    applyResult.textContent = (result.errors || ["Apply failed."]).join(" ");
-    return;
+  function simRefresh() {
+    fetch("/api/display/sim/status")
+      .then(function (r) { return r.json(); })
+      .then(function (d) { applySimState(d); })
+      .catch(function () { applySimState({ lib_ok: false, running: false }); });
   }
-  applyResult.className = "apply-result success";
-  applyResult.textContent = "Applied.";
-});
 
-updatePreview();
-
-document.querySelectorAll(".config-view-btn").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const key = btn.dataset.configKey;
-    const viewer = document.getElementById("configFileViewer");
-    const titleEl = document.getElementById("configFileTitle");
-    const pathEl = document.getElementById("configFilePath");
-    const contentEl = document.getElementById("configFileContent");
-    const title = btn.dataset.configTitle;
-
-    titleEl.textContent = title;
-    pathEl.textContent = "Loading...";
-    contentEl.textContent = "";
-    viewer.hidden = false;
-    viewer.scrollIntoView({ behavior: "smooth", block: "nearest" });
-
-    const resp = await fetch(`/api/display/config-content?key=${encodeURIComponent(key)}`);
-    const data = await resp.json();
-
-    if (data.error) {
-      pathEl.textContent = "Error";
-      contentEl.textContent = data.error;
-      return;
+  function applySimState(d) {
+    _simLibOk = !!d.lib_ok;
+    var badge = document.getElementById("sim-lib-badge");
+    var missing = document.getElementById("sim-lib-missing");
+    if (badge) {
+      if (_simLibOk) {
+        badge.className = "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-safe/30 bg-safe/5 text-[0.75rem] font-semibold text-safe";
+        badge.innerHTML = '<iconify-icon icon="lucide:check-circle" width="13" height="13"></iconify-icon><span>'+ "\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e43\u0e0a\u0e49" + '</span>';
+        if (missing) missing.style.display = "none";
+      } else {
+        badge.className = "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-caution/30 bg-caution/5 text-[0.75rem] font-semibold text-caution";
+        badge.innerHTML = '<iconify-icon icon="lucide:alert-triangle" width="13" height="13"></iconify-icon><span>'+ "\u0e44\u0e21\u0e48\u0e1e\u0e1a Library" + '</span>';
+        if (missing) missing.style.display = "";
+      }
     }
-    pathEl.textContent = data.path;
-    contentEl.textContent = data.exists ? (data.content || "(empty)") : "(file does not exist)";
-  });
-});
+    var dot  = document.getElementById("sim-status-dot");
+    var txt  = document.getElementById("sim-status-text");
+    var pid  = document.getElementById("sim-pid");
+    var running = !!d.running;
+    if (dot) dot.className = "w-2 h-2 rounded-full flex-shrink-0 " + (running ? "bg-safe" : "bg-faint/40");
+    if (txt) { txt.textContent = running ? "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e17\u0e33\u0e07\u0e32\u0e19" : "\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e17\u0e33\u0e07\u0e32\u0e19"; txt.className = "text-[0.78rem] flex-1 " + (running ? "text-safe font-medium" : "text-muted"); }
+    if (pid) pid.textContent = d.pid ? "PID " + d.pid : "";
+    var startBtn = document.getElementById("sim-start-btn");
+    var stopBtn  = document.getElementById("sim-stop-btn");
+    if (startBtn) startBtn.disabled = !_simLibOk || running;
+    if (stopBtn)  stopBtn.disabled  = !running;
+  }
 
-document.getElementById("configViewerClose").addEventListener("click", () => {
-  document.getElementById("configFileViewer").hidden = true;
-});
+  window.simStart = function () {
+    var btn = document.getElementById("sim-start-btn");
+    if (btn) btn.disabled = true;
+    fetch("/api/display/sim/start", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function () { setTimeout(simRefresh, 600); })
+      .catch(function () { simRefresh(); });
+  };
+
+  window.simStop = function () {
+    var btn = document.getElementById("sim-stop-btn");
+    if (btn) btn.disabled = true;
+    fetch("/api/display/sim/stop", { method: "POST" })
+      .then(function () { setTimeout(simRefresh, 400); })
+      .catch(function () { simRefresh(); });
+  };
+
+  // ── Init ────────────────────────────────────────────────────
+  document.addEventListener("DOMContentLoaded", function () {
+    updatePreview();
+    switchTab("monitor");
+    simRefresh();
+  });
+})();
 </script>
 {% endblock %}

@@ -1,149 +1,169 @@
-{% extends "base.html" %}
+{% extends base_template %}
 {% set title = "WireGuard" %}
 {% block header_title %}VPN{% endblock %}
 
 {% block header_actions %}
-<span class="cf-zone {{ 'cf-zone-safe' if vpn.service_active == 'active' and vpn.interface_exists else 'cf-zone-danger' }}" id="connectionBadge">
+<span class="zone {{ 'zone-safe' if vpn.service_active == 'active' and vpn.interface_exists else 'zone-danger' }}" id="connectionBadge">
   {{ 'Connected' if vpn.service_active == 'active' and vpn.interface_exists else 'Disconnected' }}
 </span>
 {% endblock %}
 
 {% block content %}
-<section class="wireguard-page" data-interface="{{ vpn.interface_name }}">
+<style>
+  /* Validation panel (JS-updated) */
+  .val-panel { padding:0.75rem 1rem; border-radius:0.5rem; font-size:0.82rem; border-width:1px; border-style:solid; }
+  .val-panel ul { list-style:none; margin-top:0.35rem; display:flex; flex-direction:column; gap:0.2rem; }
+  .val-panel li { font-size:0.78rem; }
+  .val-ok   { background:rgb(var(--c-safe)/0.06);    border-color:rgb(var(--c-safe)/0.22);    color:#0f766e; }
+  .val-warn { background:rgb(var(--c-caution)/0.08); border-color:rgb(var(--c-caution)/0.25); color:#92660b; }
+</style>
 
-  <div class="page-head">
-    <p class="cf-eyebrow">VAS · VPN</p>
-    <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">WireGuard VPN</h1>
+<section data-interface="{{ vpn.interface_name }}">
+
+  <div class="mb-1">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · VPN</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1">WireGuard VPN</h1>
   </div>
 
-  <!-- WireGuard Status panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h2>WireGuard Status</h2>
+  <!-- Status panel -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">WireGuard Status</h2>
     </div>
-    <div class="status-dl">
-      <div class="status-dl-row">
-        <span class="status-dl-key">Tool</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.wg_installed else 'cf-zone-danger' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</span>
+    <div class="divide-y divide-line/7">
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Tool</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.wg_installed else 'zone-danger' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>
+          {{ vpn.wg_version or "not installed" }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">App config</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.app_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>{{ vpn.app_config_path.as_posix() }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">App config</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.app_config_exists else 'zone-caution' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>
+          {{ vpn.app_config_path.as_posix() }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Active config</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.active_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>{{ vpn.active_config_path.as_posix() }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Active config</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.active_config_exists else 'zone-caution' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>
+          {{ vpn.active_config_path.as_posix() }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">History</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.history_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.history_exists else 'WARN' }}</span>{{ vpn.history_dir.as_posix() }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">History</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.history_exists else 'zone-caution' }}">{{ 'OK' if vpn.history_exists else 'WARN' }}</span>
+          {{ vpn.history_dir.as_posix() }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Service</span>
-        <span class="status-dl-val">{{ vpn.service_enabled }} / {{ vpn.service_active }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Service</span>
+        <span class="flex-1 text-[0.82rem] text-ink">{{ vpn.service_enabled }} / {{ vpn.service_active }}</span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Connection</span>
-        <span class="status-dl-val">{{ vpn_connection_label(vpn) }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Connection</span>
+        <span class="flex-1 text-[0.82rem] text-ink">{{ vpn_connection_label(vpn) }}</span>
       </div>
     </div>
   </div>
 
   <!-- Editor + Actions layout -->
-  <div class="wg-layout">
+  <div class="flex flex-col lg:grid lg:grid-cols-[1fr_280px] gap-4 items-start">
 
     <!-- Config editor panel -->
-    <div class="cf-card">
-      <div class="card-head hair-b section-header" style="flex-wrap:wrap;gap:0.5rem;">
+    <div class="bg-card border border-line/10 rounded-xl">
+      <div class="flex items-start justify-between px-5 py-3 border-b border-line/10 gap-3 flex-wrap">
         <div>
-          <h2>App Config</h2>
-          <p class="muted" style="font-size:0.75rem;color:rgb(var(--c-faint));margin-top:2px;">{{ vpn.app_config_path.as_posix() }}</p>
+          <h2 class="text-[0.9rem] font-semibold text-ink">App Config</h2>
+          <p class="text-[0.72rem] text-faint mt-0.5">{{ vpn.app_config_path.as_posix() }}</p>
         </div>
-        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
-          <button class="cf-btn" id="loadTemplate" type="button">New template</button>
-          <button class="cf-btn" id="validateConfig" type="button">Validate</button>
-          <button class="cf-btn cf-btn-primary" id="saveConfig" type="button">Save</button>
-          <button class="cf-btn cf-btn-danger" id="deleteConfig" type="button">Delete</button>
+        <div class="flex gap-1.5 flex-wrap">
+          <button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors" id="loadTemplate" type="button">New template</button>
+          <button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors" id="validateConfig" type="button">Validate</button>
+          <button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors" id="saveConfig" type="button">Save</button>
+          <button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.82rem] font-semibold hover:bg-danger/5 transition-colors" id="deleteConfig" type="button">Delete</button>
         </div>
       </div>
-      <div style="padding:1rem;display:flex;flex-direction:column;gap:0.75rem;">
-        <textarea class="config-textarea" id="wireguardConfig" spellcheck="false">{{ config_content }}</textarea>
-        <div class="validation-panel {{ 'valid' if config_validation.valid else 'invalid' }}" id="configValidation">
+      <div class="p-4 flex flex-col gap-3">
+        <textarea id="wireguardConfig" spellcheck="false"
+                  class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition resize-y font-mono leading-relaxed min-h-[220px]">{{ config_content }}</textarea>
+        <div class="val-panel {{ 'val-ok' if config_validation.valid else 'val-warn' }}" id="configValidation">
           <strong>{{ 'Valid config' if config_validation.valid else 'Config needs attention' }}</strong>
           <ul>
-            {% for error in config_validation.errors %}
-            <li>{{ error }}</li>
-            {% endfor %}
-            {% for warning in config_validation.warnings %}
-            <li>{{ warning }}</li>
-            {% endfor %}
-            {% if config_validation.valid and not config_validation.warnings %}
-            <li>No validation issues.</li>
-            {% endif %}
+            {% for error in config_validation.errors %}<li>{{ error }}</li>{% endfor %}
+            {% for warning in config_validation.warnings %}<li>{{ warning }}</li>{% endfor %}
+            {% if config_validation.valid and not config_validation.warnings %}<li>No validation issues.</li>{% endif %}
           </ul>
         </div>
       </div>
     </div>
 
-    <!-- Actions panel -->
-    <div class="cf-card">
-      <div class="card-head hair-b">
-        <h2>Actions</h2>
-      </div>
-      <div style="padding:1rem;display:flex;flex-direction:column;gap:0.75rem;">
-        <div style="display:flex;flex-direction:column;gap:0.5rem;">
-          <button class="cf-btn cf-btn-primary" data-wireguard-action="sync" type="button">Sync active config</button>
-          <button class="cf-btn" data-wireguard-action="unsync" type="button">Unsync active config</button>
+    <!-- Right column: Actions + History -->
+    <div class="flex flex-col gap-4 w-full">
+
+      <!-- Actions panel -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+          <h2 class="text-[0.9rem] font-semibold text-ink">Actions</h2>
         </div>
-        <p class="field-hint">Sync writes the saved app config to the active WireGuard config and restarts the interface. Unsync disables the service and backs up the active config.</p>
-        <div class="apply-result" id="wireguardResult" aria-live="polite"></div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- History panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b section-header">
-      <div>
-        <h2>Config History</h2>
-        <p class="muted" style="font-size:0.75rem;color:rgb(var(--c-faint));margin-top:2px;">{{ vpn.history_dir.as_posix() }}</p>
-      </div>
-      <button class="cf-btn" id="refreshHistory" type="button">Refresh</button>
-    </div>
-
-    <div class="history-list" id="historyList">
-      {% for entry in history_entries %}
-      <div class="history-entry" data-history-id="{{ entry.id }}">
-        <button class="history-item" type="button">
-          <span>
-            <strong>{{ entry.id }}</strong>
-            <small>{{ entry.path }}</small>
-          </span>
-          <span class="badge {{ 'ok' if entry.valid else 'warn' }}">{{ 'OK' if entry.valid else 'WARN' }}</span>
-        </button>
-        <div class="history-accordion" hidden>
-          <div class="section-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.75rem;padding:0.75rem 0;">
-            <div>
-              <h3 style="font-size:0.88rem;font-weight:600;">Snapshot Preview</h3>
-              <p class="muted history-path" style="font-size:0.72rem;color:rgb(var(--c-faint));"></p>
-            </div>
-            <button class="danger-action delete-history cf-btn cf-btn-danger" type="button">Delete</button>
+        <div class="p-4 flex flex-col gap-3">
+          <div class="flex flex-col gap-2">
+            <button class="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors" data-wireguard-action="sync" type="button">Sync active config</button>
+            <button class="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors" data-wireguard-action="unsync" type="button">Unsync active config</button>
           </div>
-          <div class="validation-panel history-validation"></div>
-          <pre class="config-file-content history-content" style="margin:0;padding:1rem;font-family:'JetBrains Mono','Fira Code','Courier New',monospace;font-size:0.78rem;line-height:1.6;white-space:pre;overflow-x:auto;background:rgb(var(--c-surface));border-radius:0 0 0.75rem 0.75rem;"></pre>
+          <p class="text-[0.75rem] text-faint leading-relaxed">Sync writes the saved app config to the active WireGuard config and restarts the interface.</p>
+          <div class="msg" id="wireguardResult" aria-live="polite"></div>
         </div>
       </div>
-      {% else %}
-      <p class="muted" id="historyEmpty">No history snapshots found.</p>
-      {% endfor %}
+
+      <!-- History panel -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+          <div>
+            <h2 class="text-[0.9rem] font-semibold text-ink">Config History</h2>
+            <p class="text-[0.68rem] text-faint mt-0.5">{{ vpn.history_dir.as_posix() }}</p>
+          </div>
+          <button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors" id="refreshHistory" type="button">Refresh</button>
+        </div>
+
+        <div id="historyList">
+          {% for entry in history_entries %}
+          <div class="history-entry border-b border-line/7 last:border-b-0" data-history-id="{{ entry.id }}">
+            <button class="history-item w-full flex items-center justify-between gap-3 px-5 py-2.5 hover:bg-surface transition-colors text-left" type="button">
+              <span>
+                <strong class="text-[0.82rem] font-semibold text-ink block">{{ entry.id }}</strong>
+                <small class="text-[0.7rem] text-faint">{{ entry.path }}</small>
+              </span>
+              <span class="zone {{ 'zone-safe' if entry.valid else 'zone-caution' }}">{{ 'OK' if entry.valid else 'WARN' }}</span>
+            </button>
+            <div class="history-accordion" hidden>
+              <div class="flex items-start justify-between gap-3 px-5 py-3 border-t border-line/7">
+                <div>
+                  <h3 class="text-[0.88rem] font-semibold text-ink">Snapshot Preview</h3>
+                  <p class="history-path text-[0.72rem] text-faint mt-0.5"></p>
+                </div>
+                <button class="delete-history inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors" type="button">Delete</button>
+              </div>
+              <div class="history-validation val-panel mx-5 mb-3"></div>
+              <pre class="history-content mx-0 px-5 py-3 font-mono text-[0.78rem] leading-relaxed whitespace-pre overflow-x-auto bg-surface text-ink border-t border-line/7 rounded-b-xl"></pre>
+            </div>
+          </div>
+          {% else %}
+          <p class="text-muted text-[0.82rem] px-5 py-4" id="historyEmpty">No history snapshots found.</p>
+          {% endfor %}
+        </div>
+      </div>
+
     </div>
   </div>
 
 </section>
 
 <script>
-const wireguardPage = document.querySelector(".wireguard-page");
+const wireguardPage = document.querySelector("[data-interface]");
 const interfaceName = wireguardPage.dataset.interface || "wg0";
 const configText = document.getElementById("wireguardConfig");
 const configValidation = document.getElementById("configValidation");
@@ -151,7 +171,7 @@ const resultEl = document.getElementById("wireguardResult");
 const historyList = document.getElementById("historyList");
 
 function renderValidation(target, validation) {
-  target.className = `validation-panel ${validation.valid ? "valid" : "invalid"}`;
+  target.className = `val-panel ${validation.valid ? "val-ok" : "val-warn"}`;
   const items = [...(validation.errors || []), ...(validation.warnings || [])];
   target.innerHTML = "";
   const title = document.createElement("strong");
@@ -167,7 +187,7 @@ function renderValidation(target, validation) {
 }
 
 function setResult(message, status = "") {
-  resultEl.className = `apply-result ${status}`;
+  resultEl.className = `msg ${status === "success" ? "msg-ok" : status === "error" ? "msg-error" : ""}`;
   resultEl.textContent = message;
 }
 
@@ -178,17 +198,12 @@ async function postJson(url, payload) {
     body: JSON.stringify(payload),
   });
   const data = await response.json();
-  if (!response.ok) {
-    throw new Error((data.errors || ["Request failed."]).join(" "));
-  }
+  if (!response.ok) throw new Error((data.errors || ["Request failed."]).join(" "));
   return data;
 }
 
 async function validateConfig() {
-  const data = await postJson("{{ url_for('wireguard_validate_api') }}", {
-    name: interfaceName,
-    content: configText.value,
-  });
+  const data = await postJson("{{ url_for('wireguard_validate_api') }}", { name: interfaceName, content: configText.value });
   renderValidation(configValidation, data.validation);
   return data.validation;
 }
@@ -207,27 +222,17 @@ document.getElementById("validateConfig").addEventListener("click", async () => 
 
 document.getElementById("saveConfig").addEventListener("click", async () => {
   try {
-    const data = await postJson("{{ url_for('wireguard_save_config_api') }}", {
-      name: interfaceName,
-      content: configText.value,
-    });
+    const data = await postJson("{{ url_for('wireguard_save_config_api') }}", { name: interfaceName, content: configText.value });
     renderValidation(configValidation, data.validation);
     setResult(`Saved ${data.path}.`, "success");
-  } catch (error) {
-    setResult(error.message, "error");
-  }
+  } catch (error) { setResult(error.message, "error"); }
 });
 
 document.getElementById("deleteConfig").addEventListener("click", async () => {
-  if (!confirm("Delete the saved WireGuard app config?")) {
-    return;
-  }
+  if (!confirm("Delete the saved WireGuard app config?")) return;
   const response = await fetch(`{{ url_for('wireguard_delete_config_api') }}?name=${encodeURIComponent(interfaceName)}`, { method: "DELETE" });
   const data = await response.json();
-  if (!response.ok) {
-    setResult((data.errors || ["Delete failed."]).join(" "), "error");
-    return;
-  }
+  if (!response.ok) { setResult((data.errors || ["Delete failed."]).join(" "), "error"); return; }
   configText.value = "";
   renderValidation(configValidation, { valid: false, errors: ["missing [Interface] section", "missing [Peer] section"], warnings: [] });
   setResult(`Deleted ${data.path}.`, "success");
@@ -241,9 +246,7 @@ document.querySelectorAll("[data-wireguard-action]").forEach((button) => {
       await postJson("{{ url_for('wireguard_action_api') }}", { name: interfaceName, action });
       setResult(`${action} completed.`, "success");
       await refreshHistory();
-    } catch (error) {
-      setResult(error.message, "error");
-    }
+    } catch (error) { setResult(error.message, "error"); }
   });
 });
 
@@ -251,30 +254,33 @@ function renderHistory(entries) {
   historyList.innerHTML = "";
   if (!entries.length) {
     const empty = document.createElement("p");
-    empty.className = "muted";
+    empty.className = "text-muted text-[0.82rem] px-5 py-4";
     empty.textContent = "No history snapshots found.";
     historyList.appendChild(empty);
     return;
   }
   entries.forEach((entry) => {
     const wrapper = document.createElement("div");
-    wrapper.className = "history-entry";
+    wrapper.className = "history-entry border-b border-line/7 last:border-b-0";
     wrapper.dataset.historyId = entry.id;
     wrapper.innerHTML = `
-      <button class="history-item" type="button">
-        <span><strong></strong><small></small></span>
-        <span class="badge ${entry.valid ? "ok" : "warn"}">${entry.valid ? "OK" : "WARN"}</span>
+      <button class="history-item w-full flex items-center justify-between gap-3 px-5 py-2.5 hover:bg-surface transition-colors text-left" type="button">
+        <span>
+          <strong class="text-[0.82rem] font-semibold text-ink block"></strong>
+          <small class="text-[0.7rem] text-faint"></small>
+        </span>
+        <span class="zone ${entry.valid ? "zone-safe" : "zone-caution"}">${entry.valid ? "OK" : "WARN"}</span>
       </button>
       <div class="history-accordion" hidden>
-        <div class="section-header">
+        <div class="flex items-start justify-between gap-3 px-5 py-3 border-t border-line/7">
           <div>
-            <h3>Snapshot Preview</h3>
-            <p class="muted history-path"></p>
+            <h3 class="text-[0.88rem] font-semibold text-ink">Snapshot Preview</h3>
+            <p class="history-path text-[0.72rem] text-faint mt-0.5"></p>
           </div>
-          <button class="danger-action delete-history" type="button">Delete</button>
+          <button class="delete-history inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors" type="button">Delete</button>
         </div>
-        <div class="validation-panel history-validation"></div>
-        <pre class="config-file-content history-content"></pre>
+        <div class="history-validation val-panel mx-5 mb-3"></div>
+        <pre class="history-content mx-0 px-5 py-3 font-mono text-[0.78rem] leading-relaxed whitespace-pre overflow-x-auto bg-surface text-ink border-t border-line/7 rounded-b-xl"></pre>
       </div>`;
     wrapper.querySelector("strong").textContent = entry.id;
     wrapper.querySelector("small").textContent = entry.path;
@@ -286,32 +292,19 @@ function renderHistory(entries) {
 async function refreshHistory() {
   const response = await fetch(`{{ url_for('wireguard_history_api') }}?name=${encodeURIComponent(interfaceName)}`);
   const data = await response.json();
-  if (!response.ok) {
-    setResult((data.errors || ["History refresh failed."]).join(" "), "error");
-    return;
-  }
+  if (!response.ok) { setResult((data.errors || ["History refresh failed."]).join(" "), "error"); return; }
   renderHistory(data.entries || []);
 }
 
 async function loadHistory(historyId) {
   const wrapper = historyList.querySelector(`[data-history-id="${CSS.escape(historyId)}"]`);
-  if (!wrapper) {
-    return;
-  }
+  if (!wrapper) return;
   const accordion = wrapper.querySelector(".history-accordion");
-  if (!accordion.hidden) {
-    accordion.hidden = true;
-    return;
-  }
+  if (!accordion.hidden) { accordion.hidden = true; return; }
   const response = await fetch(`/api/wireguard/history/${encodeURIComponent(historyId)}?name=${encodeURIComponent(interfaceName)}`);
   const data = await response.json();
-  if (!response.ok) {
-    setResult((data.errors || ["History load failed."]).join(" "), "error");
-    return;
-  }
-  historyList.querySelectorAll(".history-accordion").forEach((item) => {
-    item.hidden = item !== accordion;
-  });
+  if (!response.ok) { setResult((data.errors || ["History load failed."]).join(" "), "error"); return; }
+  historyList.querySelectorAll(".history-accordion").forEach((item) => { item.hidden = item !== accordion; });
   wrapper.querySelector(".history-path").textContent = data.path;
   wrapper.querySelector(".history-content").textContent = data.content;
   renderValidation(wrapper.querySelector(".history-validation"), data.validation);
@@ -319,15 +312,10 @@ async function loadHistory(historyId) {
 }
 
 async function deleteHistory(historyId) {
-  if (!historyId || !confirm("Delete this WireGuard history snapshot?")) {
-    return;
-  }
+  if (!historyId || !confirm("Delete this WireGuard history snapshot?")) return;
   const response = await fetch(`/api/wireguard/history/${encodeURIComponent(historyId)}?name=${encodeURIComponent(interfaceName)}`, { method: "DELETE" });
   const data = await response.json();
-  if (!response.ok) {
-    setResult((data.errors || ["History delete failed."]).join(" "), "error");
-    return;
-  }
+  if (!response.ok) { setResult((data.errors || ["History delete failed."]).join(" "), "error"); return; }
   setResult(`Deleted history ${data.id}.`, "success");
   await refreshHistory();
 }
@@ -335,14 +323,10 @@ async function deleteHistory(historyId) {
 function bindHistoryEntry(wrapper) {
   const historyId = wrapper.dataset.historyId;
   wrapper.querySelector(".history-item").addEventListener("click", () => loadHistory(historyId));
-  wrapper.querySelector(".delete-history").addEventListener("click", (event) => {
-    event.stopPropagation();
-    deleteHistory(historyId);
-  });
+  wrapper.querySelector(".delete-history").addEventListener("click", (event) => { event.stopPropagation(); deleteHistory(historyId); });
 }
 
 document.querySelectorAll(".history-entry").forEach(bindHistoryEntry);
-
 document.getElementById("refreshHistory").addEventListener("click", refreshHistory);
 </script>
 {% endblock %}

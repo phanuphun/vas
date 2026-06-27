@@ -1,11 +1,11 @@
-<ul class="command-list">
+<ul class="flex flex-col divide-y divide-line/7">
   {% for command in commands %}
-  <li>
-    <div>
-      <strong>{{ command.label }}</strong>
-      {% if command.requires_root %}<span class="cf-zone cf-zone-caution">sudo</span>{% endif %}
+  <li class="px-5 py-3">
+    <div class="flex items-center gap-1.5 mb-1">
+      <strong class="text-[0.82rem] font-semibold text-ink">{{ command.label }}</strong>
+      {% if command.requires_root %}<span class="zone zone-caution">sudo</span>{% endif %}
     </div>
-    <code>{{ command.command }}</code>
+    <code class="block font-mono text-[0.78rem] text-muted bg-surface px-3 py-1.5 rounded-md whitespace-pre-wrap break-all">{{ command.command }}</code>
   </li>
   {% endfor %}
 </ul>

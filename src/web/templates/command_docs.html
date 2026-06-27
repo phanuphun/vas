@@ -3,62 +3,52 @@
 {% block header_title %}คำสั่ง CLI{% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <p class="cf-eyebrow">VAS · เอกสารคำสั่ง</p>
-  <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">คู่มือคำสั่ง VAS CLI</h1>
-  <p class="doc-intro" style="margin-top:0.5rem">Commands are preview-only. Run them manually in a terminal on the vending machine.</p>
+<div class="mb-1">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · เอกสารคำสั่ง</p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1">คู่มือคำสั่ง VAS CLI</h1>
+  <p class="text-[0.82rem] text-muted mt-1">Commands are preview-only. Run them manually in a terminal on the vending machine.</p>
 </div>
 
-<div class="commands-grid">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-  <div class="cf-card doc-section">
-    <div class="card-head hair-b">
-      <h2>Install</h2>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">Install</h2>
     </div>
-    <div>
-      {% set commands = install_commands %}
-      {% include "_command_list.html" with context %}
-    </div>
+    {% set commands = install_commands %}
+    {% include "_command_list.html" with context %}
   </div>
 
-  <div class="cf-card doc-section">
-    <div class="card-head hair-b">
-      <h2>Reset</h2>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">Reset</h2>
     </div>
-    <div>
-      {% set commands = reset_commands %}
-      {% include "_command_list.html" %}
-    </div>
+    {% set commands = reset_commands %}
+    {% include "_command_list.html" %}
   </div>
 
-  <div class="cf-card doc-section">
-    <div class="card-head hair-b">
-      <h2>Display</h2>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">Display</h2>
     </div>
-    <div>
-      {% set commands = display_commands %}
-      {% include "_command_list.html" %}
-    </div>
+    {% set commands = display_commands %}
+    {% include "_command_list.html" %}
   </div>
 
-  <div class="cf-card doc-section">
-    <div class="card-head hair-b">
-      <h2>VPN</h2>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">VPN</h2>
     </div>
-    <div>
-      {% set commands = wireguard_commands %}
-      {% include "_command_list.html" %}
-    </div>
+    {% set commands = wireguard_commands %}
+    {% include "_command_list.html" %}
   </div>
 
-  <div class="cf-card doc-section">
-    <div class="card-head hair-b">
-      <h2>Server</h2>
+  <div class="bg-card border border-line/10 rounded-xl md:col-span-2">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">Server</h2>
     </div>
-    <div>
-      {% set commands = server_commands %}
-      {% include "_command_list.html" %}
-    </div>
+    {% set commands = server_commands %}
+    {% include "_command_list.html" %}
   </div>
 
 </div>

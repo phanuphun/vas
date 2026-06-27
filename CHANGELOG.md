@@ -1,5 +1,90 @@
 # Changelog
 
+## [2026-06-27]
+
+### ปรับ mqtt.html — Section Menu 2 tabs + Message Monitor panel
+- แทนที่ Toolbar "รายการ Broker" label ด้วย Section Menu แบบ 2 tabs: **Brokers** (lucide:server) และ **Message Monitor** (lucide:activity)
+- ย้ายปุ่ม "เพิ่ม Broker" จาก toolbar เข้าไปใน card header ของ broker list (ขวาบน)
+- เพิ่ม tab panel **Message Monitor**: control card (broker select + topic input + เริ่ม/หยุด), status strip (dot indicator + topic label + message count + ล้าง + auto-scroll), message log (dark terminal style, max-height 380px)
+- Polling JS: `monStart/Stop/Clear/Poll` — polling ทุก 1.5s ผ่าน `GET /api/mqtt/monitor/messages?since=N`, แสดง timestamp/topic/payload ด้วย syntax highlight
+- Tab switching: `mqttTab()` toggle class `bg-accent/8 text-accent font-semibold` / `text-muted` โดยไม่ใช้ Tailwind JIT
+- SPA cleanup: `window.__vasCleanup.push(...)` หยุด interval และ stop session เมื่อ navigate ออก
+- ใช้ bash heredoc แทน Write tool เพื่อป้องกัน truncation (ไฟล์ 465 บรรทัด)
+
+### เพิ่ม paho-mqtt ใน Settings > Software
+- เพิ่ม package entry `paho-mqtt` ในกลุ่ม Network ของ `features/packages/settings.py`
+- check: `_python_import_check("paho")`, install: `apt-get install python3-paho-mqtt`
+- logo: ใช้ `mqtt-logo.png` ที่มีอยู่แล้วใน `public/images/logo/`
+- ปรากฏในหน้า Settings > Software ใต้กลุ่ม NETWORK พร้อมปุ่ม Install
+
+### ปรับ UX หน้า MQTT Broker List (รอบ 2)
+- Stats Cards: ปรับเป็น Monitor style — icon box (`w-9 h-9 bg-surface border rounded-lg`) + label + metric value ขนาด 1.25rem แทน big number เดิม
+- Broker List: ปรับเป็น Settings pkg-row style — icon box (wifi, เปลี่ยนสีตามสถานะ) + ชื่อ/badge/URL/topic count + ปุ่ม action (เชื่อมต่อ/จัดการ/แก้ไข icon/ลบ icon)
+- Empty state: ใช้ iconify-icon `lucide:wifi-off` แทน SVG inline
+
+### ปรับ UX หน้า MQTT Broker List
+- ย้ายปุ่ม "เพิ่ม Broker" ออกจาก header_actions เข้ามาใน Content area
+- เพิ่ม Toolbar Section (nav bar เหมือน display.html) แสดง label "รายการ Broker" + ปุ่ม action ทางขวา
+- แทนที่ paho-mqtt alert banner ด้วย Library card แบบเดียวกับ "Library ที่จำเป็น" ใน display.html: header+badge status + missing row (bg-caution/5, border-caution/20) + ปุ่ม "ไปติดตั้ง"
+- ห่อ content ทั้งหมดด้วย `<div class="flex flex-col gap-4">` ตาม convention ของ INSTRUCTIONS.md
+
+### MQTT Multi-Broker Management
+- ปรับหน้า `/mqtt` ใหม่เป็น **Broker List** — ตาราง brokers พร้อม status badge, ปุ่มเชื่อมต่อ/จัดการ/แก้ไข/ลบ
+- เพิ่มหน้า `/mqtt/broker/add` — ฟอร์มเพิ่ม broker ใหม่ (แยกหน้าตาม UX requirement)
+- เพิ่มหน้า `/mqtt/broker/<id>/edit` — ฟอร์มแก้ไข broker (แยกหน้า)
+- เพิ่มหน้า `/mqtt/broker/<id>` — Broker Detail: tab สถานะ, tab Topics (เพิ่ม/ลบ/toggle), tab ข้อมูล
+- เพิ่ม `mqtt_brokers` table — เก็บ name, broker_url, username, password, client_id, qos, retain, payload_mode, tls_insecure, keep_alive, reconnect_min/max, notes, is_primary, enabled
+- เพิ่ม `mqtt_broker_topics` table — เก็บ topics หลายรายการต่อ broker (topic, label, enabled)
+- เพิ่ม CRUD functions ใน `core/database.py`: `list/get/create/update/delete_mqtt_broker`, `list/add/update/delete_mqtt_topic`
+- เพิ่ม helper functions ใน `features/mqtt/client.py`: `broker_db_to_config`, `start_mqtt_broker`, `get_broker_connection_status`, `get_primary_broker_id`
+- API endpoints ใหม่: `POST/PUT/DELETE /api/mqtt/brokers/<id>`, `POST /api/mqtt/brokers/<id>/connect`, `/disconnect`, `/test`, `/status`, `POST/PUT/DELETE /api/mqtt/topics/<id>`
+- UI ตาม INSTRUCTIONS.md convention: Page Header + Section Menu (tabs) + Content Section, ui-minimal design system
+
+
+
+### ระบบจัดการผู้ใช้งาน (Auth & User Management)
+- เพิ่ม `src/core/auth.py` — auth module: สร้าง/แก้ไข/ลบผู้ใช้, hash password ด้วย werkzeug, roles: root/admin/user
+- เพิ่ม `users` table ใน SQLite (เรียก `init_users()` จาก `init_db`)
+- หน้า First-run Setup (`/setup`) — ครั้งแรกที่ไม่มี user ให้สร้าง Root ก่อน
+- หน้า Login (`/login`) — form login พร้อม toggle show/hide password
+- หน้า User Management (`/users`) — ตาราง users, เพิ่ม/แก้ไข/ลบ, reset password ผ่าน modal
+- `before_request` guard — ป้องกัน route ที่ต้อง login, redirect first-run อัตโนมัติ
+- Navbar: user dropdown แสดงชื่อ+role, แก้ไขโปรไฟล์, เปลี่ยนรหัสผ่าน, ออกจากระบบ
+- Sidebar: เมนู "ผู้ใช้งาน" แสดงเฉพาะ root/admin
+- API: `/api/users`, `/api/users/<id>`, `/api/users/<id>/reset-password`, `/api/profile`, `/api/profile/password`
+
+### QR Device Catalog & Integration System
+- เพิ่มหน้า **อุปกรณ์** (`/qr/devices`) — catalog ของ hardware ที่รองรับ, ปุ่มติดตั้ง/ถอน, แสดง device ที่ install แล้ว
+- เพิ่มหน้า **ZKTeco QR500** (`/qr/device/zkteco/qr500`) — tab ตั้งค่า device (hidraw/evdev) + tab Integration (Webhook, MQTT Publish, Named Pipe I/O)
+- Integration Webhook: กำหนด URL, HTTP Method, Retry (1/5/10 ครั้ง), Timeout, แสดง Payload ตัวอย่าง
+- Integration MQTT: เลือก broker จากที่ตั้งไว้ในหน้า MQTT หรือกรอกใหม่, กำหนด topic และ QoS
+- Integration Pipe I/O: สร้าง named pipe (`mkfifo`) ให้ process อื่นอ่านข้อมูลสแกนได้
+- เพิ่ม `qr_device_registry.py` — จัดการ installed devices + integration config (JSON)
+- ปรับ `qr.html` — เพิ่มปุ่ม Copy Clipboard ชัดเจน, ลบ scan animation, เพิ่ม Flow Diagram แบบ pipeline
+- ปรับ `base.html` sidebar — เพิ่ม "อุปกรณ์" nav, conditional "QR500" sub-item เมื่อ install
+- เพิ่ม API: `/api/qr/devices/<id>/install`, `/api/qr/devices/<id>/uninstall`, `/api/qr/integrations`, `/api/qr/integrations/<type>`, `/api/qr/integrations/pipe/create`
+
+### แก้ SPA Router โหลดซ้ำหลายรอบ (base.html)
+- **FIX 1**: เพิ่ม `e.isTrusted` check — ป้องกัน synthetic click events จาก web components (เช่น `<iconify-icon>`) trigger navigation ซ้ำ
+- **FIX 2**: เพิ่ม `e.stopPropagation()` — ป้องกัน listener อื่นจับ event ซ้ำ
+- **FIX 3**: เพิ่ม `AbortController` — cancel fetch ที่ค้างอยู่เมื่อ navigate ใหม่, ป้องกัน concurrent navigation ทำให้ content ถูกเขียนทับหลายรอบ
+- **FIX 4**: เปลี่ยน `window.__vasCleanup = []` → `window.__vasCleanup = window.__vasCleanup || []` — ป้องกัน SPA init ลบ cleanup functions ที่ page scripts ลงทะเบียนไว้ก่อนหน้า (เพราะ `{% block extra_scripts %}` รันก่อน SPA init)
+
+### ปรับ Monitor ตาม page convention
+- ย้าย styles จาก `{% block extra_styles %}` (ไม่ได้ defined ใน base.html) มาเป็น `<style>` tag ใน content block
+- เพิ่ม Page Header (eyebrow + h1 + subtitle) ตาม INSTRUCTIONS.md convention
+- ปรับโครงสร้าง content block ให้ถูกต้อง: Page Header → Content Section
+
+### Re-Design หน้า Monitor
+- ออกแบบหน้า System Monitor ใหม่ด้วย UI-Minimal Design System
+- เพิ่ม Summary Stat Row (4 cards: CPU%, RAM%, Load Avg, Temperature) ไว้ด้านบน
+- เพิ่ม Loading skeleton แทน spinner เพื่อประสบการณ์ที่ดีขึ้น
+- ปรับ CPU/RAM card: bar usage + grid metric ที่อ่านง่ายขึ้น
+- ปรับ per-core bars เป็น micro-bar grid แบบ compact
+- Disk section: เพิ่ม icon, fstype badge, และ layout ที่สะอาดขึ้น
+- Network section: เพิ่ม interface icon และจัด layout ชัดเจน
+- ใช้สี dynamic (safe/caution/danger) ตาม threshold บน stat cards
+
 ## [2026-06-23]
 
 ### OpenSSH Server

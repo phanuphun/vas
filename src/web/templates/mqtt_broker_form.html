@@ -1,0 +1,306 @@
+{% extends base_template %}
+{% block page_title %}{{ 'แก้ไข Broker' if edit else 'เพิ่ม Broker' }} — VAS{% endblock %}
+{% block header_title %}{{ 'แก้ไข Broker' if edit else 'เพิ่ม Broker' }}{% endblock %}
+
+{% block header_actions %}
+<a href="{{ '/mqtt/broker/' + broker.id|string if edit else '/mqtt' }}"
+   class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="15 18 9 12 15 6"/>
+  </svg>
+  ย้อนกลับ
+</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .toggle-switch { position:relative; display:inline-flex; align-items:center; gap:0.5rem; cursor:pointer; }
+  .toggle-switch input { position:absolute; opacity:0; width:0; height:0; }
+  .toggle-track { width:36px; height:20px; border-radius:10px; background:rgb(var(--c-faint)/0.4); transition:background 0.2s; border:1px solid rgb(var(--c-line)/0.14); position:relative; }
+  .toggle-switch input:checked + .toggle-track { background:rgb(var(--c-safe)); border-color:rgb(var(--c-safe)); }
+  .toggle-thumb { position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.15); transition:left 0.2s; }
+  .toggle-switch input:checked + .toggle-track .toggle-thumb { left:18px; }
+</style>
+
+<!-- Page header -->
+<div class="border-b border-line/10 pb-4">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · MQTT · {{ 'แก้ไข' if edit else 'เพิ่มใหม่' }}</p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">{{ 'แก้ไข Broker' if edit else 'เพิ่ม MQTT Broker' }}</h1>
+  <p class="text-[0.82rem] text-muted mt-1">{{ 'แก้ไขการตั้งค่า broker: ' + broker.name if edit else 'กรอกข้อมูล broker ที่ต้องการเชื่อมต่อ' }}</p>
+</div>
+
+<!-- Form card -->
+<div class="bg-card border border-line/10 rounded-xl">
+  <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+    <h2 class="text-[0.9rem] font-semibold text-ink">ข้อมูล Broker</h2>
+    <span class="text-[0.78rem] text-faint" id="form-result"></span>
+  </div>
+
+  <div class="p-5 flex flex-col gap-4">
+
+    <!-- Enable + Primary toggles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+        <div>
+          <div class="text-[0.84rem] font-semibold text-ink">เปิดใช้งาน</div>
+          <div class="text-[0.72rem] text-faint mt-0.5">broker นี้จะถูกใช้งาน</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="f-enabled" {{ 'checked' if (broker is none or broker.enabled) else '' }}>
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+      <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+        <div>
+          <div class="text-[0.84rem] font-semibold text-ink">Primary Broker</div>
+          <div class="text-[0.72rem] text-faint mt-0.5">ใช้สำหรับ QR scan publish</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="f-primary" {{ 'checked' if broker and broker.is_primary else '' }}>
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Basic Info -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+      <!-- Name -->
+      <div class="sm:col-span-2 flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="f-name">ชื่อ Broker <span class="text-danger">*</span></label>
+        <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-name" type="text" placeholder="เช่น Production MQTT, Local Broker" value="{{ broker.name if broker else '' }}">
+      </div>
+
+      <!-- Broker URL -->
+      <div class="sm:col-span-2 flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="f-url">Broker URL <span class="text-danger">*</span></label>
+        <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-url" type="text" placeholder="mqtts://broker.example.com:8883" value="{{ broker.broker_url if broker else '' }}">
+        <p class="text-[0.7rem] text-faint">รองรับ mqtt://, mqtts:// (TLS), ws://, wss:// (WebSocket)</p>
+      </div>
+
+      <!-- Username -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="f-username">Username</label>
+        <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-username" type="text" placeholder="username" value="{{ broker.username if broker else '' }}" autocomplete="username">
+      </div>
+
+      <!-- Password -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="f-password">Password</label>
+        <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-password" type="password" placeholder="••••••••" value="{{ broker.password if broker else '' }}" autocomplete="current-password">
+      </div>
+
+      <!-- Client ID -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="f-client-id">Client ID</label>
+        <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-client-id" type="text" placeholder="vas-qr-reader (auto-generate ถ้าว่าง)" value="{{ broker.client_id if broker else '' }}">
+      </div>
+
+      <!-- QoS -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="f-qos">QoS</label>
+        <select class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-qos">
+          <option value="0" {{ 'selected' if broker and broker.qos == 0 else '' }}>0 — At most once</option>
+          <option value="1" {{ 'selected' if (broker is none or broker.qos == 1) else '' }}>1 — At least once (แนะนำ)</option>
+          <option value="2" {{ 'selected' if broker and broker.qos == 2 else '' }}>2 — Exactly once</option>
+        </select>
+      </div>
+
+    </div>
+
+    <!-- Payload Mode -->
+    <div class="flex flex-col gap-2">
+      <label class="text-[0.75rem] font-semibold text-muted">Payload Mode</label>
+      <div class="flex flex-col gap-2">
+        {% set cur_mode = broker.payload_mode if broker else 'decoded' %}
+        {% for mode_value, mode_label, mode_desc, mode_example in [
+          ('decoded', 'Decoded', 'ลอง decode QR content ก่อน publish', '{"scan":{"order_id":"123"},"device":"...","ts":"..."}'),
+          ('json',    'JSON Object', 'ส่ง QR string ใน JSON envelope', '{"scan":"3833401723","device":"/dev/input/event6","ts":"..."}'),
+          ('raw',     'Raw String', 'ส่ง QR string เปล่าๆ ไม่มี wrapper', '3833401723'),
+        ] %}
+        <label class="flex items-start gap-2.5 cursor-pointer px-3.5 py-2.5 border border-line/14 rounded-lg hover:bg-surface transition-colors" id="lbl-mode-{{ mode_value }}">
+          <input type="radio" name="f-payload-mode" id="f-mode-{{ mode_value }}" value="{{ mode_value }}" style="margin-top:3px;" {{ 'checked' if cur_mode == mode_value else '' }} onchange="syncModeLabels()">
+          <div>
+            <div class="text-[0.84rem] font-semibold text-ink">{{ mode_label }}</div>
+            <div class="text-[0.72rem] text-faint mt-0.5">{{ mode_desc }}</div>
+            <code class="text-[0.7rem] text-muted font-display">{{ mode_example }}</code>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Advanced settings -->
+    <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+      <button type="button" onclick="toggleAdvanced()" class="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface transition-colors" id="adv-toggle">
+        <span class="text-[0.84rem] font-semibold text-ink">การตั้งค่าขั้นสูง</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="adv-chevron" class="text-faint transition-transform">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      <div id="adv-panel" class="hidden border-t border-line/10 p-4 flex flex-col gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <!-- Keep alive -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted" for="f-keepalive">Keep Alive (วินาที)</label>
+            <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-keepalive" type="number" min="5" max="3600" value="{{ broker.keep_alive if broker else 60 }}">
+          </div>
+          <!-- Reconnect min -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted" for="f-recon-min">Reconnect Min (วิ)</label>
+            <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-recon-min" type="number" min="1" max="60" value="{{ broker.reconnect_min if broker else 3 }}">
+          </div>
+          <!-- Reconnect max -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted" for="f-recon-max">Reconnect Max (วิ)</label>
+            <input class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-recon-max" type="number" min="5" max="3600" value="{{ broker.reconnect_max if broker else 30 }}">
+          </div>
+        </div>
+        <!-- Retain + TLS toggles -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="flex items-center gap-3 px-4 py-3 border border-line/10 rounded-lg">
+            <label class="toggle-switch">
+              <input type="checkbox" id="f-retain" {{ 'checked' if broker and broker.retain else '' }}>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+            <div>
+              <div class="text-[0.84rem] font-medium text-ink">Retain</div>
+              <div class="text-[0.7rem] text-faint">broker เก็บข้อความล่าสุดไว้</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 border border-line/10 rounded-lg">
+            <label class="toggle-switch">
+              <input type="checkbox" id="f-tls-insecure" {{ 'checked' if broker and broker.tls_insecure else '' }}>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+            <div>
+              <div class="text-[0.84rem] font-medium text-ink">TLS Insecure</div>
+              <div class="text-[0.7rem] text-caution">ข้าม certificate verify (self-signed)</div>
+            </div>
+          </div>
+        </div>
+        <!-- Notes -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.75rem] font-semibold text-muted" for="f-notes">หมายเหตุ</label>
+          <textarea class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition resize-y" id="f-notes" rows="2" placeholder="รายละเอียดเพิ่มเติม...">{{ broker.notes if broker else '' }}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="flex gap-2 flex-wrap pt-1 border-t border-line/10">
+      <button class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors" onclick="submitForm()" id="btn-submit">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+        {{ 'บันทึกการแก้ไข' if edit else 'เพิ่ม Broker' }}
+      </button>
+      <a href="{{ '/mqtt/broker/' + broker.id|string if edit else '/mqtt' }}"
+        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+        ยกเลิก
+      </a>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var IS_EDIT    = {{ 'true' if edit else 'false' }};
+  var BROKER_ID  = {{ broker.id if broker else 'null' }};
+
+  // sync toggle thumbs on load
+  document.querySelectorAll(".toggle-switch input").forEach(function (inp) {
+    function sync() {
+      var thumb = inp.closest(".toggle-switch").querySelector(".toggle-thumb");
+      var track = inp.closest(".toggle-switch").querySelector(".toggle-track");
+      if (thumb) thumb.style.left = inp.checked ? "18px" : "2px";
+      if (track) {
+        track.style.background  = inp.checked ? "rgb(var(--c-safe))" : "";
+        track.style.borderColor = inp.checked ? "rgb(var(--c-safe))" : "";
+      }
+    }
+    inp.addEventListener("change", sync);
+    sync();
+  });
+
+  function syncModeLabels() {
+    ["decoded", "json", "raw"].forEach(function (m) {
+      var inp = document.getElementById("f-mode-" + m);
+      var lbl = document.getElementById("lbl-mode-" + m);
+      if (!inp || !lbl) return;
+      lbl.style.borderColor = inp.checked ? "rgb(var(--c-accent))" : "";
+      lbl.style.background  = inp.checked ? "rgb(var(--c-accent)/0.05)" : "";
+    });
+  }
+  window.syncModeLabels = syncModeLabels;
+  syncModeLabels();
+
+  function toggleAdvanced() {
+    var panel   = document.getElementById("adv-panel");
+    var chevron = document.getElementById("adv-chevron");
+    var hidden  = panel.classList.toggle("hidden");
+    if (chevron) chevron.style.transform = hidden ? "" : "rotate(180deg)";
+  }
+  window.toggleAdvanced = toggleAdvanced;
+
+  function readForm() {
+    return {
+      name:          document.getElementById("f-name").value.trim(),
+      broker_url:    document.getElementById("f-url").value.trim(),
+      username:      document.getElementById("f-username").value,
+      password:      document.getElementById("f-password").value,
+      client_id:     document.getElementById("f-client-id").value.trim(),
+      qos:           parseInt(document.getElementById("f-qos").value, 10),
+      payload_mode:  (document.querySelector('input[name="f-payload-mode"]:checked') || {}).value || "decoded",
+      enabled:       document.getElementById("f-enabled").checked,
+      is_primary:    document.getElementById("f-primary").checked,
+      retain:        document.getElementById("f-retain").checked,
+      tls_insecure:  document.getElementById("f-tls-insecure").checked,
+      keep_alive:    parseInt(document.getElementById("f-keepalive").value, 10) || 60,
+      reconnect_min: parseInt(document.getElementById("f-recon-min").value, 10) || 3,
+      reconnect_max: parseInt(document.getElementById("f-recon-max").value, 10) || 30,
+      notes:         document.getElementById("f-notes").value,
+    };
+  }
+
+  function setResult(msg, ok) {
+    var el = document.getElementById("form-result");
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok ? "rgb(var(--c-safe))" : "rgb(var(--c-danger))";
+  }
+
+  function submitForm() {
+    var data = readForm();
+    if (!data.name) { setResult("กรุณากรอกชื่อ Broker", false); return; }
+    if (!data.broker_url) { setResult("กรุณากรอก Broker URL", false); return; }
+    var btn = document.getElementById("btn-submit");
+    btn.disabled = true;
+    var url    = IS_EDIT ? "/api/mqtt/brokers/" + BROKER_ID : "/api/mqtt/brokers";
+    var method = IS_EDIT ? "PUT" : "POST";
+    fetch(url, { method: method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === "ok") {
+          setResult(IS_EDIT ? "✓ บันทึกแล้ว" : "✓ เพิ่ม Broker แล้ว", true);
+          var id = IS_EDIT ? BROKER_ID : d.id;
+          setTimeout(function () { location.href = "/mqtt/broker/" + id; }, 800);
+        } else {
+          setResult("Error: " + (d.errors || []).join(", "), false);
+        }
+      })
+      .catch(function (e) { setResult("Error: " + e, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+  window.submitForm = submitForm;
+})();
+</script>
+{% endblock %}

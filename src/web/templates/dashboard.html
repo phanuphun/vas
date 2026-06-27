@@ -1,54 +1,74 @@
-{% extends "base.html" %}
+{% extends base_template %}
 {% set title = "Dashboard" %}
 {% block header_title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <p class="cf-eyebrow">VAS · ภาพรวมระบบ</p>
-  <h1 class="font-display" style="font-size:1.35rem;font-weight:700;margin-top:0.2rem">Dashboard</h1>
+
+<!-- Page heading -->
+<div class="mb-1">
+  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · ภาพรวมระบบ</p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1">Dashboard</h1>
 </div>
 
 <!-- Session panel -->
-<div class="cf-card">
-  <div class="card-head hair-b">
-    <h2>Session</h2>
+<div class="bg-card border border-line/10 rounded-xl">
+  <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+    <h2 class="text-[0.9rem] font-semibold text-ink">Session</h2>
   </div>
-  <div class="status-dl">
-    <div class="status-dl-row">
-      <span class="status-dl-key">Display</span>
-      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if session.is_x11 else 'cf-zone-caution' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>{{ session.session_type }} via {{ session.source }}</span>
+  <div class="divide-y divide-line/7">
+    <div class="flex items-start gap-3 px-5 py-2.5">
+      <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Display</span>
+      <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+        <span class="zone {{ 'zone-safe' if session.is_x11 else 'zone-caution' }}">{{ 'OK' if session.is_x11 else 'WARN' }}</span>
+        {{ session.session_type }} via {{ session.source }}
+      </span>
     </div>
-    <div class="status-dl-row">
-      <span class="status-dl-key">Display config</span>
-      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if display_config.has_signature else 'cf-zone-caution' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>{{ display_config.path.as_posix() }}</span>
+    <div class="flex items-start gap-3 px-5 py-2.5">
+      <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Display config</span>
+      <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+        <span class="zone {{ 'zone-safe' if display_config.has_signature else 'zone-caution' }}">{{ 'OK' if display_config.has_signature else 'WARN' }}</span>
+        {{ display_config.path.as_posix() }}
+      </span>
     </div>
-    <div class="status-dl-row">
-      <span class="status-dl-key">Session script</span>
-      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if display_script.has_signature and display_script.executable else 'cf-zone-caution' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>{{ display_script.path.as_posix() }}</span>
+    <div class="flex items-start gap-3 px-5 py-2.5">
+      <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Session script</span>
+      <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+        <span class="zone {{ 'zone-safe' if display_script.has_signature and display_script.executable else 'zone-caution' }}">{{ 'OK' if display_script.has_signature and display_script.executable else 'WARN' }}</span>
+        {{ display_script.path.as_posix() }}
+      </span>
     </div>
-    <div class="status-dl-row">
-      <span class="status-dl-key">Touchscreen</span>
-      <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if touchscreen.has_signature else 'cf-zone-caution' }}">{{ 'OK' if touchscreen.has_signature else 'WARN' }}</span>{{ touchscreen.path.as_posix() }}</span>
+    <div class="flex items-start gap-3 px-5 py-2.5">
+      <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Touchscreen</span>
+      <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+        <span class="zone {{ 'zone-safe' if touchscreen.has_signature else 'zone-caution' }}">{{ 'OK' if touchscreen.has_signature else 'WARN' }}</span>
+        {{ touchscreen.path.as_posix() }}
+      </span>
     </div>
   </div>
 </div>
 
 <!-- Core Tools panel -->
-<div class="cf-card">
-  <div class="card-head hair-b">
-    <h2>Core Tools</h2>
+<div class="bg-card border border-line/10 rounded-xl">
+  <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+    <h2 class="text-[0.9rem] font-semibold text-ink">Core Tools</h2>
   </div>
   <div class="overflow-x-auto">
-    <table class="cf-table">
+    <table class="w-full border-collapse text-[0.82rem]">
       <thead>
-        <tr><th>Tool</th><th>Status</th><th>Version</th></tr>
+        <tr>
+          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">Tool</th>
+          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">Status</th>
+          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">Version</th>
+        </tr>
       </thead>
       <tbody>
         {% for tool in tools %}
-        <tr>
-          <td>{{ tool.name }}</td>
-          <td><span class="cf-zone {{ 'cf-zone-safe' if tool.installed else 'cf-zone-danger' }}">{{ 'OK' if tool.installed else 'MISSING' }}</span></td>
-          <td>{{ tool.version or "not installed" }}</td>
+        <tr class="hover:bg-surface transition-colors">
+          <td class="px-5 py-2.5 border-b border-line/7 text-ink">{{ tool.name }}</td>
+          <td class="px-5 py-2.5 border-b border-line/7">
+            <span class="zone {{ 'zone-safe' if tool.installed else 'zone-danger' }}">{{ 'OK' if tool.installed else 'MISSING' }}</span>
+          </td>
+          <td class="px-5 py-2.5 border-b border-line/7 text-muted font-display tabular-nums text-[0.8rem]">{{ tool.version or "not installed" }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -57,127 +77,162 @@
 </div>
 
 <!-- Status panels row -->
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
   <!-- VPN panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h2>VPN</h2>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">VPN</h2>
     </div>
-    <div class="status-dl">
-      <div class="status-dl-row">
-        <span class="status-dl-key">WireGuard</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.wg_installed else 'cf-zone-danger' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>{{ vpn.wg_version or "not installed" }}</span>
+    <div class="divide-y divide-line/7">
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">WireGuard</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.wg_installed else 'zone-danger' }}">{{ 'OK' if vpn.wg_installed else 'MISSING' }}</span>
+          {{ vpn.wg_version or "not installed" }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">App config</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.app_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>{{ vpn.app_config_path.as_posix() }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">App config</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.app_config_exists else 'zone-caution' }}">{{ 'OK' if vpn.app_config_exists else 'WARN' }}</span>
+          {{ vpn.app_config_path.as_posix() }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Active config</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.active_config_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>{{ vpn.active_config_path.as_posix() }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Active config</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.active_config_exists else 'zone-caution' }}">{{ 'OK' if vpn.active_config_exists else 'WARN' }}</span>
+          {{ vpn.active_config_path.as_posix() }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Connection</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if vpn.service_active == 'active' and vpn.interface_exists else 'cf-zone-caution' }}">{{ 'OK' if vpn.service_active == 'active' and vpn.interface_exists else 'WARN' }}</span>{{ vpn_connection_label(vpn) }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Connection</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if vpn.service_active == 'active' and vpn.interface_exists else 'zone-caution' }}">{{ 'OK' if vpn.service_active == 'active' and vpn.interface_exists else 'WARN' }}</span>
+          {{ vpn_connection_label(vpn) }}
+        </span>
       </div>
     </div>
   </div>
 
   <!-- Remote panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h2>Remote</h2>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">Remote</h2>
     </div>
-    <div class="status-dl">
-      <div class="status-dl-row">
-        <span class="status-dl-key">AnyDesk</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.anydesk_installed else 'cf-zone-danger' }}">{{ 'OK' if remote.anydesk_installed else 'MISSING' }}</span>{{ remote.anydesk_version or "not installed" }}</span>
+    <div class="divide-y divide-line/7">
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">AnyDesk</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if remote.anydesk_installed else 'zone-danger' }}">{{ 'OK' if remote.anydesk_installed else 'MISSING' }}</span>
+          {{ remote.anydesk_version or "not installed" }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">ID</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.anydesk_id else 'cf-zone-caution' }}">{{ 'OK' if remote.anydesk_id else 'WARN' }}</span>{{ remote.anydesk_id or "not available" }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">ID</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if remote.anydesk_id else 'zone-caution' }}">{{ 'OK' if remote.anydesk_id else 'WARN' }}</span>
+          {{ remote.anydesk_id or "not available" }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Status</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.anydesk_status|lower == 'online' else 'cf-zone-caution' }}">{{ 'OK' if remote.anydesk_status|lower == 'online' else 'WARN' }}</span>{{ remote.anydesk_status }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Status</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if remote.anydesk_status|lower == 'online' else 'zone-caution' }}">{{ 'OK' if remote.anydesk_status|lower == 'online' else 'WARN' }}</span>
+          {{ remote.anydesk_status }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Service</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if remote.service_active == 'active' else 'cf-zone-caution' }}">{{ 'OK' if remote.service_active == 'active' else 'WARN' }}</span>{{ remote.service_enabled }} / {{ remote.service_active }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Service</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if remote.service_active == 'active' else 'zone-caution' }}">{{ 'OK' if remote.service_active == 'active' else 'WARN' }}</span>
+          {{ remote.service_enabled }} / {{ remote.service_active }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">OpenSSH</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if openssh.installed else 'cf-zone-danger' }}">{{ 'OK' if openssh.installed else 'MISSING' }}</span>{{ openssh.version or "not installed" }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">OpenSSH</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if openssh.installed else 'zone-danger' }}">{{ 'OK' if openssh.installed else 'MISSING' }}</span>
+          {{ openssh.version or "not installed" }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">SSH Service</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if openssh.service_active == 'active' else 'cf-zone-caution' }}">{{ 'OK' if openssh.service_active == 'active' else 'WARN' }}</span>{{ openssh.service_enabled }} / {{ openssh.service_active }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">SSH Service</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if openssh.service_active == 'active' else 'zone-caution' }}">{{ 'OK' if openssh.service_active == 'active' else 'WARN' }}</span>
+          {{ openssh.service_enabled }} / {{ openssh.service_active }}
+        </span>
       </div>
     </div>
   </div>
 
   <!-- Web Server panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h2>Web Server</h2>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">Web Server</h2>
     </div>
-    <div class="status-dl">
-      <div class="status-dl-row">
-        <span class="status-dl-key">Service</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if web_server.service_enabled == 'enabled' else 'cf-zone-caution' }}">{{ 'OK' if web_server.service_enabled == 'enabled' else 'WARN' }}</span>{{ web_server.service_enabled }}</span>
+    <div class="divide-y divide-line/7">
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Service</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if web_server.service_enabled == 'enabled' else 'zone-caution' }}">{{ 'OK' if web_server.service_enabled == 'enabled' else 'WARN' }}</span>
+          {{ web_server.service_enabled }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Connection</span>
-        <span class="status-dl-val"><span class="cf-zone {{ 'cf-zone-safe' if web_server.service_active == 'active' else 'cf-zone-caution' }}">{{ 'OK' if web_server.service_active == 'active' else 'WARN' }}</span>{{ web_server.service_active }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Connection</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if web_server.service_active == 'active' else 'zone-caution' }}">{{ 'OK' if web_server.service_active == 'active' else 'WARN' }}</span>
+          {{ web_server.service_active }}
+        </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Address</span>
-        <span class="status-dl-val"><span class="cf-zone cf-zone-safe">OK</span>{{ web_server.url }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Address</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone zone-safe">OK</span>
+          {{ web_server.url }}
+        </span>
       </div>
     </div>
   </div>
 
   <!-- QR Reader panel -->
-  <div class="cf-card">
-    <div class="card-head hair-b">
-      <h2>QR Reader</h2>
-      <a href="{{ url_for('qr_reader_page') }}" class="cf-btn" style="font-size:0.75rem;padding:0.25rem 0.6rem;">รายละเอียด</a>
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">QR Reader</h2>
+      <a href="{{ url_for('qr_reader_page') }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.75rem] font-semibold hover:bg-surface transition-colors">รายละเอียด</a>
     </div>
-    <div class="status-dl">
-      <div class="status-dl-row">
-        <span class="status-dl-key">udev rule</span>
-        <span class="status-dl-val">
-          <span class="cf-zone {{ 'cf-zone-safe' if qr_reader.udev_rule_has_signature else 'cf-zone-caution' }}">
-            {{ 'OK' if qr_reader.udev_rule_has_signature else 'WARN' }}
-          </span>
+    <div class="divide-y divide-line/7">
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">udev rule</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if qr_reader.udev_rule_has_signature else 'zone-caution' }}">{{ 'OK' if qr_reader.udev_rule_has_signature else 'WARN' }}</span>
         </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">อุปกรณ์</span>
-        <span class="status-dl-val">
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">อุปกรณ์</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
           {% if qr_reader.detected_devices %}
             {{ qr_reader.detected_devices[0] }}
             {% if qr_reader.detected_devices | length > 1 %}
-              +{{ qr_reader.detected_devices | length - 1 }}
+              <span class="zone zone-neutral">+{{ qr_reader.detected_devices | length - 1 }}</span>
             {% endif %}
           {% else %}
-            <span class="cf-zone cf-zone-caution">ไม่พบ</span>
+            <span class="zone zone-caution">ไม่พบ</span>
           {% endif %}
         </span>
       </div>
-      <div class="status-dl-row">
-        <span class="status-dl-key">Reader</span>
-        <span class="status-dl-val">
-          <span class="cf-zone {{ 'cf-zone-safe' if qr_reader.reader_running else 'cf-zone-caution' }}">
-            {{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}
-          </span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Reader</span>
+        <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap">
+          <span class="zone {{ 'zone-safe' if qr_reader.reader_running else 'zone-caution' }}">{{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}</span>
         </span>
       </div>
       {% if qr_reader.last_scan %}
-      <div class="status-dl-row">
-        <span class="status-dl-key">ล่าสุด</span>
-        <span class="status-dl-val" style="font-family:monospace;font-size:0.85rem">{{ qr_reader.last_scan }}</span>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">ล่าสุด</span>
+        <span class="flex-1 text-[0.82rem] font-display tabular-nums text-ink">{{ qr_reader.last_scan }}</span>
       </div>
       {% endif %}
     </div>

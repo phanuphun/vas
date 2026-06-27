@@ -7,108 +7,547 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;500;600;700&family=Anuphan:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='homeoffice.css') }}">
-  </head>
-  <body>
-    <div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
 
-    <div class="app-root">
+    <!-- Tailwind Play CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Iconify — 200k+ icons from 150+ providers (Lucide, MDI, Phosphor, Tabler, Simple Icons…) -->
+    <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              ink:     'rgb(var(--c-ink)     / <alpha-value>)',
+              muted:   'rgb(var(--c-muted)   / <alpha-value>)',
+              faint:   'rgb(var(--c-faint)   / <alpha-value>)',
+              accent:  'rgb(var(--c-accent)  / <alpha-value>)',
+              card:    'rgb(var(--c-card)    / <alpha-value>)',
+              surface: 'rgb(var(--c-surface) / <alpha-value>)',
+              page:    'rgb(var(--c-page)    / <alpha-value>)',
+              safe:    'rgb(var(--c-safe)    / <alpha-value>)',
+              caution: 'rgb(var(--c-caution) / <alpha-value>)',
+              danger:  'rgb(var(--c-danger)  / <alpha-value>)',
+              line:    'rgb(var(--c-line)    / <alpha-value>)',
+            },
+            fontFamily: {
+              display: ['Bai Jamjuree', 'sans-serif'],
+              body: ['Anuphan', 'system-ui', 'sans-serif'],
+            },
+          }
+        }
+      }
+    </script>
+
+    <style>
+      /* ── Color channels ── */
+      :root {
+        --c-ink:     26 32 50;
+        --c-muted:   74 80 99;
+        --c-faint:  140 146 165;
+        --c-line:    26 32 50;
+        --c-accent:  37 99 235;
+        --c-card:   255 255 255;
+        --c-surface: 248 249 251;
+        --c-page:   246 247 250;
+        --c-safe:    16 185 129;
+        --c-caution: 234 179 8;
+        --c-danger:  239 68 68;
+        --header-h: 52px;
+        --sidebar-w: 0px;
+      }
+      @media (min-width: 1024px) { :root { --sidebar-w: 240px; } }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Anuphan', system-ui, sans-serif; font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+
+      /* ── Animations ── */
+      @keyframes spin    { to { transform: rotate(360deg); } }
+      @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+      @keyframes fadeUp  { from { opacity: 0; transform: translateY(8px); }  to { opacity: 1; transform: translateY(0); } }
+
+      .spin {
+        display: inline-block; width: 14px; height: 14px;
+        border: 2px solid rgb(var(--c-line) / 0.15);
+        border-top-color: rgb(var(--c-accent));
+        border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0;
+      }
+      .spin-white { border-color: rgba(255,255,255,0.3); border-top-color: #fff; }
+
+      /* ── Sidebar cubic-bezier transition ── */
+      .sidebar { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+
+      /* ── Scrollbar ── */
+      .sidebar-nav { scrollbar-width: thin; scrollbar-color: rgb(var(--c-line) / 0.12) transparent; }
+
+      /* ── Zone badges (JS-updated elements use these) ── */
+      .zone { display:inline-flex; align-items:center; padding:0.1rem 0.5rem; border-radius:9999px; font-size:0.7rem; font-weight:600; border-width:1px; border-style:solid; white-space:nowrap; }
+      .zone-safe    { background:rgb(var(--c-safe)/0.08);    border-color:rgb(var(--c-safe)/0.22);    color:#0f766e; }
+      .zone-caution { background:rgb(var(--c-caution)/0.10); border-color:rgb(var(--c-caution)/0.25); color:#92660b; }
+      .zone-danger  { background:rgb(var(--c-danger)/0.08);  border-color:rgb(var(--c-danger)/0.22);  color:#b1453a; }
+      .zone-mute, .zone-neutral { background:rgb(var(--c-surface)); border-color:rgb(var(--c-line)/0.12); color:rgb(var(--c-muted)); }
+      .zone-info  { background:rgb(var(--c-accent)/0.08);  border-color:rgb(var(--c-accent)/0.20);  color:rgb(var(--c-accent)); }
+
+      /* ── Result message (JS-updated) ── */
+      .msg { font-size:0.82rem; padding:0.5rem 0.75rem; border-radius:0.5rem; min-height:0; }
+      .msg:empty { display:none; }
+      .msg-ok    { background:rgb(var(--c-safe)/0.08);   color:#0f766e; }
+      .msg-error { background:rgb(var(--c-danger)/0.07); color:#b1453a; }
+
+      /* ── Modal ── */
+      .modal-backdrop { position:fixed; inset:0; background:rgb(26 32 50/0.28); backdrop-filter:blur(4px); z-index:400; opacity:0; pointer-events:none; transition:opacity 0.15s; }
+      .modal-backdrop.is-visible { opacity:1; pointer-events:all; }
+      .modal-dialog { position:fixed; top:50%; left:50%; transform:translate(-50%,-60%); z-index:401; width:min(420px,calc(100vw - 2rem)); padding:1.5rem; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.10); border-radius:0.75rem; box-shadow:0 8px 32px rgb(26 32 50/0.12); opacity:0; pointer-events:none; transition:opacity 0.15s, transform 0.15s; }
+      .modal-dialog.is-visible { opacity:1; pointer-events:all; transform:translate(-50%,-50%); }
+      .modal-dialog-head { display:flex; align-items:flex-start; gap:1rem; }
+      .modal-dialog-body { flex:1; }
+      .modal-dialog-title { font-family:'Bai Jamjuree',sans-serif; font-size:1rem; font-weight:700; color:rgb(var(--c-ink)); margin-bottom:0.25rem; }
+      .modal-dialog-message { font-size:0.875rem; color:rgb(var(--c-muted)); line-height:1.55; }
+      .modal-dialog-actions { display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.25rem; }
+      .modal-open { overflow:hidden; }
+
+      /* ── Toasts ── */
+      .toast-wrap { position:fixed; bottom:1.5rem; right:1rem; z-index:9999; display:flex; flex-direction:column; gap:0.375rem; max-width:360px; }
+
+      /* ── safe-area-inset-bottom ── */
+      .safe-pb { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+      /* ── User dropdown ── */
+      #user-dropdown-menu { animation: fadeUp 0.15s ease forwards; }
+    </style>
+  </head>
+  <body class="bg-page text-ink">
+
+    <!-- Mobile overlay -->
+    <div id="overlay" onclick="closeSidebar()"
+         class="hidden fixed inset-0 bg-[rgb(26_32_50/0.32)] backdrop-blur-sm z-[299]"></div>
+
+    <div class="flex flex-col lg:flex-row lg:items-start min-h-screen">
+
       <!-- Sidebar -->
-      <aside class="sidebar hair-r" id="sidebar">
-        <div class="sidebar-brand hair-b">
-          <div class="brand-mark">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-            </svg>
+      <aside id="sidebar"
+             class="sidebar fixed top-0 left-0 bottom-0 w-60 bg-card border-r border-line/10 flex flex-col z-[300] -translate-x-full lg:translate-x-0 lg:sticky lg:h-screen flex-shrink-0">
+
+        <!-- Brand — exact same height as top nav bar (52px) -->
+        <div class="flex-shrink-0 border-b border-line/10 h-[52px] flex items-center px-3">
+          <div class="flex items-center gap-2.5 flex-1 min-w-0">
+            <!-- Icon -->
+            <div class="relative flex-shrink-0">
+              <div class="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
+                <iconify-icon icon="lucide:monitor" width="14" height="14" style="color:white;display:block;"></iconify-icon>
+              </div>
+              <span class="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-safe border-2 border-card"></span>
+            </div>
+            <!-- Wordmark -->
+            <div class="min-w-0 flex items-center gap-1.5">
+              <span class="font-display text-[0.92rem] font-bold text-ink leading-none tracking-tight">VAS</span>
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[0.55rem] font-bold bg-accent/10 text-accent leading-none">v0.1</span>
+            </div>
           </div>
-          <div class="brand-text">
-            <div class="brand-name font-display">VAS</div>
-            <div class="brand-sub">Vending Auto Setup</div>
-          </div>
-          <button class="sidebar-close" onclick="closeSidebar()" aria-label="ปิดเมนู">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <!-- Close (mobile only) -->
+          <button onclick="closeSidebar()"
+                  class="lg:hidden w-7 h-7 flex items-center justify-center rounded-lg text-faint hover:text-ink hover:bg-surface transition-colors flex-shrink-0"
+                  aria-label="ปิดเมนู">
+            <iconify-icon icon="lucide:x" width="14" height="14"></iconify-icon>
           </button>
         </div>
-        <nav class="sidebar-nav">
-          <div class="nav-section">
-            <span class="cf-eyebrow nav-heading">เมนูหลัก</span>
-            <a class="nav-item {{ 'active' if request.endpoint == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}">
-              <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
-              <span class="nav-label">แดชบอร์ด</span>
-            </a>
-            <a class="nav-item {{ 'active' if request.endpoint == 'display_settings' else '' }}" href="{{ url_for('display_settings') }}">
-              <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>
-              <span class="nav-label">จอแสดงผล</span>
-            </a>
-            <a class="nav-item {{ 'active' if request.endpoint == 'wireguard' else '' }}" href="{{ url_for('wireguard') }}">
-              <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
-              <span class="nav-label">VPN</span>
-            </a>
-            <a class="nav-item {{ 'active' if request.endpoint == 'logs' else '' }}" href="{{ url_for('logs') }}">
-              <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
-              <span class="nav-label">บันทึกระบบ</span>
-            </a>
-            <a class="nav-item {{ 'active' if request.endpoint == 'commands' else '' }}" href="{{ url_for('commands') }}">
-              <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>
-              <span class="nav-label">คำสั่ง CLI</span>
-            </a>
-            <a class="nav-item {{ 'active' if request.endpoint == 'qr_reader_page' else '' }}" href="{{ url_for('qr_reader_page') }}">
-              <span class="nav-icon">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="3" width="7" height="7"/>
-                  <rect x="14" y="3" width="7" height="7"/>
-                  <rect x="3" y="14" width="7" height="7"/>
-                  <path d="M14 14h3v3h-3z"/>
-                  <path d="M17 17h4"/>
-                  <path d="M17 21v-4"/>
-                </svg>
-              </span>
-              <span class="nav-label">QR Reader</span>
-            </a>
-            <a class="nav-item {{ 'active' if request.endpoint == 'mqtt_page' else '' }}" href="{{ url_for('mqtt_page') }}">
-              <span class="nav-icon">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.59 3.44 2 2 0 0 1 3.56 1.25h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.8a16 16 0 0 0 6.29 6.29l.92-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-                </svg>
-              </span>
-              <span class="nav-label">MQTT</span>
-            </a>
+
+        <!-- Nav -->
+        <nav class="sidebar-nav flex-1 overflow-y-auto py-1.5">
+
+          {# Jinja macro: nav link #}
+          {%- macro nav_link(endpoint, icon, label, extra_attrs='') -%}
+          <a href="{{ url_for(endpoint) }}" {{ extra_attrs | safe }}
+             class="nav-link flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[0.8rem] font-medium w-full transition-colors
+                    {{ 'bg-accent/8 text-accent font-semibold' if request.endpoint == endpoint else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+            <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+            <span class="flex-1">{{ label }}</span>
+          </a>
+          {%- endmacro -%}
+
+          {# ── หลัก ──────────────────────────────────── #}
+          <div class="nav-section px-2 pt-2 pb-1">
+            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">หลัก</span>
+            {{ nav_link('dashboard',         'lucide:layout-dashboard', 'แดชบอร์ด') }}
+            {{ nav_link('monitor_page',      'lucide:activity',         'Monitor') }}
+            {{ nav_link('display_settings',  'lucide:monitor',          'จอแสดงผล') }}
           </div>
+
+          {# ── ฮาร์ดแวร์ ─────────────────────────────── #}
+          <div class="nav-section px-2 pt-3 pb-1">
+            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">ฮาร์ดแวร์</span>
+            {{ nav_link('qr_devices_page',         'lucide:cpu',       'อุปกรณ์') }}
+            {{ nav_link('qr_reader_page',          'lucide:scan-line', 'QR Reader') }}
+            {# QR500 — conditional: แสดงเมื่อ install แล้ว #}
+            <a href="{{ url_for('qr_device_zkteco_qr500_page') }}" data-nav-device="zkteco-qr500" style="display:none;"
+               class="nav-link flex items-center gap-2 pl-6 pr-2.5 py-1.5 rounded-lg text-[0.78rem] font-medium w-full transition-colors
+                      {{ 'bg-accent/8 text-accent font-semibold' if request.endpoint == 'qr_device_zkteco_qr500_page' else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+              <iconify-icon icon="lucide:scan-barcode" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+              <span class="flex-1">QR500</span>
+            </a>
+            {{ nav_link('mqtt_page', 'simple-icons:mqtt', 'MQTT') }}
+          </div>
+
+          {# ── เครือข่าย (conditional) ── #}
+          <div class="nav-section nav-section-conditional px-2 pt-3 pb-1" id="nav-sec-network" style="display:none;">
+            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">เครือข่าย</span>
+            {{ nav_link('wireguard','simple-icons:wireguard','VPN','data-nav-pkg="wireguard" style="display:none;"') }}
+          </div>
+
+          {# ── ระบบ ───────────────────────────────────── #}
+          <div class="nav-section px-2 pt-3 pb-1">
+            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">ระบบ</span>
+            {{ nav_link('logs',          'lucide:scroll-text', 'บันทึกระบบ') }}
+            {{ nav_link('commands',      'lucide:terminal',    'คำสั่ง CLI') }}
+            {{ nav_link('database_page', 'lucide:database',    'Database') }}
+            {%- if current_user and current_user.role in ('root', 'admin') %}
+            {{ nav_link('users_page',    'lucide:users',       'ผู้ใช้งาน') }}
+            {%- endif %}
+          </div>
+
+          {# ── divider ────────────────────────────────── #}
+          <div class="mx-3 my-2 border-t border-line/8"></div>
+
+          {# ── ตั้งค่า ────────────────────────────────── #}
+          <div class="px-2 pb-1">
+            {{ nav_link('settings_page','lucide:settings','Settings') }}
+          </div>
+
         </nav>
-        <div class="sidebar-footer hair-t">
-          <div style="display:flex;align-items:center;gap:0.5rem;">
-            <div class="cf-ava" style="background:rgb(var(--c-accent)/0.10);color:rgb(var(--c-accent))">VM</div>
-            <div>
-              <div style="font-size:0.78rem;font-weight:600;color:rgb(var(--c-ink))">{{ machine_name or "VAS" }}</div>
-              <div style="font-size:0.62rem;color:rgb(var(--c-faint))">VAS</div>
-            </div>
+
+        <script>
+        (function(){
+          function applyNavStatus(installed, devices){
+            // แสดง/ซ่อน conditional pkg items (wireguard, etc.)
+            document.querySelectorAll('[data-nav-pkg]').forEach(function(el){
+              el.style.display = installed[el.dataset.navPkg] ? '' : 'none';
+            });
+            // แสดง/ซ่อน conditional sections — ซ่อนถ้าไม่มี item ที่ visible เลย
+            document.querySelectorAll('.nav-section-conditional').forEach(function(sec){
+              var anyVisible = Array.from(sec.querySelectorAll('[data-nav-pkg]'))
+                .some(function(el){ return el.style.display !== 'none'; });
+              sec.style.display = anyVisible ? '' : 'none';
+            });
+            // แสดง/ซ่อน installed device nav items
+            document.querySelectorAll('[data-nav-device]').forEach(function(el){
+              el.style.display = (devices && devices[el.dataset.navDevice]) ? '' : 'none';
+            });
+          }
+          fetch('/api/nav/status')
+            .then(function(r){ return r.json(); })
+            .then(function(d){ applyNavStatus(d.installed || {}, d.devices || {}); })
+            .catch(function(){});  // ถ้า fail → sections ยังซ่อนอยู่ (safe default)
+        })();
+        </script>
+
+        <!-- Footer — version info -->
+        <div class="border-t border-line/10 px-3 py-2.5 flex-shrink-0 safe-pb">
+          <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-safe flex-shrink-0"></span>
+            <span class="text-[0.7rem] text-faint">VAS</span>
+            <span class="text-[0.7rem] font-semibold text-muted">v0.1</span>
+            <span class="ml-auto text-[0.65rem] text-faint">online</span>
           </div>
         </div>
       </aside>
 
-      <!-- Main column -->
-      <div class="app-column">
-        <header class="app-header hair-b">
-          <div class="header-inner">
-            <button class="menu-btn" onclick="openSidebar()" aria-label="เปิดเมนู">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-              </svg>
+      <!-- Right column -->
+      <div class="flex-1 min-w-0 flex flex-col min-h-screen">
+        <header class="sticky top-0 z-[100] bg-white border-b border-line/10">
+          <div class="flex items-center gap-3 px-4 h-[52px]">
+            <button onclick="openSidebar()" aria-label="เปิดเมนู"
+                    class="lg:hidden w-8 h-8 border border-line/15 rounded-lg bg-card text-ink flex items-center justify-center hover:bg-surface transition-colors flex-shrink-0">
+              <iconify-icon icon="lucide:menu" width="15" height="15"></iconify-icon>
             </button>
-            <span class="page-title">{% block header_title %}VAS{% endblock %}</span>
-            <div style="flex:1;"></div>
+            <span id="spa-header-title" class="font-display text-[0.95rem] font-bold text-ink whitespace-nowrap">{% block header_title %}VAS{% endblock %}</span>
+            <div class="flex-1"></div>
             {% block header_actions %}{% endblock %}
+
+            <!-- ── User dropdown ─────────────────────────────── -->
+            <div class="relative" id="user-dropdown-wrap">
+              <button id="user-dropdown-btn" onclick="toggleUserDropdown()"
+                      class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface transition-colors cursor-pointer select-none border border-line/10">
+                {%- if current_user %}
+                  {%- set _avatar_bg = 'bg-danger/10 text-danger' if current_user.role == 'root' else ('bg-caution/10 text-[#92660b]' if current_user.role == 'admin' else 'bg-accent/10 text-accent') %}
+                  <div class="w-6 h-6 rounded-full {{ _avatar_bg }} text-[0.6rem] font-bold font-display grid place-items-center flex-shrink-0">
+                    {{ (current_user.display_name or current_user.username)[:2].upper() }}
+                  </div>
+                  <div class="hidden sm:block text-left">
+                    <div class="text-[0.78rem] font-semibold text-ink leading-none">{{ current_user.display_name or current_user.username }}</div>
+                    <div class="text-[0.58rem] text-faint leading-none mt-0.5">{{ current_user.role | title }}</div>
+                  </div>
+                {%- else %}
+                  <div class="w-6 h-6 rounded-full bg-surface text-faint text-[0.6rem] font-bold font-display grid place-items-center flex-shrink-0">??</div>
+                {%- endif %}
+                <iconify-icon icon="lucide:chevron-down" width="12" height="12" class="text-faint hidden sm:block" id="user-dropdown-chevron"></iconify-icon>
+              </button>
+
+              <!-- Dropdown menu -->
+              <div id="user-dropdown-menu"
+                   class="hidden absolute right-0 top-[calc(100%+6px)] w-52 bg-card border border-line/10 rounded-xl shadow-md z-[150] overflow-hidden py-1">
+                {%- if current_user %}
+                <div class="px-3.5 py-2.5 border-b border-line/8">
+                  <div class="text-[0.82rem] font-semibold text-ink">{{ current_user.display_name or current_user.username }}</div>
+                  <div class="text-[0.7rem] text-faint">@{{ current_user.username }}</div>
+                </div>
+                {%- endif %}
+                <button onclick="openProfileModal(); closeUserDropdown();"
+                        class="flex items-center gap-2.5 w-full px-3.5 py-2 text-[0.8rem] text-muted hover:bg-surface hover:text-ink transition-colors">
+                  <iconify-icon icon="lucide:user-pen" width="13" height="13" class="text-faint flex-shrink-0"></iconify-icon>
+                  แก้ไขข้อมูลส่วนตัว
+                </button>
+                <button onclick="openPasswordModal(); closeUserDropdown();"
+                        class="flex items-center gap-2.5 w-full px-3.5 py-2 text-[0.8rem] text-muted hover:bg-surface hover:text-ink transition-colors">
+                  <iconify-icon icon="lucide:key-round" width="13" height="13" class="text-faint flex-shrink-0"></iconify-icon>
+                  เปลี่ยนรหัสผ่าน
+                </button>
+                <div class="border-t border-line/8 my-1"></div>
+                <form method="POST" action="{{ url_for('auth_logout') }}">
+                  <button type="submit"
+                          class="flex items-center gap-2.5 w-full px-3.5 py-2 text-[0.8rem] text-danger hover:bg-danger/6 transition-colors">
+                    <iconify-icon icon="lucide:log-out" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+                    ออกจากระบบ
+                  </button>
+                </form>
+              </div>
+            </div>
+            <!-- ── /User dropdown ── -->
           </div>
         </header>
-        <main class="ho-main">
-          <div class="content-inner">
+
+        <main id="spa-main" class="flex-1 px-3 py-3.5 md:px-5 md:py-[1.125rem] lg:px-6 lg:py-5 overflow-x-hidden">
+          <div class="max-w-[1200px] mx-auto flex flex-col gap-4">
             {% block content %}{% endblock %}
           </div>
         </main>
       </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <!-- ════════════════════════════════════════════════════
+         MODAL: แก้ไขข้อมูลส่วนตัว
+    ═══════════════════════════════════════════════════════ -->
+    <div id="modal-profile" class="modal-backdrop">
+      <div class="modal-dialog">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="modal-dialog-title">แก้ไขข้อมูลส่วนตัว</h2>
+            <p class="modal-dialog-message">อัปเดตชื่อแสดงของคุณ</p>
+          </div>
+          <button onclick="closeBaseModal('modal-profile')" class="text-faint hover:text-ink transition-colors mt-0.5">
+            <iconify-icon icon="lucide:x" width="16" height="16"></iconify-icon>
+          </button>
+        </div>
+        <form id="form-profile" class="flex flex-col gap-3.5" onsubmit="submitProfile(event)">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">ชื่อผู้ใช้</label>
+            <div class="px-3 py-2 border border-line/10 rounded-lg bg-surface text-muted text-[0.82rem]" id="profile-username-display">—</div>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">ชื่อแสดง</label>
+            <input type="text" id="profile-display-name" placeholder="ชื่อที่แสดงในระบบ"
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+          </div>
+          <div id="profile-error" class="text-[0.78rem] text-danger hidden px-3 py-2 rounded-lg bg-danger/8 border border-danger/20"></div>
+          <div class="modal-dialog-actions mt-1">
+            <button type="button" onclick="closeBaseModal('modal-profile')"
+                    class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">ยกเลิก</button>
+            <button type="submit"
+                    class="inline-flex items-center px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+              บันทึก
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════
+         MODAL: เปลี่ยนรหัสผ่าน
+    ═══════════════════════════════════════════════════════ -->
+    <div id="modal-password" class="modal-backdrop">
+      <div class="modal-dialog">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="modal-dialog-title">เปลี่ยนรหัสผ่าน</h2>
+            <p class="modal-dialog-message">กรอกรหัสผ่านปัจจุบันและรหัสผ่านใหม่</p>
+          </div>
+          <button onclick="closeBaseModal('modal-password')" class="text-faint hover:text-ink transition-colors mt-0.5">
+            <iconify-icon icon="lucide:x" width="16" height="16"></iconify-icon>
+          </button>
+        </div>
+        <form id="form-password" class="flex flex-col gap-3.5" onsubmit="submitPassword(event)">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">รหัสผ่านปัจจุบัน</label>
+            <input type="password" id="pw-current" placeholder="รหัสผ่านปัจจุบัน" required
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">รหัสผ่านใหม่</label>
+            <input type="password" id="pw-new" placeholder="อย่างน้อย 6 ตัวอักษร" required minlength="6"
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">ยืนยันรหัสผ่านใหม่</label>
+            <input type="password" id="pw-confirm" placeholder="กรอกอีกครั้ง" required
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+          </div>
+          <div id="pw-error" class="text-[0.78rem] text-danger hidden px-3 py-2 rounded-lg bg-danger/8 border border-danger/20"></div>
+          <div class="modal-dialog-actions mt-1">
+            <button type="button" onclick="closeBaseModal('modal-password')"
+                    class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">ยกเลิก</button>
+            <button type="submit"
+                    class="inline-flex items-center px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+              เปลี่ยนรหัสผ่าน
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="base-toast-wrap" class="toast-wrap"></div>
+
+    <script>
+    // ── Sidebar ────────────────────────────────────────────────────
+    function openSidebar()  {
+      document.getElementById('sidebar').classList.remove('-translate-x-full');
+      document.getElementById('overlay').classList.remove('hidden');
+    }
+    function closeSidebar() {
+      document.getElementById('sidebar').classList.add('-translate-x-full');
+      document.getElementById('overlay').classList.add('hidden');
+    }
+
+    // ── User dropdown ──────────────────────────────────────────────
+    var _userDropOpen = false;
+    function toggleUserDropdown() {
+      _userDropOpen = !_userDropOpen;
+      var menu = document.getElementById('user-dropdown-menu');
+      var chevron = document.getElementById('user-dropdown-chevron');
+      if (_userDropOpen) {
+        menu.classList.remove('hidden');
+        if (chevron) chevron.style.transform = 'rotate(180deg)';
+      } else {
+        menu.classList.add('hidden');
+        if (chevron) chevron.style.transform = '';
+      }
+    }
+    function closeUserDropdown() {
+      _userDropOpen = false;
+      var menu = document.getElementById('user-dropdown-menu');
+      var chevron = document.getElementById('user-dropdown-chevron');
+      if (menu) menu.classList.add('hidden');
+      if (chevron) chevron.style.transform = '';
+    }
+    document.addEventListener('click', function(e) {
+      var wrap = document.getElementById('user-dropdown-wrap');
+      if (wrap && !wrap.contains(e.target)) closeUserDropdown();
+    });
+
+    // ── Base modal helpers ─────────────────────────────────────────
+    function openBaseModal(id) {
+      document.getElementById(id).classList.add('is-visible');
+      document.getElementById(id).querySelector('.modal-dialog').classList.add('is-visible');
+      document.body.classList.add('modal-open');
+    }
+    function closeBaseModal(id) {
+      document.getElementById(id).classList.remove('is-visible');
+      document.getElementById(id).querySelector('.modal-dialog').classList.remove('is-visible');
+      document.body.classList.remove('modal-open');
+    }
+    document.querySelectorAll('.modal-backdrop').forEach(function(el) {
+      el.addEventListener('click', function(e) {
+        if (e.target === el) closeBaseModal(el.id);
+      });
+    });
+
+    // ── Base toast ────────────────────────────────────────────────
+    function showBaseToast(msg, type) {
+      var wrap = document.getElementById('base-toast-wrap');
+      var t = document.createElement('div');
+      var color = type === 'ok'
+        ? 'bg-safe/10 border-safe/30 text-[#0f766e]'
+        : 'bg-danger/10 border-danger/30 text-danger';
+      t.className = 'px-4 py-2.5 rounded-lg border text-[0.82rem] font-medium shadow-md ' + color;
+      t.textContent = msg;
+      wrap.appendChild(t);
+      setTimeout(function() { t.remove(); }, 3500);
+    }
+    function setBaseErr(id, msg) {
+      var el = document.getElementById(id);
+      if (msg) { el.textContent = msg; el.classList.remove('hidden'); }
+      else { el.classList.add('hidden'); }
+    }
+
+    // ── Profile modal ─────────────────────────────────────────────
+    function openProfileModal() {
+      fetch('/api/profile')
+        .then(function(r){ return r.json(); })
+        .then(function(d) {
+          if (d.status === 'ok') {
+            document.getElementById('profile-username-display').textContent = '@' + d.user.username;
+            document.getElementById('profile-display-name').value = d.user.display_name || '';
+          }
+        })
+        .catch(function(){});
+      setBaseErr('profile-error', '');
+      openBaseModal('modal-profile');
+      setTimeout(function(){ document.getElementById('profile-display-name').focus(); }, 150);
+    }
+
+    function submitProfile(e) {
+      e.preventDefault();
+      var displayName = document.getElementById('profile-display-name').value;
+      fetch('/api/profile', {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ display_name: displayName })
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(d) {
+        if (d.status === 'ok') {
+          closeBaseModal('modal-profile');
+          showBaseToast('บันทึกข้อมูลเรียบร้อย', 'ok');
+          setTimeout(function(){ location.reload(); }, 800);
+        } else {
+          setBaseErr('profile-error', (d.errors || ['เกิดข้อผิดพลาด']).join(', '));
+        }
+      })
+      .catch(function(){ setBaseErr('profile-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ'); });
+    }
+
+    // ── Password modal ────────────────────────────────────────────
+    function openPasswordModal() {
+      document.getElementById('pw-current').value = '';
+      document.getElementById('pw-new').value = '';
+      document.getElementById('pw-confirm').value = '';
+      setBaseErr('pw-error', '');
+      openBaseModal('modal-password');
+      setTimeout(function(){ document.getElementById('pw-current').focus(); }, 150);
+    }
+
+    function submitPassword(e) {
+      e.preventDefault();
+      var cur = document.getElementById('pw-current').value;
+      var nw = document.getElementById('pw-new').value;
+      var conf = document.getElementById('pw-confirm').value;
+      if (nw !== conf) { setBaseErr('pw-error', 'รหัสผ่านใหม่ไม่ตรงกัน'); return; }
+      fetch('/api/profile/password', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ current_password: cur, new_password: nw })
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(d) {
+        if (d.status === 'ok') {
+          closeBaseModal('modal-password');
+          showBaseToast('เปลี่ยนรหัสผ่านเรียบร้อย', 'ok');
+        } else {
+          setBaseErr('pw-error', (d.errors || ['เกิดข้อผิดพลาด']).join(', '));
+        }
+      })
+      .catch(function(){ setBaseErr('pw-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ'); });
+    }
+    </script>
+
     {% block extra_scripts %}{% endblock %}
   </body>
 </html>
