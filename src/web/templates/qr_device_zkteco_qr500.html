@@ -61,28 +61,8 @@
   .hist-copy:hover { background:rgb(var(--c-surface-2)); color:rgb(var(--c-ink)); }
   .hist-empty { padding:2rem 1.25rem; text-align:center; color:rgb(var(--c-faint)); font-size:.84rem; }
 
-  /* ── Flow / Pipeline ───────────────────────── */
-  .flow-block {
-    position:relative; padding:.65rem 1.1rem .6rem;
-    border:1px solid rgb(var(--c-line)/0.18); border-radius:.6rem;
-    background:rgb(var(--c-card)); min-width:118px;
-    transition:border-color .25s, background .25s;
-  }
-  .flow-block.flash {
-    border-color:rgb(var(--c-accent)/0.45);
-    background:rgb(var(--c-accent)/0.05);
-  }
-  .flow-block-title { font-size:.8rem; font-weight:600; color:rgb(var(--c-ink)); margin-top:.2rem; }
-  .flow-block-sub   { font-size:.67rem; color:rgb(var(--c-faint)); margin-top:.12rem; white-space:nowrap; }
-  .flow-dot {
-    position:absolute; top:.6rem; right:.65rem;
-    width:7px; height:7px; border-radius:50%;
-    transition:background .3s;
-  }
-  .flow-dot-ok   { background:rgb(var(--c-safe)); }
-  .flow-dot-idle { background:rgb(var(--c-faint)/0.35); }
-  .flow-dot-err  { background:rgb(var(--c-danger)); }
-  .flow-dot-busy { background:rgb(var(--c-accent)); }
+  /* ── Pipeline chip flash ───────────────────── */
+  #pipeline-chips span { transition: background 0.2s, transform 0.2s; }
 
   /* ── Toggle switch ─────────────────────────── */
   .toggle-switch { position:relative; display:inline-flex; align-items:center; gap:.5rem; cursor:pointer; }
@@ -108,6 +88,40 @@
   <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">ZKTeco QR500-BM</h1>
   <p class="text-[0.82rem] text-muted mt-1">อ่านค่า QR/Barcode real-time · ตั้งค่าอุปกรณ์ และ Integration</p>
 </div>
+
+<!-- ── Section Menu (unified) ───────────────────────── -->
+<nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+  <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+    <button type="button" data-alltab="toptab-live" onclick="switchAllTab('toptab-live')"
+            class="qr500-all-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                   bg-accent/8 text-accent font-semibold">
+      <iconify-icon icon="lucide:scan-line" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+      <span>Live Monitor</span>
+    </button>
+    <button type="button" data-alltab="toptab-history" onclick="switchAllTab('toptab-history')"
+            class="qr500-all-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                   text-muted hover:bg-line/6 hover:text-ink">
+      <iconify-icon icon="lucide:clock" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+      <span>ประวัติการสแกน</span>
+    </button>
+    <button type="button" data-alltab="tab-config" onclick="switchAllTab('tab-config')"
+            class="qr500-all-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                   text-muted hover:bg-line/6 hover:text-ink">
+      <iconify-icon icon="lucide:settings-2" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+      <span>ตั้งค่า</span>
+    </button>
+    <button type="button" data-alltab="tab-integration" onclick="switchAllTab('tab-integration')"
+            class="qr500-all-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                   text-muted hover:bg-line/6 hover:text-ink">
+      <iconify-icon icon="lucide:git-branch" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+      <span>Integration</span>
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.58rem] font-bold bg-surface border border-line/10 text-faint" id="integ-count-badge">{{ integration_count }}</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ── Top tab panels ─────────────────────────────────── -->
+<div id="toptab-live" class="qr500-all-panel is-active" style="display:flex;flex-direction:column;gap:1rem;">
 
 <!-- ── Stat row ──────────────────────────────────────── -->
 <div class="grid grid-cols-3 gap-3">
@@ -166,74 +180,28 @@
   </div>
 </div>
 
-<!-- ── Pipeline diagram ──────────────────────────────── -->
-<div class="bg-card border border-line/10 rounded-xl overflow-hidden">
-  <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-    <h2 class="text-[0.9rem] font-semibold text-ink">Pipeline</h2>
-    <span class="text-[0.72rem] text-faint">ข้อมูลไหลไปยัง Integration ที่เปิดใช้งาน</span>
+<!-- ── Pipeline (minimal) ────────────────────────────── -->
+<div class="bg-card border border-line/10 rounded-xl px-5 py-3 flex items-center gap-3 flex-wrap">
+  <!-- Source -->
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <span id="pipeline-dot" class="w-2 h-2 rounded-full flex-shrink-0" style="background:rgb(var(--c-faint)/0.4);"></span>
+    <span class="text-[0.78rem] font-semibold text-ink font-display">QR Reader</span>
   </div>
-  <div class="px-5 py-4 overflow-x-auto">
-    <!-- Pipeline: [Read] ── vertical-bar ── [Webhook / MQTT / Pipe] -->
-    <div class="flex items-center" style="min-width:380px;">
-
-      <!-- Source block -->
-      <div class="flex-shrink-0">
-        <div class="flow-block" id="flow-block-read">
-          <span class="flow-dot flow-dot-idle" id="flow-dot-read"></span>
-          <div class="flow-block-title">Read</div>
-          <div class="flow-block-sub" id="flow-sub-read">System</div>
-        </div>
-      </div>
-
-      <!-- Arrow (h-line + chevron) -->
-      <div class="flex-shrink-0 flex items-center w-9">
-        <div class="flex-1" style="height:1px;background:rgb(var(--c-line)/0.20);"></div>
-        <span style="color:rgb(var(--c-faint));font-size:9px;line-height:1;">▶</span>
-      </div>
-
-      <!-- Vertical bar + 3 branches -->
-      <div class="flex items-stretch flex-shrink-0">
-        <!-- Vertical bar: spans height of branches via items-stretch -->
-        <div class="flex-shrink-0" style="width:1px;background:rgb(var(--c-line)/0.20);"></div>
-        <!-- Branches -->
-        <div class="flex flex-col gap-3 py-1 flex-shrink-0">
-
-          <!-- Branch: Webhook -->
-          <div class="flex items-center">
-            <div class="flex-shrink-0" style="width:20px;height:1px;background:rgb(var(--c-line)/0.20);"></div>
-            <div class="flow-block" id="flow-block-webhook">
-              <span class="flow-dot flow-dot-idle" id="flow-dot-webhook"></span>
-              <div class="flow-block-title">Webhook</div>
-              <div class="flow-block-sub" id="flow-sub-webhook">ไม่ได้เปิดใช้</div>
-            </div>
-          </div>
-
-          <!-- Branch: MQTT -->
-          <div class="flex items-center">
-            <div class="flex-shrink-0" style="width:20px;height:1px;background:rgb(var(--c-line)/0.20);"></div>
-            <div class="flow-block" id="flow-block-mqtt">
-              <span class="flow-dot flow-dot-idle" id="flow-dot-mqtt"></span>
-              <div class="flow-block-title">MQTT</div>
-              <div class="flow-block-sub" id="flow-sub-mqtt">ไม่ได้เปิดใช้</div>
-            </div>
-          </div>
-
-          <!-- Branch: Pipe I/O -->
-          <div class="flex items-center">
-            <div class="flex-shrink-0" style="width:20px;height:1px;background:rgb(var(--c-line)/0.20);"></div>
-            <div class="flow-block" id="flow-block-pipe">
-              <span class="flow-dot flow-dot-idle" id="flow-dot-pipe"></span>
-              <div class="flow-block-title">Pipe I/O</div>
-              <div class="flow-block-sub" id="flow-sub-pipe">ไม่ได้เปิดใช้</div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- Arrow -->
+  <iconify-icon icon="lucide:arrow-right" width="13" height="13" class="text-faint flex-shrink-0"></iconify-icon>
+  <!-- Enabled chips (rendered by JS) -->
+  <div class="flex items-center gap-1.5 flex-wrap" id="pipeline-chips"></div>
+  <!-- Empty state -->
+  <span id="pipeline-empty" class="text-[0.74rem] text-faint" style="display:none;">
+    ยังไม่มี integration —
+    <button type="button" onclick="switchAllTab('tab-integration')"
+            class="text-accent hover:underline">ตั้งค่า Integration</button>
+  </span>
 </div>
 
+</div><!-- /toptab-live -->
+
+<div id="toptab-history" class="qr500-all-panel" style="display:none;flex-direction:column;gap:1rem;">
 <!-- ── Scan history ──────────────────────────────────── -->
 <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
   <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
@@ -250,33 +218,14 @@
     <div class="hist-empty" id="hist-empty">ยังไม่มีการสแกน — รอรับข้อมูล...</div>
   </div>
 </div>
+</div><!-- /toptab-history -->
 
-<!-- ── Tab nav (display.html style) ─────────────────── -->
-<nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
-  <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
 
-    <button type="button" data-tab="tab-config" onclick="switchTab('tab-config')"
-            class="qr500-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
-                   bg-accent/8 text-accent font-semibold">
-      <iconify-icon icon="lucide:settings-2" width="14" height="14" class="flex-shrink-0"></iconify-icon>
-      <span>ตั้งค่า</span>
-    </button>
-
-    <button type="button" data-tab="tab-integration" onclick="switchTab('tab-integration')"
-            class="qr500-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
-                   text-muted hover:bg-line/6 hover:text-ink">
-      <iconify-icon icon="lucide:git-branch" width="14" height="14" class="flex-shrink-0"></iconify-icon>
-      <span>Integration</span>
-      <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.58rem] font-bold bg-surface border border-line/10 text-faint" id="integ-count-badge">{{ integration_count }}</span>
-    </button>
-
-  </div>
-</nav>
 
 <!-- ── Tab panels ────────────────────────────────────── -->
 
 <!-- Tab: ตั้งค่า -->
-<div id="tab-config" class="tab-panel is-active">
+<div id="tab-config" class="qr500-all-panel" style="display:none;flex-direction:column;gap:1rem;">
 
   <!-- Status card -->
   <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
@@ -373,7 +322,7 @@
 </div><!-- /tab-config -->
 
 <!-- Tab: Integration -->
-<div id="tab-integration" class="tab-panel">
+<div id="tab-integration" class="qr500-all-panel" style="display:none;flex-direction:column;gap:1rem;">
 
   <p class="text-[0.8rem] text-muted">เลือกช่องทางส่งข้อมูลออกเมื่ออ่าน QR/Barcode ได้ สามารถเปิดหลาย integration พร้อมกัน</p>
 
@@ -472,20 +421,23 @@
     </div>
     <div class="integ-body {{ '' if integrations.mqtt.enabled else 'is-hidden' }}" id="body-mqtt">
       <div class="flex flex-col gap-1.5">
-        <label class="text-[0.75rem] font-semibold text-muted">Broker</label>
-        <select id="mqtt-broker-select" onchange="onBrokerSelect(this.value)"
+        <label class="text-[0.75rem] font-semibold text-muted">MQTT Broker</label>
+        {% if mqtt_brokers %}
+        <select id="mqtt-broker-id"
                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-display">
-          <option value="">— กรอก Broker URL เอง —</option>
-          {% if mqtt_config and mqtt_config.broker_url %}
-          <option value="{{ mqtt_config.broker_url }}" selected>{{ mqtt_config.broker_url }} (จากหน้า MQTT)</option>
-          {% endif %}
+          <option value="">— เลือก Broker —</option>
+          {% for b in mqtt_brokers %}
+          <option value="{{ b.id }}" {{ 'selected' if integrations.mqtt.broker_id == b.id else '' }}>
+            {{ b.name }} — {{ b.broker_url }}
+          </option>
+          {% endfor %}
         </select>
-      </div>
-      <div class="flex flex-col gap-1.5">
-        <label class="text-[0.75rem] font-semibold text-muted">Broker URL</label>
-        <input type="text" id="mqtt-broker-url" placeholder="mqtt://192.168.1.100:1883"
-               value="{{ integrations.mqtt.broker_url or (mqtt_config.broker_url if mqtt_config else '') }}"
-               class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition font-display">
+        {% else %}
+        <div class="flex items-center gap-2 px-3 py-2 border border-caution/20 rounded-lg bg-caution/5 text-[0.78rem] text-caution">
+          <iconify-icon icon="lucide:alert-triangle" width="13" height="13"></iconify-icon>
+          ยังไม่มี Broker — <a href="/mqtt/broker/add" class="underline underline-offset-2 ml-1">เพิ่ม Broker</a>
+        </div>
+        {% endif %}
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div class="flex flex-col gap-1.5">
@@ -497,8 +449,6 @@
         <div class="flex flex-col gap-1.5">
           <label class="text-[0.75rem] font-semibold text-muted">QoS</label>
           <select id="mqtt-qos" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-display">
-            <option value="0" {{ 'selected' if integrations.mqtt.qos == 0 else '' }}>QoS 0 — At most once</option>
-            <option value="1" {{ 'selected' if (integrations.mqtt.qos == 1 or not integrations.mqtt.qos) else '' }}>QoS 1 — At least once (Default)</option>
             <option value="2" {{ 'selected' if integrations.mqtt.qos == 2 else '' }}>QoS 2 — Exactly once</option>
           </select>
         </div>
@@ -690,17 +640,9 @@
     }
 
     /* pipeline flash */
-    flashFlowBlock('flow-block-read');
-    setFlowDot('flow-dot-read', 'ok');
-
     var types = ['webhook', 'mqtt', 'pipe'];
     types.forEach(function (t) {
-      if (integState[t]) {
-        setTimeout(function () {
-          flashFlowBlock('flow-block-' + t);
-          setFlowDot('flow-dot-' + t, 'ok');
-        }, 350);
-      }
+      if (integState[t]) { setTimeout(function () { flashPipelineChip(t); }, 200); }
     });
 
     /* history */
@@ -708,37 +650,50 @@
   }
 
   /* ══ Pipeline helpers ════════════════════════════════════════════════════ */
-  function flashFlowBlock(id) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.classList.add('flash');
-    setTimeout(function () { el.classList.remove('flash'); }, 700);
-  }
+  var INTEG_META = {
+    webhook: { label: 'Webhook',  icon: 'lucide:link' },
+    mqtt:    { label: 'MQTT',     icon: 'lucide:activity' },
+    pipe:    { label: 'Pipe I/O', icon: 'lucide:git-branch' },
+  };
 
-  function setFlowDot(id, state) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.className = 'flow-dot flow-dot-' + state;
-  }
-
-  function initFlowPipeline() {
-    /* Set branch sub-text based on integration state */
-    var cfg = {
-      webhook: { sub: integState.webhook ? '{{ integrations.webhook.url or "URL ไม่ได้ตั้ง" }}' : 'ไม่ได้เปิดใช้' },
-      mqtt:    { sub: integState.mqtt    ? '{{ integrations.mqtt.topic or "vas/qr/scan" }}'       : 'ไม่ได้เปิดใช้' },
-      pipe:    { sub: integState.pipe    ? '{{ integrations.pipe.path or "/tmp/vas_qr_pipe" }}'   : 'ไม่ได้เปิดใช้' },
-    };
-    Object.keys(cfg).forEach(function (t) {
-      var sub = document.getElementById('flow-sub-' + t);
-      if (sub) sub.textContent = cfg[t].sub;
-      setFlowDot('flow-dot-' + t, integState[t] ? 'idle' : 'idle');
-      var blk = document.getElementById('flow-block-' + t);
-      if (blk) blk.style.opacity = integState[t] ? '1' : '0.45';
+  function renderPipelineChips() {
+    var chips  = document.getElementById('pipeline-chips');
+    var empty  = document.getElementById('pipeline-empty');
+    var dot    = document.getElementById('pipeline-dot');
+    if (!chips) return;
+    chips.innerHTML = '';
+    var enabled = Object.keys(integState).filter(function (k) { return integState[k]; });
+    if (empty) empty.style.display = enabled.length ? 'none' : '';
+    if (dot) {
+      dot.style.background = enabled.length
+        ? 'rgb(var(--c-safe))' : 'rgb(var(--c-faint)/0.4)';
+    }
+    enabled.forEach(function (k) {
+      var m = INTEG_META[k] || { label: k, icon: 'lucide:circle' };
+      var chip = document.createElement('span');
+      chip.id = 'pipeline-chip-' + k;
+      chip.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.72rem] font-semibold bg-safe/8 border border-safe/20 text-safe transition-all';
+      chip.innerHTML = '<iconify-icon icon="' + m.icon + '" width="10" height="10"></iconify-icon>' + m.label;
+      chips.appendChild(chip);
     });
-    var subRead = document.getElementById('flow-sub-read');
-    if (subRead) subRead.textContent = '{{ qr_reader.active_device or "System" }}';
-    setFlowDot('flow-dot-read', '{{ "ok" if qr_reader.reader_running else "idle" }}');
   }
+
+  function flashPipelineChip(key) {
+    var chip = document.getElementById('pipeline-chip-' + key);
+    if (!chip) return;
+    chip.classList.add('bg-safe/20', 'scale-105');
+    setTimeout(function () { chip.classList.remove('bg-safe/20', 'scale-105'); }, 700);
+  }
+
+  function setPipelineDotState(running) {
+    var dot = document.getElementById('pipeline-dot');
+    if (!dot) return;
+    var hasInteg = Object.keys(integState).some(function (k) { return integState[k]; });
+    dot.style.background = running
+      ? 'rgb(var(--c-safe))' : (hasInteg ? 'rgb(var(--c-faint)/0.4)' : 'rgb(var(--c-faint)/0.4)');
+  }
+
+  function initFlowPipeline() { renderPipelineChips(); }
 
   /* ══ History ═════════════════════════════════════════════════════════════ */
   function addToHistory(value, ts, device) {
@@ -809,10 +764,10 @@
     copyValue(lastScanVal);
   };
 
-  /* ══ Tab switching (display.html pattern) ════════════════════════════════ */
-  window.switchTab = function (targetId) {
-    document.querySelectorAll('.qr500-tab-btn').forEach(function (btn) {
-      var isActive = btn.dataset.tab === targetId;
+  /* ══ Unified tab switching (4 tabs) ══════════════════════════════════════ */
+  window.switchAllTab = function (targetId) {
+    document.querySelectorAll('.qr500-all-tab-btn').forEach(function (btn) {
+      var isActive = btn.dataset.alltab === targetId;
       btn.className = btn.className
         .replace(/\s*bg-accent\/8/g, '')
         .replace(/\s*text-accent/g, '')
@@ -827,8 +782,8 @@
         btn.className += ' text-muted hover:bg-line/6 hover:text-ink';
       }
     });
-    document.querySelectorAll('.tab-panel').forEach(function (panel) {
-      panel.classList.toggle('is-active', panel.id === targetId);
+    document.querySelectorAll('.qr500-all-panel').forEach(function (panel) {
+      panel.style.display = panel.id === targetId ? 'flex' : 'none';
     });
   };
 
@@ -836,14 +791,6 @@
   window.toggleInteg = function (type, enabled) {
     var body = document.getElementById('body-' + type);
     if (body) body.classList.toggle('is-hidden', !enabled);
-  };
-
-  /* ══ MQTT broker select ══════════════════════════════════════════════════ */
-  window.onBrokerSelect = function (val) {
-    if (val) {
-      var el = document.getElementById('mqtt-broker-url');
-      if (el) el.value = val;
-    }
   };
 
   /* ══ Save integration ════════════════════════════════════════════════════ */
@@ -855,7 +802,7 @@
       payload.retry       = parseInt((document.getElementById('webhook-retry')   || {}).value || '5', 10);
       payload.timeout_sec = parseInt((document.getElementById('webhook-timeout') || {}).value || '5', 10);
     } else if (type === 'mqtt') {
-      payload.broker_url = (document.getElementById('mqtt-broker-url') || {}).value || '';
+      payload.broker_id  = parseInt((document.getElementById('mqtt-broker-id') || {}).value || '0', 10) || null;
       payload.topic      = (document.getElementById('mqtt-topic')       || {}).value || 'vas/qr/scan';
       payload.qos        = parseInt((document.getElementById('mqtt-qos') || {}).value || '1', 10);
     } else if (type === 'pipe') {
@@ -937,7 +884,7 @@
         if (data.status === 'ok') {
           showToast('Restart สำเร็จ · ' + (data.device || ''), 'success');
           updateReaderBadge(true);
-          setFlowDot('flow-dot-read', 'ok');
+          setPipelineDotState(true);
         } else {
           showToast('Error: ' + (data.errors || []).join(', '), 'error');
         }
@@ -948,7 +895,7 @@
   window.qrStop = function () {
     fetch('/api/qr/stop', { method: 'POST' }).then(function () {
       updateReaderBadge(false);
-      setFlowDot('flow-dot-read', 'idle');
+      setPipelineDotState(false);
       showToast('Reader หยุดแล้ว', 'success');
     });
   };

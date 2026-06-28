@@ -394,32 +394,6 @@
     <!-- ── ทดสอบจอ (Display Test) tab ──────────────────────────── -->
     <div id="tab-testmode" class="tab-panel flex flex-col gap-4">
 
-      <!-- Library status card -->
-      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col gap-4">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <h2 class="text-[0.88rem] font-semibold text-ink">Library ที่จำเป็น</h2>
-            <p class="text-[0.75rem] text-muted mt-0.5">Script จำลองจอต้องการ <code class="font-display text-[0.72rem] bg-surface px-1.5 py-0.5 rounded border border-line/10">python3-evdev</code></p>
-          </div>
-          <div id="sim-lib-badge" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.75rem] font-semibold">
-            <span class="spin" style="width:12px;height:12px;border-width:1.5px;"></span>
-            <span>ตรวจสอบ...</span>
-          </div>
-        </div>
-        <div id="sim-lib-missing" style="display:none;"
-             class="flex items-center justify-between gap-3 bg-caution/5 border border-caution/20 rounded-lg px-3 py-3">
-          <div class="flex items-center gap-2">
-            <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="text-caution flex-shrink-0"></iconify-icon>
-            <span class="text-[0.78rem] text-ink">ยังไม่ได้ติดตั้ง — ไปที่ Settings &gt; Software เพื่อติดตั้ง</span>
-          </div>
-          <a href="/settings" data-spa-link
-             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap flex-shrink-0">
-            <iconify-icon icon="lucide:arrow-right" width="12" height="12"></iconify-icon>
-            ไปติดตั้ง
-          </a>
-        </div>
-      </div>
-
       <!-- Simulator control card -->
       <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col gap-4">
         <div>

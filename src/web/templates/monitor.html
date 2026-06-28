@@ -2,23 +2,7 @@
 {% block page_title %}Monitor — VAS{% endblock %}
 {% block header_title %}System Monitor{% endblock %}
 
-{% block header_actions %}
-<div class="flex items-center gap-2">
-  <!-- Refresh interval selector -->
-  <div class="flex items-center gap-0.5 border border-line/10 rounded-lg bg-surface px-1 py-1">
-    <button class="interval-btn px-2.5 py-1 rounded-md text-[0.72rem] font-semibold transition-colors text-muted hover:bg-card hover:text-ink" data-sec="3">3s</button>
-    <button class="interval-btn px-2.5 py-1 rounded-md text-[0.72rem] font-semibold transition-colors text-muted hover:bg-card hover:text-ink" data-sec="5">5s</button>
-    <button class="interval-btn px-2.5 py-1 rounded-md text-[0.72rem] font-semibold transition-colors text-muted hover:bg-card hover:text-ink" data-sec="10">10s</button>
-  </div>
-  <button id="btn-refresh"
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors"
-          onclick="mon.load()">
-    <iconify-icon icon="lucide:refresh-cw" width="13" height="13" id="refresh-icon"></iconify-icon>
-    Refresh
-  </button>
-  <span class="text-[0.72rem] text-faint tabular-nums" id="last-update">—</span>
-</div>
-{% endblock %}
+{% block header_actions %}{% endblock %}
 
 {% block content %}
 <style>

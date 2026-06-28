@@ -190,21 +190,6 @@ PACKAGES: list[dict[str, Any]] = [
             ["systemctl", "enable", "--now", "ssh"],
         ],
     },
-    # ── Messaging / MQTT ──────────────────────────────────────────
-    {
-        "id":          "paho-mqtt",
-        "name":        "paho-mqtt",
-        "description": "Python MQTT client library — จำเป็นสำหรับ MQTT Broker connection ใน VAS",
-        "logo":        "mqtt-logo.png",
-        "category":    "network",
-        "depends":     [],
-        "children":    [],
-        "check":       _python_import_check("paho"),
-        "install_cmds": [
-            ["apt-get", "update"],
-            ["apt-get", "install", "-y", "python3-paho-mqtt"],
-        ],
-    },
     # ── Remote ────────────────────────────────────────────────────
     {
         "id":          "anydesk",
@@ -231,21 +216,6 @@ PACKAGES: list[dict[str, Any]] = [
             ],
             ["apt-get", "update"],
             ["apt-get", "install", "-y", "anydesk"],
-        ],
-    },
-    # ── Display / Simulation ──────────────────────────────────────
-    {
-        "id":          "python-evdev",
-        "name":        "python3-evdev",
-        "description": "Python bindings สำหรับ Linux evdev — ใช้จำลอง Virtual Touchscreen",
-        "logo":        None,
-        "category":    "display",
-        "depends":     [],
-        "children":    [],
-        "check":       _python_import_check("evdev"),
-        "install_cmds": [
-            ["apt-get", "update"],
-            ["apt-get", "install", "-y", "python3-evdev"],
         ],
     },
     # ── Hardware ──────────────────────────────────────────────────

@@ -108,28 +108,6 @@
 
     </div>
 
-    <!-- Payload Mode -->
-    <div class="flex flex-col gap-2">
-      <label class="text-[0.75rem] font-semibold text-muted">Payload Mode</label>
-      <div class="flex flex-col gap-2">
-        {% set cur_mode = broker.payload_mode if broker else 'decoded' %}
-        {% for mode_value, mode_label, mode_desc, mode_example in [
-          ('decoded', 'Decoded', 'ลอง decode QR content ก่อน publish', '{"scan":{"order_id":"123"},"device":"...","ts":"..."}'),
-          ('json',    'JSON Object', 'ส่ง QR string ใน JSON envelope', '{"scan":"3833401723","device":"/dev/input/event6","ts":"..."}'),
-          ('raw',     'Raw String', 'ส่ง QR string เปล่าๆ ไม่มี wrapper', '3833401723'),
-        ] %}
-        <label class="flex items-start gap-2.5 cursor-pointer px-3.5 py-2.5 border border-line/14 rounded-lg hover:bg-surface transition-colors" id="lbl-mode-{{ mode_value }}">
-          <input type="radio" name="f-payload-mode" id="f-mode-{{ mode_value }}" value="{{ mode_value }}" style="margin-top:3px;" {{ 'checked' if cur_mode == mode_value else '' }} onchange="syncModeLabels()">
-          <div>
-            <div class="text-[0.84rem] font-semibold text-ink">{{ mode_label }}</div>
-            <div class="text-[0.72rem] text-faint mt-0.5">{{ mode_desc }}</div>
-            <code class="text-[0.7rem] text-muted font-display">{{ mode_example }}</code>
-          </div>
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-
     <!-- Advanced settings -->
     <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
       <button type="button" onclick="toggleAdvanced()" class="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface transition-colors" id="adv-toggle">
@@ -231,18 +209,6 @@
     sync();
   });
 
-  function syncModeLabels() {
-    ["decoded", "json", "raw"].forEach(function (m) {
-      var inp = document.getElementById("f-mode-" + m);
-      var lbl = document.getElementById("lbl-mode-" + m);
-      if (!inp || !lbl) return;
-      lbl.style.borderColor = inp.checked ? "rgb(var(--c-accent))" : "";
-      lbl.style.background  = inp.checked ? "rgb(var(--c-accent)/0.05)" : "";
-    });
-  }
-  window.syncModeLabels = syncModeLabels;
-  syncModeLabels();
-
   function toggleAdvanced() {
     var panel   = document.getElementById("adv-panel");
     var chevron = document.getElementById("adv-chevron");
@@ -259,7 +225,7 @@
       password:      document.getElementById("f-password").value,
       client_id:     document.getElementById("f-client-id").value.trim(),
       qos:           parseInt(document.getElementById("f-qos").value, 10),
-      payload_mode:  (document.querySelector('input[name="f-payload-mode"]:checked') || {}).value || "decoded",
+      payload_mode:  "json",
       enabled:       document.getElementById("f-enabled").checked,
       is_primary:    document.getElementById("f-primary").checked,
       retain:        document.getElementById("f-retain").checked,

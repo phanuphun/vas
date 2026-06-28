@@ -310,6 +310,103 @@ window.__vasCleanup.push(function () {
 });
 ```
 
+## Confirm Modal Convention
+
+**ห้ามใช้ `window.confirm()` เด็ดขาด** — ให้ใช้ `showConfirm()` ทุกครั้งที่ต้องการ confirmation dialog (ลบ, reset, action ที่ย้อนกลับไม่ได้)
+
+### วิธีใช้
+
+```javascript
+window.showConfirm({
+  title:   "ลบ [ชื่อ item]?",          // หัวข้อ — ระบุสิ่งที่จะลบ
+  body:    "ข้อมูลทั้งหมดจะถูกลบ ไม่สามารถยกเลิกได้",  // คำอธิบายผลกระทบ
+  okLabel: "ลบ",                        // label ปุ่ม confirm (default: "ลบ")
+  onOk: function () {
+    // action จริง เช่น fetch DELETE
+  }
+});
+```
+
+### HTML ที่ต้องใส่ในทุกหน้าที่มีการลบ
+
+วาง modal ก่อน `{% endblock %}` ของ `{% block content %}`:
+
+```html
+<!-- ── Confirm Modal ──────────────────────────────────────── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">
+        ยกเลิก
+      </button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        ลบ
+      </button>
+    </div>
+  </div>
+</div>
+```
+
+CSS ที่ต้องใส่ใน `<style>` ของหน้า:
+
+```css
+#confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+#confirm-modal.is-open { display:flex; }
+#confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+#confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+```
+
+JS helper ที่ต้องใส่ใน `{% block extra_scripts %}`:
+
+```javascript
+window.showConfirm = function (opts) {
+  var modal = document.getElementById("confirm-modal");
+  var btnOk = document.getElementById("confirm-ok");
+  var clone = btnOk.cloneNode(true);
+  btnOk.parentNode.replaceChild(clone, clone);
+  btnOk = document.getElementById("confirm-ok");
+
+  document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+  document.getElementById("confirm-body").textContent  = opts.body  || "";
+  if (opts.okLabel) btnOk.childNodes[1].textContent = " " + opts.okLabel;
+
+  window._confirmModal = {
+    cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+  };
+  btnOk.onclick = function () {
+    modal.classList.remove("is-open"); window._confirmModal = null;
+    if (opts.onOk) opts.onOk();
+  };
+  modal.classList.add("is-open");
+  document.getElementById("confirm-cancel").focus();
+};
+
+// Escape key
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+});
+```
+
+### กฎ
+- ปุ่ม OK ของ delete modal ใช้สี `bg-danger text-white` เสมอ
+- backdrop คลิกแล้วปิด modal ได้
+- Escape key ปิด modal ได้
+- ใส่ `role="dialog"` และ `aria-modal="true"` ทุกครั้ง
+
 ## Code Style
 
 - **Python**: stdlib only where possible; type hints on public functions

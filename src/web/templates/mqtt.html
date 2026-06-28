@@ -2,7 +2,13 @@
 {% block page_title %}MQTT — VAS{% endblock %}
 {% block header_title %}MQTT{% endblock %}
 
-{% block header_actions %}{% endblock %}
+{% block header_actions %}
+<a href="/mqtt/broker/add"
+   class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+  <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>
+  เพิ่ม Broker
+</a>
+{% endblock %}
 
 {% block content %}
 <style>
@@ -13,17 +19,25 @@
   .pkg-row { transition: background 0.1s; }
   .pkg-row:hover { background: rgb(var(--c-surface)); }
   .pkg-row:last-child { border-bottom: none !important; }
+  /* ── Confirm Modal ────────────────────────────────────────── */
+  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open { display:flex; }
+  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
   .msg-log {
-    font-family: 'Bai Jamjuree', monospace; font-size: 0.72rem; line-height: 1.7;
-    background: #0f1117; color: #e2e8f0; border-radius: 0 0 0.75rem 0.75rem;
+    font-family: 'Bai Jamjuree', monospace; font-size: 0.72rem; line-height: 1.8;
+    background: rgb(var(--c-surface)); color: rgb(var(--c-ink));
+    border-radius: 0 0 0.75rem 0.75rem;
     padding: 0.875rem 1rem; overflow-y: auto; max-height: 380px;
     white-space: pre-wrap; word-break: break-all;
   }
   .msg-log::-webkit-scrollbar { width: 4px; }
-  .msg-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
-  .msg-ts    { color: #64748b; }
-  .msg-topic { color: #7dd3fc; font-weight: 600; }
-  .msg-retain { color: #fbbf24; font-size: 0.65rem; }
+  .msg-log::-webkit-scrollbar-thumb { background: rgb(var(--c-line)/0.2); border-radius: 2px; }
+  .msg-ts    { color: rgb(var(--c-faint)); }
+  .msg-topic { color: rgb(var(--c-accent)); font-weight: 600; }
+  .msg-retain { color: rgb(var(--c-caution)); font-size: 0.65rem; }
+  .msg-log > div { border-bottom: 1px solid rgb(var(--c-line)/0.06); padding-bottom: 0.25rem; margin-bottom: 0.25rem; }
+  .msg-log > div:last-child { border-bottom: none; margin-bottom: 0; }
 </style>
 
 <div class="flex flex-col gap-4">
@@ -57,83 +71,25 @@
     <!-- TAB: Brokers -->
     <div id="tab-brokers" class="tab-panel is-active flex flex-col gap-4">
 
-      <!-- Stats row -->
-      <div class="grid grid-cols-3 gap-3">
-        <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-3">
-          <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface grid place-items-center flex-shrink-0">
-            <iconify-icon icon="lucide:server" width="16" height="16" class="text-muted"></iconify-icon>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="text-[0.68rem] text-faint mb-0.5">Brokers ทั้งหมด</div>
-            <div class="font-display font-bold text-[1.25rem] leading-none text-ink">{{ brokers | length }}</div>
-          </div>
-        </div>
-        <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-3">
-          <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface grid place-items-center flex-shrink-0">
-            <iconify-icon icon="lucide:wifi" width="16" height="16" class="{{ 'text-safe' if active_client and active_client.is_connected else 'text-muted' }}"></iconify-icon>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="text-[0.68rem] text-faint mb-0.5">เชื่อมต่ออยู่</div>
-            <div class="font-display font-bold text-[1.25rem] leading-none {{ 'text-safe' if active_client and active_client.is_connected else 'text-faint' }}">
-              {{ '1' if active_client and active_client.is_connected else '0' }}
-            </div>
-          </div>
-        </div>
-        <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center gap-3">
-          <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface grid place-items-center flex-shrink-0">
-            <iconify-icon icon="lucide:package" width="16" height="16" class="{{ 'text-safe' if paho_available else 'text-caution' }}"></iconify-icon>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="text-[0.68rem] text-faint mb-0.5">paho-mqtt</div>
-            <div class="font-display font-bold text-[1.25rem] leading-none {{ 'text-safe' if paho_available else 'text-caution' }}">
-              {{ 'OK' if paho_available else 'N/A' }}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- paho dependency card -->
-      {% if not paho_available %}
-      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col gap-3">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <h2 class="text-[0.88rem] font-semibold text-ink">Dependency ที่จำเป็น</h2>
-            <p class="text-[0.75rem] text-muted mt-0.5">ระบบ MQTT ต้องการ <code class="font-display text-[0.72rem] bg-surface px-1.5 py-0.5 rounded border border-line/10">paho-mqtt</code></p>
-          </div>
-          <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-caution/30 bg-caution/5 text-[0.75rem] font-semibold text-caution flex-shrink-0">
-            <iconify-icon icon="lucide:alert-triangle" width="13" height="13"></iconify-icon>
-            <span>ไม่พบ Library</span>
-          </div>
-        </div>
-        <div class="flex items-center justify-between gap-3 bg-caution/5 border border-caution/20 rounded-lg px-3 py-3">
-          <div class="flex items-center gap-2 min-w-0">
-            <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="text-caution flex-shrink-0"></iconify-icon>
-            <span class="text-[0.78rem] text-ink">ยังไม่ได้ติดตั้ง — รัน <code class="font-display text-[0.7rem] bg-caution/10 px-1.5 py-0.5 rounded">sudo apt install -y python3-paho-mqtt</code></span>
-          </div>
-          <a href="/settings" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap flex-shrink-0">
-            <iconify-icon icon="lucide:arrow-right" width="12" height="12"></iconify-icon>
-            ไปติดตั้ง
-          </a>
-        </div>
-      </div>
-      {% endif %}
-
       <!-- Broker list card -->
       <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
         <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-3">
             <span class="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-faint">Brokers</span>
-            {% if brokers %}
-            <span class="font-display text-[0.68rem] font-bold text-faint bg-surface border border-line/10 rounded px-1.5 py-0.5">{{ brokers | length }}</span>
-            {% endif %}
+            <!-- stat 1: total count -->
+            <div class="flex items-center gap-1.5 text-[0.72rem] text-faint">
+              <iconify-icon icon="lucide:server" width="11" height="11" class="text-faint"></iconify-icon>
+              <span class="font-display font-semibold text-ink">{{ brokers | length }}</span>
+              <span>ทั้งหมด</span>
+            </div>
+            <!-- stat 2: connected -->
+            <div class="flex items-center gap-1.5 text-[0.72rem] {{ 'text-safe' if active_client and active_client.is_connected else 'text-faint' }}">
+              <iconify-icon icon="lucide:wifi" width="11" height="11"></iconify-icon>
+              <span class="font-display font-semibold {{ 'text-safe' if active_client and active_client.is_connected else 'text-faint' }}">{{ '1' if active_client and active_client.is_connected else '0' }}</span>
+              <span>เชื่อมต่อ</span>
+            </div>
           </div>
-          <div class="flex items-center gap-2">
-            <span class="text-[0.78rem] text-faint" id="list-msg"></span>
-            <a href="/mqtt/broker/add" class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">
-              <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>
-              เพิ่ม Broker
-            </a>
-          </div>
+          <span class="text-[0.78rem] text-faint" id="list-msg"></span>
         </div>
         {% if brokers %}
         <div id="broker-list">
@@ -264,11 +220,39 @@
           <span class="text-[0.72rem] font-semibold text-muted">ข้อความที่รับได้</span>
           <span class="text-[0.65rem] text-faint">เก็บสูงสุด 200 ข้อความ</span>
         </div>
-        <div id="mon-log" class="msg-log"><span class="text-faint">กด "เริ่ม Subscribe" เพื่อรับข้อความจาก broker...</span></div>
+        <div id="mon-log" class="msg-log"><span data-placeholder style="color:rgb(var(--c-faint))">กด "เริ่ม Subscribe" เพื่อรับข้อความจาก broker...</span></div>
       </div>
 
     </div><!-- /tab-monitor -->
 
+  </div>
+</div>
+
+<!-- ── Confirm Modal ──────────────────────────────────────── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">
+        ยกเลิก
+      </button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        <span>ลบ</span>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -319,18 +303,54 @@
       .catch(function (e) { setListMsg("Error: " + e, true); });
   };
 
+  /* ── Confirm Modal helper ─────────────────────────────────── */
+  window.showConfirm = function (opts) {
+    /* opts: { title, body, okLabel, onOk } */
+    var modal   = document.getElementById("confirm-modal");
+    var btnOk   = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = clone;
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) document.querySelector("#confirm-ok span").textContent = opts.okLabel;
+
+    window._confirmModal = {
+      cancel: function () {
+        modal.classList.remove("is-open");
+        window._confirmModal = null;
+      }
+    };
+
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open");
+      window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
   window.deleteBroker = function (bid, name) {
-    if (!confirm("ลบ broker [" + name + "] ?\nTopics ทั้งหมดจะถูกลบด้วย")) return;
-    fetch("/api/mqtt/brokers/" + bid, { method: "DELETE" })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d.status === "ok") {
-          var row = document.querySelector("[data-broker-id='" + bid + "']");
-          if (row) row.remove();
-          setListMsg("ลบแล้ว");
-        } else { setListMsg("Error: " + (d.errors || []).join(", "), true); }
-      })
-      .catch(function (e) { setListMsg("Error: " + e, true); });
+    showConfirm({
+      title:   "ลบ Broker [" + name + "]?",
+      body:    "Topics ทั้งหมดจะถูกลบด้วย ไม่สามารถยกเลิกได้",
+      okLabel: "ลบ",
+      onOk: function () {
+        fetch("/api/mqtt/brokers/" + bid, { method: "DELETE" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.status === "ok") {
+              var row = document.querySelector("[data-broker-id='" + bid + "']");
+              if (row) row.remove();
+              setListMsg("ลบแล้ว");
+            } else { setListMsg("Error: " + (d.errors || []).join(", "), true); }
+          })
+          .catch(function (e) { setListMsg("Error: " + e, true); });
+      }
+    });
   };
 
   function setListMsg(msg, isErr) {
@@ -378,6 +398,9 @@
   window.monStop = function () {
     if (_monTimer) { clearInterval(_monTimer); _monTimer = null; }
     _monRunning = false;
+    fetch("/api/mqtt/monitor/stop", { method: "POST" });
+    document.getElementById("mon-start-btn").disabled = false;
+
     fetch("/api/mqtt/monitor/stop", { method: "POST" });
     document.getElementById("mon-start-btn").disabled = false;
     document.getElementById("mon-stop-btn").disabled  = true;
@@ -452,6 +475,11 @@
   function esc(str) {
     return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
+
+  /* ── Confirm Modal — Escape key ───────────────────────────── */
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
 
   /* ── SPA cleanup ───────────────────────────────────────────── */
   window.__vasCleanup = window.__vasCleanup || [];

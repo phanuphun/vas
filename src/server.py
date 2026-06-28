@@ -513,16 +513,10 @@ def create_app() -> Flask:
 
     @app.get("/api/display/sim/status")
     def display_sim_status() -> dict[str, object]:
-        import subprocess as _sp
-        # lib check
-        lib_ok = _sp.run(
-            ["python3", "-c", "import evdev"],
-            capture_output=True, timeout=5,
-        ).returncode == 0
         proc = _sim_proc[0]
         running = proc is not None and proc.poll() is None
         return {
-            "lib_ok":  lib_ok,
+            "lib_ok":  True,
             "running": running,
             "pid":     proc.pid if running else None,
         }
@@ -809,7 +803,7 @@ def create_app() -> Flask:
     def qr_device_zkteco_qr500_page() -> str:
         from features.qr.reader import find_zkteco_evdev_devices, find_zkteco_hidraw_devices, load_qr_config
         from features.qr.registry import load_integrations
-        from features.mqtt.client import load_mqtt_config
+        from core.database import list_mqtt_brokers
         evdev_devices = find_zkteco_evdev_devices()
         hidraw_devices = find_zkteco_hidraw_devices()
         integrations_raw = load_integrations("zkteco-qr500")
@@ -822,7 +816,7 @@ def create_app() -> Flask:
             config=load_qr_config(),
             integrations=_IntegProxy(integrations_raw),
             integration_count=integration_count,
-            mqtt_config=load_mqtt_config(),
+            mqtt_brokers=list_mqtt_brokers(),
         )
 
     @app.post("/api/qr/devices/<device_id>/install")
@@ -893,7 +887,7 @@ def create_app() -> Flask:
     @app.get("/mqtt")
     def mqtt_page() -> str:
         from core.database import list_mqtt_brokers
-        from features.mqtt.client import get_mqtt_client, _paho_available
+        from features.mqtt.client import get_mqtt_client
         c = get_mqtt_client()
         active_url = c.config.broker_url if c else None
         brokers = list_mqtt_brokers()
@@ -902,7 +896,6 @@ def create_app() -> Flask:
             brokers=brokers,
             active_broker_url=active_url,
             active_client=c,
-            paho_available=_paho_available(),
         )
 
     @app.get("/mqtt/broker/add")
@@ -912,11 +905,11 @@ def create_app() -> Flask:
     @app.get("/mqtt/broker/<int:broker_id>")
     def mqtt_broker_detail_page(broker_id: int) -> str:
         from core.database import get_mqtt_broker, list_mqtt_topics
-        from features.mqtt.client import get_broker_connection_status, _paho_available
+        from features.mqtt.client import get_broker_connection_status
         broker = get_mqtt_broker(broker_id)
         if broker is None:
             return render_template("mqtt.html", brokers=[], active_broker_url=None,
-                                   active_client=None, paho_available=_paho_available()), 404  # type: ignore[return-value]
+                                   active_client=None), 404  # type: ignore[return-value]
         topics = list_mqtt_topics(broker_id)
         conn_status = get_broker_connection_status(broker_id)
         return render_template(
@@ -924,7 +917,6 @@ def create_app() -> Flask:
             broker=broker,
             topics=topics,
             conn_status=conn_status,
-            paho_available=_paho_available(),
         )
 
     @app.get("/mqtt/broker/<int:broker_id>/edit")

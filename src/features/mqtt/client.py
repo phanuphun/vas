@@ -429,6 +429,25 @@ def _paho_available() -> bool:
         return False
 
 
+def get_broker_connection_status(broker_id: int) -> dict[str, object]:
+    """คืน connection status ของ broker ตาม id — ใช้ใน detail page"""
+    with _client_lock:
+        c = _client
+    if c is None:
+        return {"connected": False, "broker_url": None, "last_error": None}
+    status = c.status_dict()
+    # ตรวจว่า active client กำลังใช้ broker นี้อยู่หรือเปล่า
+    from core.database import get_mqtt_broker
+    broker = get_mqtt_broker(broker_id)
+    if broker and status.get("broker_url") == broker.get("broker_url"):
+        return {
+            "connected": status.get("connected", False),
+            "broker_url": status.get("broker_url"),
+            "last_error": status.get("last_error"),
+        }
+    return {"connected": False, "broker_url": None, "last_error": None}
+
+
 # ---------------------------------------------------------------------------
 # MQTT Monitor Session — background subscriber for live message testing
 # ---------------------------------------------------------------------------
@@ -544,7 +563,6 @@ class MqttMonitorSession:
         if c:
             try:
                 c.loop_stop()
-                c.disconnect()
             except Exception:
                 pass
 

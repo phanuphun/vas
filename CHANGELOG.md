@@ -1,5 +1,30 @@
 # Changelog
 
+## [2026-06-28]
+
+### ย้าย paho-mqtt และ evdev เป็น core dependencies
+- เพิ่ม `paho-mqtt>=1.6` และ `evdev>=1.6` ใน `pyproject.toml` dependencies หลัก
+- ลบ package entries `paho-mqtt` และ `python-evdev` ออกจาก `settings.py` (ไม่ต้องติดตั้งแยกอีกต่อไป)
+- `display_sim_status()` คืน `lib_ok: True` ถาวร เนื่องจาก evdev เป็น dep หลักแล้ว
+
+### เพิ่ม get_broker_connection_status() ใน mqtt/client.py
+- ฟังก์ชันใหม่สำหรับ broker detail page — ตรวจสอบว่า active client กำลังใช้ broker นั้นอยู่หรือไม่
+- แก้ MqttMonitorSession cleanup: ลบ `c.disconnect()` ออกเพื่อป้องกัน disconnect client ที่ยังใช้งานอยู่
+
+### อัปเดต QR device และ MQTT pages ให้ใช้ multi-broker API
+- `qr_device_zkteco_qr500_page` เปลี่ยนจาก `load_mqtt_config()` เป็น `list_mqtt_brokers()`
+- `mqtt_page` ลบ `paho_available` context variable ออก (ไม่จำเป็นแล้ว)
+
+### เพิ่ม Confirm Modal Convention ใน INSTRUCTIONS.md
+- บังคับใช้ `showConfirm()` แทน `window.confirm()` สำหรับ action ที่ย้อนกลับไม่ได้
+- เพิ่มตัวอย่าง HTML modal และ JS usage ใน INSTRUCTIONS.md
+
+### ปรับ UI หลายหน้า
+- base.html, database.html, display.html, monitor.html — UI cleanup และ showConfirm integration
+- mqtt.html, mqtt_broker_detail.html, mqtt_broker_form.html — อัปเดตให้รองรับ multi-broker
+- qr_device_zkteco_qr500.html, qr_devices.html — ใช้ broker list แทน single config
+- wireguard.html — ปรับ UI ครั้งใหญ่
+
 ## [2026-06-27]
 
 ### ปรับ mqtt.html — Section Menu 2 tabs + Message Monitor panel

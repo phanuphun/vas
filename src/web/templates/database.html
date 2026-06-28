@@ -112,8 +112,39 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<style>
+  /* ── Confirm Modal ────────────────────────────────────────── */
+  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open { display:flex; }
+  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+</style>
 <script>
 (function () {
+  /* ── Confirm Modal helper ──────────────────────────────────── */
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = clone;
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) document.querySelector("#confirm-ok span").textContent = opts.okLabel;
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
+
   "use strict";
 
   var LIMIT = 50;
@@ -311,13 +342,19 @@
       }, 350);
     },
     clearTable: function () {
-      if (!confirm("ลบข้อมูลทั้งหมดใน " + state.table + "?")) return;
-      fetch("/api/database/" + encodeURIComponent(state.table) + "/clear", { method: "POST" })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (d.status === "ok") { state.offset = 0; load(); refreshStats(); }
-          else { alert("Error: " + (d.errors || []).join(", ")); }
-        })
+      showConfirm({
+        title:   "ลบข้อมูลใน " + state.table + "?",
+        body:    "ข้อมูลทั้งหมดในตารางจะถูกลบ ไม่สามารถยกเลิกได้",
+        okLabel: "ลบ",
+        onOk: function () {
+          fetch("/api/database/" + encodeURIComponent(state.table) + "/clear", { method: "POST" })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d.status === "ok") { state.offset = 0; load(); refreshStats(); }
+              else { alert("Error: " + (d.errors || []).join(", ")); }
+            });
+        }
+      })
         .catch(function (e) { alert("Error: " + e); });
     },
   };
