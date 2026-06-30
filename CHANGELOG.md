@@ -1,5 +1,21 @@
 # Changelog
 
+## [2026-07-01]
+
+### คืน SPA Router ใน base.html (sidebar ไม่ Re-Render)
+- เพิ่ม `id="spa-content-wrap"` ใน wrapper div ภายใน `#spa-main` เพื่อเป็น swap target
+- เพิ่ม SPA router script ใน `base.html` — intercept `.nav-link` clicks, fetch partial ด้วย `X-VAS-Partial: 1`, swap เฉพาะ `#spa-content-wrap` (sidebar/header ไม่ถูก re-render)
+- FIX 1: `e.isTrusted` check — ปฏิเสธ synthetic events จาก iconify-icon
+- FIX 2: `e.stopPropagation()` — ป้องกัน listener อื่น trigger ซ้ำ
+- FIX 3: `AbortController` — cancel fetch ที่ค้างเมื่อ navigate ใหม่
+- FIX 4: `window.__vasCleanup = window.__vasCleanup || []` — ป้องกัน SPA init ลบ cleanup functions ที่ page scripts ลงทะเบียนไว้ก่อน
+- `runCleanup()` เรียกก่อน navigate ทุกครั้ง, `execScripts()` re-execute scripts ใน content ใหม่
+- `updateNavActive()` toggle Tailwind classes บน `.nav-link` ตาม current pathname
+- Handle browser back/forward ด้วย `popstate`
+
+### แก้ evdev ติดตั้งบน Windows ไม่ได้
+- เพิ่ม `; sys_platform == 'linux'` marker ใน `pyproject.toml` — evdev ถูกติดตั้งเฉพาะ Linux
+
 ## [2026-06-28]
 
 ### ย้าย paho-mqtt และ evdev เป็น core dependencies

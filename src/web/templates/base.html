@@ -323,7 +323,7 @@
         </header>
 
         <main id="spa-main" class="flex-1 px-3 py-3.5 md:px-5 md:py-[1.125rem] lg:px-6 lg:py-5 overflow-x-hidden">
-          <div class="max-w-[1200px] mx-auto flex flex-col gap-4">
+          <div id="spa-content-wrap" class="max-w-[1200px] mx-auto flex flex-col gap-4">
             {% block content %}{% endblock %}
           </div>
         </main>
@@ -557,6 +557,143 @@
       })
       .catch(function(){ setBaseErr('pw-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ'); });
     }
+    </script>
+
+    <script>
+    // ══════════════════════════════════════════════════════════════════
+    //  SPA Router — intercept nav-link clicks, swap #spa-content-wrap
+    //  โดย sidebar / header ไม่ถูก re-render เลย
+    // ══════════════════════════════════════════════════════════════════
+    (function () {
+      'use strict';
+
+      var _ctrl = null; // AbortController for in-flight fetch
+
+      // FIX 4: || [] — ป้องกัน SPA init ลบ cleanup functions ที่ page
+      //         scripts (extra_scripts block) ลงทะเบียนไว้ก่อน
+      window.__vasCleanup = window.__vasCleanup || [];
+
+      // ── Cleanup ────────────────────────────────────────────────────
+      function runCleanup() {
+        var fns = window.__vasCleanup;
+        window.__vasCleanup = [];
+        fns.forEach(function (fn) { try { fn(); } catch (e) {} });
+      }
+
+      // ── Nav active state ───────────────────────────────────────────
+      function updateNavActive(pathname) {
+        var norm = pathname.replace(/\/$/, '') || '/';
+        document.querySelectorAll('a.nav-link').forEach(function (a) {
+          var href = a.getAttribute('href');
+          if (!href) return;
+          var aPath = href.replace(/\/$/, '') || '/';
+          if (aPath === norm) {
+            a.classList.add('bg-accent/8', 'text-accent', 'font-semibold');
+            a.classList.remove('text-muted', 'hover:bg-line/6', 'hover:text-ink');
+          } else {
+            a.classList.remove('bg-accent/8', 'text-accent', 'font-semibold');
+            a.classList.add('text-muted', 'hover:bg-line/6', 'hover:text-ink');
+          }
+        });
+      }
+
+      // ── Re-execute <script> tags in injected HTML ──────────────────
+      function execScripts(container) {
+        Array.from(container.querySelectorAll('script')).forEach(function (s) {
+          var ns = document.createElement('script');
+          Array.from(s.attributes).forEach(function (attr) {
+            ns.setAttribute(attr.name, attr.value);
+          });
+          ns.textContent = s.textContent;
+          s.parentNode.replaceChild(ns, s);
+        });
+      }
+
+      // ── Core navigate ──────────────────────────────────────────────
+      function navigate(url, push) {
+        // FIX 3: cancel in-flight fetch ก่อน navigate ใหม่
+        if (_ctrl) { _ctrl.abort(); }
+        _ctrl = new AbortController();
+        var sig = _ctrl.signal;
+
+        runCleanup();
+
+        fetch(url, {
+          headers: { 'X-VAS-Partial': '1' },
+          signal: sig,
+        })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        })
+        .then(function (html) {
+          if (sig.aborted) return;
+
+          var doc = new DOMParser().parseFromString(html, 'text/html');
+
+          // 1. Swap content — sidebar/header ไม่ถูกแตะ
+          var src  = doc.getElementById('spa-content');
+          var dest = document.getElementById('spa-content-wrap');
+          if (src && dest) {
+            dest.innerHTML = src.innerHTML;
+            execScripts(dest);
+          }
+
+          // 2. Update header title
+          var meta = doc.querySelector('meta[name="spa-header-title"]');
+          if (meta) {
+            var t = meta.getAttribute('content');
+            var hel = document.getElementById('spa-header-title');
+            if (hel) hel.textContent = t;
+            document.title = t + ' — VAS';
+          }
+
+          // 3. Push history
+          if (push) history.pushState({ vas: url }, '', url);
+
+          // 4. Highlight active nav
+          updateNavActive(new URL(url, location.origin).pathname);
+
+          // 5. Scroll content to top
+          window.scrollTo(0, 0);
+        })
+        .catch(function (e) {
+          if (e.name === 'AbortError') return;
+          location.href = url; // hard fallback
+        });
+      }
+
+      // ── Intercept nav-link clicks ──────────────────────────────────
+      document.addEventListener('click', function (e) {
+        // FIX 1: ปฏิเสธ synthetic events (เช่น iconify-icon web component)
+        if (!e.isTrusted) return;
+
+        var a = e.target.closest('a.nav-link');
+        if (!a) return;
+
+        var href = a.getAttribute('href');
+        if (!href || href.charAt(0) === '#') return;
+        if (/^https?:\/\/|^\/\//.test(href)) return; // external
+
+        // FIX 2: ป้องกัน listener อื่นจับ event ซ้ำ
+        e.preventDefault();
+        e.stopPropagation();
+
+        var url = new URL(href, location.origin).href;
+        if (url === location.href) return; // already here
+
+        navigate(url, true);
+      }, true); // capture — ก่อน listener อื่น
+
+      // ── Browser back / forward ─────────────────────────────────────
+      window.addEventListener('popstate', function () {
+        navigate(location.href, false);
+      });
+
+      // ── Seed initial history state ─────────────────────────────────
+      history.replaceState({ vas: location.href }, '');
+
+    })();
     </script>
 
     {% block extra_scripts %}{% endblock %}
