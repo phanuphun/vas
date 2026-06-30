@@ -538,11 +538,9 @@
   window.qrStop = qrStop;
   window.qrSaveConfig = qrSaveConfig;
 
-  // ── Init ────────────────────────────────────────────────────
-  document.addEventListener("DOMContentLoaded", function () {
-    connectSSE();
-    agoTimer = setInterval(updateAgo, 5000);
-  });
+  // ── Init — immediate call รองรับ SPA navigate ──────────────
+  connectSSE();
+  agoTimer = setInterval(updateAgo, 5000);
 })();
 </script>
 {% endblock %}

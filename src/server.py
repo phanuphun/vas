@@ -1186,13 +1186,19 @@ def create_app() -> Flask:
         logo_dir = Path(__file__).parent.parent / "public" / "images" / "logo"
         return send_from_directory(str(logo_dir), filename)
 
-    # ── Settings routes ──────────────────────────────────────────
+    # ── Apps (โปรแกรมเพิ่มเติม) routes ──────────────────────────────
+
+    @app.get("/apps")
+    def apps_page() -> str:
+        return render_template("apps.html", active_tab="software")
 
     @app.get("/settings")
     def settings_page() -> str:
-        return render_template("settings.html", active_tab="software")
+        from flask import redirect
+        return redirect("/apps", code=301)  # type: ignore[return-value]
 
-    @app.get("/api/settings/packages")
+    @app.get("/api/apps/packages")
+    @app.get("/api/settings/packages")   # legacy alias
     def settings_packages_api() -> dict[str, object]:
         from features.packages.settings import get_package_status, CATEGORIES
         return {

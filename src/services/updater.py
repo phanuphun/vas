@@ -21,12 +21,14 @@ class SelfUpdater:
         runner: CommandRunner,
         repo: str = DEFAULT_REPO,
         version: str = "latest",
+        branch: str = "main",
         install_dir: Path = DEFAULT_INSTALL_DIR,
         bin_dir: Path = Path("/usr/local/bin"),
     ) -> None:
         self.runner = runner
         self.repo = repo
         self.version = version
+        self.branch = branch
         self.install_dir = install_dir
         self.bin_dir = bin_dir
 
@@ -54,7 +56,7 @@ class SelfUpdater:
 
     def archive_url(self) -> str:
         if self.version == "latest":
-            return f"https://github.com/{self.repo}/archive/refs/heads/main.tar.gz"
+            return f"https://github.com/{self.repo}/archive/refs/heads/{self.branch}.tar.gz"
         return f"https://github.com/{self.repo}/archive/refs/tags/{self.version}.tar.gz"
 
     def ensure_runtime_packages(self) -> None:

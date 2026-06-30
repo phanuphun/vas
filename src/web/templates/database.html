@@ -361,10 +361,9 @@
 
   var _statsTimer = null;
 
-  document.addEventListener("DOMContentLoaded", function () {
-    db.switchTab("qr_scans");
-    _statsTimer = setInterval(refreshStats, 15000);
-  });
+  // immediate call — รองรับ SPA navigate
+  db.switchTab("qr_scans");
+  _statsTimer = setInterval(refreshStats, 15000);
 
   // SPA cleanup
   window.__vasCleanup = window.__vasCleanup || [];

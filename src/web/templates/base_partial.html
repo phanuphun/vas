@@ -6,7 +6,9 @@
   <meta name="spa-header-title" content="{% block header_title %}VAS{% endblock %}">
 </head>
 <body>
-<div id="spa-content">{% block content %}{% endblock %}</div>
+<div id="spa-content">
+{% block content %}{% endblock %}
 {% block extra_scripts %}{% endblock %}
+</div>
 </body>
 </html>

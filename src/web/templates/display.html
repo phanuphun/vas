@@ -43,14 +43,6 @@
   .tab-panel.is-active { display:flex; flex-direction:column; animation:tabFade 0.15s ease forwards; }
   @keyframes tabFade { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 
-  /* Config viewer */
-  .config-pre {
-    font-family:'Bai Jamjuree',monospace; font-size:0.76rem; line-height:1.7;
-    background:#0f1117; color:#e2e8f0; border-radius:0 0 0.75rem 0.75rem;
-    padding:1rem 1.25rem; overflow:auto; max-height:360px; white-space:pre; margin:0;
-  }
-  .config-pre::-webkit-scrollbar { width:4px; height:4px; }
-  .config-pre::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.15); border-radius:2px; }
 </style>
 
 <div class="flex flex-col gap-4">
@@ -375,15 +367,18 @@
           </button>
 
           <!-- File content (hidden initially) -->
-          <div id="cfg-viewer-{{ key }}" class="hidden border-t border-line/8">
-            <div class="flex items-center justify-between px-4 py-4 bg-surface/40">
+          <div id="cfg-viewer-{{ key }}" class="hidden border-t border-line/10">
+            <div class="flex items-center justify-between px-4 py-3 bg-surface/40">
               <span class="text-[0.72rem] font-semibold text-muted">เนื้อหาไฟล์</span>
               <button onclick="loadConfig('{{ cfg_key }}', '{{ key }}')" type="button"
                       class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
                 <iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Reload
               </button>
             </div>
-            <pre class="config-pre" id="cfg-content-{{ key }}"><span class="text-faint">กำลังโหลด...</span></pre>
+            <div class="p-4">
+              <textarea id="cfg-content-{{ key }}" readonly spellcheck="false"
+                        class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[200px] outline-none resize-y cursor-default select-all">กำลังโหลด...</textarea>
+            </div>
           </div>
         </div>
         {% endfor %}
@@ -559,24 +554,24 @@
   if (applyBtn) applyBtn.addEventListener("click", doApply);
 
   // ── Config file loading ──────────────────────────────────────
-  var _cfgLoaded = {};
-  document.querySelectorAll(".cfg-accordion-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var key = btn.dataset.key;
-      var body = document.getElementById("cfg-body-" + key);
-      var isOpen = body.style.display !== "none";
-      body.style.display = isOpen ? "none" : "";
-      btn.querySelector(".cfg-chevron").style.transform = isOpen ? "" : "rotate(180deg)";
-      if (!isOpen && !_cfgLoaded[key]) {
-        _cfgLoaded[key] = true;
-        var pre = document.getElementById("cfg-content-" + key);
-        fetch("/api/display/config-content?key=" + encodeURIComponent(key))
-          .then(function (r) { return r.json(); })
-          .then(function (d) { pre.textContent = d.content || "(empty)"; })
-          .catch(function (e) { pre.textContent = "Error: " + e; });
-      }
-    });
-  });
+  window.toggleConfig = function (key) {
+    var viewer = document.getElementById("cfg-viewer-" + key);
+    var chev   = document.getElementById("chevron-" + key);
+    if (!viewer) return;
+    var nowHidden = viewer.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+    if (!nowHidden) loadConfig(key, key);
+  };
+
+  window.loadConfig = function (cfgKey, key) {
+    var ta = document.getElementById("cfg-content-" + key);
+    if (!ta) return;
+    ta.value = "กำลังโหลด...";
+    fetch("/api/display/config-content?key=" + encodeURIComponent(cfgKey))
+      .then(function (r) { return r.json(); })
+      .then(function (d) { ta.value = d.content || "(ไฟล์ว่าง)"; })
+      .catch(function (e) { ta.value = "โหลดล้มเหลว: " + e; });
+  };
 
   // ── Virtual Touchscreen Simulation ──────────────────────────
   var _simLibOk = false;
@@ -633,12 +628,10 @@
       .catch(function () { simRefresh(); });
   };
 
-  // ── Init ────────────────────────────────────────────────────
-  document.addEventListener("DOMContentLoaded", function () {
-    updatePreview();
-    switchTab("monitor");
-    simRefresh();
-  });
+  // ── Init — immediate call รองรับ SPA navigate ──────────────
+  updatePreview();
+  switchTab("monitor");
+  simRefresh();
 })();
 </script>
 {% endblock %}

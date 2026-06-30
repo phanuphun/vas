@@ -4,12 +4,17 @@ set -euo pipefail
 REPO="${VENDING_AUTO_SETUP_REPO:-phanuphun/vending-auto-setup}"
 VERSION="${VENDING_AUTO_SETUP_VERSION:-latest}"
 PERSIST_CLI="${VENDING_AUTO_SETUP_PERSIST:-0}"
+BRANCH="${VENDING_AUTO_SETUP_BRANCH:-main}"
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --install-cli|--persist-cli)
       PERSIST_CLI="1"
       shift
+      ;;
+    --branch)
+      BRANCH="$2"
+      shift 2
       ;;
     --)
       shift
@@ -127,7 +132,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "$VERSION" == "latest" ]]; then
-  archive_url="https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+  archive_url="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
 else
   archive_url="https://github.com/${REPO}/archive/refs/tags/${VERSION}.tar.gz"
 fi

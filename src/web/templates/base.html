@@ -182,7 +182,7 @@
           <div class="nav-section px-2 pt-3 pb-1" id="nav-sec-network">
             <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">เครือข่าย</span>
             {{ nav_link('mqtt_page',  'simple-icons:mqtt',      'MQTT') }}
-            {{ nav_link('wireguard','simple-icons:wireguard','VPN','data-nav-pkg="wireguard" style="display:none;"') }}
+            {{ nav_link('wireguard','simple-icons:wireguard','Wireguard','data-nav-pkg="wireguard" style="display:none;"') }}
           </div>
 
           {# ── ระบบ ───────────────────────────────────── #}
@@ -199,10 +199,10 @@
           {# ── divider ────────────────────────────────── #}
           <div class="mx-3 my-2 border-t border-line/8"></div>
 
-          {# ── ตั้งค่า + อุปกรณ์ ──────────────────────── #}
+          {# ── โปรแกรมเพิ่มเติม + อุปกรณ์ ──────────────────────── #}
           <div class="px-2 pb-1">
-            {{ nav_link('settings_page',  'lucide:settings', 'ตั้งค่า') }}
-            {{ nav_link('qr_devices_page','lucide:cpu',      'อุปกรณ์') }}
+            {{ nav_link('apps_page',      'lucide:package-plus', 'โปรแกรมเพิ่มเติม') }}
+            {{ nav_link('qr_devices_page','lucide:cpu',          'อุปกรณ์') }}
           </div>
 
         </nav>
@@ -247,15 +247,24 @@
         })();
         </script>
 
-        <!-- Footer — version info -->
-        <div class="border-t border-line/10 px-3 py-2.5 flex-shrink-0 safe-pb">
+        <!-- Footer — version info (clickable → update page) -->
+        <a href="/update"
+           class="nav-link border-t border-line/10 px-3 py-2.5 flex-shrink-0 safe-pb
+                  hover:bg-surface/60 transition-colors block"
+           title="ตรวจสอบอัปเดต">
           <div class="flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-safe flex-shrink-0"></span>
             <span class="text-[0.7rem] text-faint">VAS</span>
             <span class="text-[0.7rem] font-semibold text-muted">v0.1</span>
-            <span class="ml-auto text-[0.65rem] text-faint">online</span>
+            <span class="ml-auto text-[0.65rem] text-faint flex items-center gap-1">
+              online
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-40">
+                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+            </span>
           </div>
-        </div>
+        </a>
       </aside>
 
       <!-- Right column -->
@@ -634,10 +643,9 @@
           // 1. Swap content — sidebar/header ไม่ถูกแตะ
           var src  = doc.getElementById('spa-content');
           var dest = document.getElementById('spa-content-wrap');
-          if (src && dest) {
-            dest.innerHTML = src.innerHTML;
-            execScripts(dest);
-          }
+          if (!src || !dest) { location.href = url; return; } // fallback: partial ไม่มี #spa-content
+          dest.innerHTML = src.innerHTML;
+          execScripts(dest);
 
           // 2. Update header title
           var meta = doc.querySelector('meta[name="spa-header-title"]');

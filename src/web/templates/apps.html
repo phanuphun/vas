@@ -1,6 +1,6 @@
 {% extends base_template %}
-{% block page_title %}Settings — VAS{% endblock %}
-{% block header_title %}Settings{% endblock %}
+{% block page_title %}โปรแกรมเพิ่มเติม — VAS{% endblock %}
+{% block header_title %}โปรแกรมเพิ่มเติม{% endblock %}
 
 {% block content %}
 <style>
@@ -48,34 +48,24 @@
 
   <!-- ── 1. Page Header ─────────────────────────────────────────── -->
   <div class="border-b border-line/10 pb-4">
-    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · Settings</p>
-    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">Settings</h1>
-    <p class="text-[0.82rem] text-muted mt-1">จัดการ software, การตั้งค่าระบบ และความปลอดภัย</p>
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · โปรแกรมเพิ่มเติม</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">โปรแกรมเพิ่มเติม</h1>
+    <p class="text-[0.82rem] text-muted mt-1">ติดตั้งและจัดการ software ที่ VAS รองรับ</p>
   </div>
 
   <!-- ── 2. Section Menu ────────────────────────────────────────── -->
   <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
     <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
-      {% set sub_nav = [
-        ("software", "lucide:package",      "Software",  false),
-        ("hardware", "lucide:cpu",          "Hardware",  false),
-        ("general",  "lucide:sliders",      "General",   true),
-        ("network",  "lucide:network",      "Network",   true),
-        ("security", "lucide:shield-check", "Security",  true),
-      ] %}
-      {% for tab_id, tab_icon, tab_label, is_soon in sub_nav %}
-      <button type="button"
-              data-tab="{{ tab_id }}"
-              onclick="setTab('{{ tab_id }}')"
-              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors
-                     {{ 'bg-accent/8 text-accent font-semibold' if tab_id == 'software' else 'text-muted hover:bg-surface hover:text-ink' }}">
-        <iconify-icon icon="{{ tab_icon }}" width="13" height="13" class="flex-shrink-0"></iconify-icon>
-        {{ tab_label }}
-        {% if is_soon %}
-        <span class="text-[0.58rem] text-faint font-normal ml-0.5">soon</span>
-        {% endif %}
+      <button type="button" data-tab="software" onclick="setTab('software')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors bg-accent/8 text-accent font-semibold">
+        <iconify-icon icon="lucide:package" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        Software
       </button>
-      {% endfor %}
+      <button type="button" data-tab="source" onclick="setTab('source')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+        <iconify-icon icon="lucide:server" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        แหล่งดาวน์โหลด
+      </button>
     </div>
   </nav>
 
@@ -114,24 +104,152 @@
 
     </div>
 
-    <!-- Hardware tab -->
-    <div id="tab-hardware" class="tab-panel flex flex-col gap-4">
-      <div id="hw-loading" class="bg-card border border-line/10 rounded-xl px-4 py-10 flex items-center justify-center gap-2 text-faint text-[0.84rem]">
-        <span class="spin"></span> กำลังตรวจสอบสถานะ...
-      </div>
-      <div id="hw-list" class="flex flex-col gap-4" style="display:none;"></div>
-    </div>
+    <!-- Download Source tab (mock-up) -->
+    <div id="tab-source" class="tab-panel flex flex-col gap-4">
 
-    <!-- Placeholder tabs -->
-    {% for tab_id, tab_label in [("general","General"),("network","Network"),("security","Security")] %}
-    <div id="tab-{{ tab_id }}" class="tab-panel flex flex-col gap-4">
-      <div class="bg-card border border-line/10 rounded-xl px-6 py-16 flex flex-col items-center gap-3 text-center">
-        <iconify-icon icon="lucide:construction" width="28" height="28" class="text-faint"></iconify-icon>
-        <div class="text-[0.88rem] font-semibold text-muted">{{ tab_label }} — Coming soon</div>
-        <div class="text-[0.75rem] text-faint">ส่วนนี้กำลังพัฒนา</div>
+      <!-- Info callout -->
+      <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-accent/5 border-accent/18 text-muted">
+        <iconify-icon icon="lucide:info" width="14" height="14" class="flex-shrink-0 mt-0.5 text-accent"></iconify-icon>
+        <span>หน้านี้เป็น <strong class="text-ink">mock-up</strong> — ฟีเจอร์นี้ยังไม่ได้ implement
+          ดู <a href="#" class="text-accent underline underline-offset-2">docs/download-source.md</a> สำหรับ spec และแผนการพัฒนา</span>
       </div>
+
+      <!-- Card 1: Global source selector -->
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8 flex items-center justify-between">
+          <div>
+            <h3 class="text-[0.88rem] font-semibold text-ink">แหล่งดาวน์โหลดหลัก</h3>
+            <p class="text-[0.72rem] text-muted mt-0.5">กำหนดว่า VAS จะดึง package จากที่ไหนเป็น default</p>
+          </div>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-surface border-line/12 text-faint">
+            ยังไม่บันทึก
+          </span>
+        </div>
+
+        <!-- Option A: VAS Default -->
+        <label class="flex items-start gap-4 px-4 py-4 border-b border-line/8 cursor-pointer hover:bg-surface/50 transition-colors">
+          <input type="radio" name="global-source" value="default" checked
+                 class="mt-0.5 accent-accent flex-shrink-0">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[0.88rem] font-semibold text-ink">VAS Default</span>
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-safe/8 border-safe/22 text-[#0f766e]">
+                <iconify-icon icon="lucide:check" width="9" height="9"></iconify-icon>ใช้งานอยู่
+              </span>
+            </div>
+            <p class="text-[0.75rem] text-muted mt-0.5 leading-snug">
+              ดาวน์โหลดจาก internet — ใช้ latest stable version ของแต่ละ package เสมอ (apt, nodesource, npm official)
+            </p>
+            <div class="mt-2 flex flex-col gap-1">
+              <div class="flex items-center gap-2 text-[0.7rem] text-faint">
+                <iconify-icon icon="lucide:link" width="10" height="10" class="flex-shrink-0"></iconify-icon>
+                <span class="font-display">node</span>
+                <span class="text-line/40">→</span>
+                <span class="font-mono text-[0.67rem]">https://deb.nodesource.com/node_22.x</span>
+              </div>
+              <div class="flex items-center gap-2 text-[0.7rem] text-faint">
+                <iconify-icon icon="lucide:link" width="10" height="10" class="flex-shrink-0"></iconify-icon>
+                <span class="font-display">docker</span>
+                <span class="text-line/40">→</span>
+                <span class="font-mono text-[0.67rem]">https://download.docker.com/linux/ubuntu</span>
+              </div>
+              <div class="flex items-center gap-2 text-[0.7rem] text-faint">
+                <iconify-icon icon="lucide:link" width="10" height="10" class="flex-shrink-0"></iconify-icon>
+                <span class="font-display">pm2</span>
+                <span class="text-line/40">→</span>
+                <span class="font-mono text-[0.67rem]">https://registry.npmjs.org</span>
+              </div>
+            </div>
+          </div>
+        </label>
+
+        <!-- Option B: On-Premise Server -->
+        <label class="flex items-start gap-4 px-4 py-4 cursor-pointer hover:bg-surface/50 transition-colors" id="onprem-label">
+          <input type="radio" name="global-source" value="onpremise"
+                 class="mt-0.5 accent-accent flex-shrink-0" onchange="toggleOnPrem(this.checked)">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[0.88rem] font-semibold text-ink">On-Premise Server</span>
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-surface border-line/12 text-faint">ยังไม่ตั้งค่า</span>
+            </div>
+            <p class="text-[0.75rem] text-muted mt-0.5 leading-snug">
+              ใช้ server ภายในองค์กรที่ lock version เอาไว้ — เหมาะสำหรับ production ที่ต้องการ reproducible build
+            </p>
+
+            <!-- On-prem config fields (hidden until radio selected) -->
+            <div id="onprem-fields" class="mt-3 flex flex-col gap-3" style="display:none;">
+              <div class="flex flex-col gap-1.5">
+                <label class="text-[0.75rem] font-semibold text-muted">URL ของ server</label>
+                <div class="flex items-center gap-2">
+                  <input type="text" placeholder="https://packages.internal.company.com"
+                         class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition font-mono"
+                         disabled>
+                  <button disabled
+                          class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-line/15 rounded-lg bg-surface text-faint text-[0.8rem] font-semibold cursor-not-allowed whitespace-nowrap">
+                    <iconify-icon icon="lucide:wifi" width="13" height="13"></iconify-icon>
+                    ทดสอบ
+                  </button>
+                </div>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label class="text-[0.75rem] font-semibold text-muted">API Token <span class="text-faint font-normal">(optional)</span></label>
+                <input type="password" placeholder="••••••••••••••••"
+                       class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition"
+                       disabled>
+              </div>
+              <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-caution/8 border-caution/25 text-[0.78rem] text-[#92660b]">
+                <iconify-icon icon="lucide:triangle-alert" width="13" height="13" class="flex-shrink-0 mt-0.5"></iconify-icon>
+                <span>server ต้องรองรับ VAS Package API spec — ดู <code class="font-mono text-[0.72rem] bg-caution/10 px-1 rounded">docs/download-source.md</code></span>
+              </div>
+            </div>
+          </div>
+        </label>
+      </div>
+
+      <!-- Card 2: Per-package override (mock-up, disabled) -->
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden opacity-50 pointer-events-none select-none">
+        <div class="px-4 py-3 border-b border-line/8 flex items-center justify-between">
+          <div>
+            <h3 class="text-[0.88rem] font-semibold text-ink">Override รายบุคคล</h3>
+            <p class="text-[0.72rem] text-muted mt-0.5">กำหนด source แต่ละ package แตกต่างจาก global ได้</p>
+          </div>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-surface border-line/12 text-faint">
+            ยังไม่ implement
+          </span>
+        </div>
+        <!-- Mock table rows -->
+        {% for pkg_name, pkg_source in [
+          ("Git",          "VAS Default"),
+          ("Docker",       "VAS Default"),
+          ("Node.js",      "VAS Default"),
+          ("PM2",          "VAS Default"),
+          ("WireGuard",    "VAS Default"),
+          ("OpenSSH",      "VAS Default"),
+          ("AnyDesk",      "VAS Default"),
+        ] %}
+        <div class="flex items-center gap-4 px-4 py-3 border-b border-line/6">
+          <div class="flex-1 text-[0.84rem] font-medium text-ink">{{ pkg_name }}</div>
+          <div class="flex items-center gap-2">
+            <span class="text-[0.72rem] text-faint">{{ pkg_source }}</span>
+            <div class="px-2.5 py-1 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] flex items-center gap-1">
+              <iconify-icon icon="lucide:chevron-down" width="11" height="11"></iconify-icon>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Save bar (mock-up, disabled) -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex items-center justify-between opacity-50">
+        <span class="text-[0.78rem] text-muted">บันทึกการตั้งค่าแหล่งดาวน์โหลด</span>
+        <button disabled
+                class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold cursor-not-allowed">
+          <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>
+          บันทึก
+        </button>
+      </div>
+
     </div>
-    {% endfor %}
 
   </div>
 </div>
@@ -279,55 +397,7 @@
     list.style.display = "";
   }
 
-  function renderHardware(pkgs, cats) {
-    var hwPkgs = pkgs.filter(function (p) { return p.category === "hardware"; });
-    var list = document.getElementById("hw-list");
 
-    if (!hwPkgs.length) {
-      list.innerHTML = '<div class="bg-card border border-line/10 rounded-xl px-4 py-10 flex flex-col items-center gap-2 text-center text-faint text-[0.84rem]">ไม่มีรายการ</div>';
-    } else {
-      var catLabel = (cats["hardware"] || "Hardware").toUpperCase();
-      var html = '<div class="bg-card border border-line/10 rounded-xl overflow-hidden">';
-      html += '<div class="px-4 py-3 border-b border-line/8">';
-      html += '<h3 class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-faint">' + catLabel + '</h3>';
-      html += '</div>';
-      hwPkgs.forEach(function (p) { html += hwRowHtml(p); });
-      html += '</div>';
-      list.innerHTML = html;
-    }
-    document.getElementById("hw-loading").style.display = "none";
-    list.style.display = "";
-  }
-
-  function hwRowHtml(p) {
-    var logoSrc = p.logo ? "/public/images/logo/" + encodeURIComponent(p.logo) : FALLBACK_LOGO;
-    var applied = p.installed;
-
-    var statusBadge = applied
-      ? '<span class="zone zone-safe">ตั้งค่าแล้ว</span>'
-      : '<span class="zone zone-neutral">ยังไม่ได้ตั้งค่า</span>';
-
-    var btn = applied
-      ? '<button disabled class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
-          '<iconify-icon icon="lucide:check" width="12" height="12"></iconify-icon>Applied</button>'
-      : '<button onclick="installPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
-          'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
-          '<iconify-icon icon="lucide:settings-2" width="12" height="12"></iconify-icon>ตั้งค่า</button>';
-
-    return '<div class="pkg-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" id="card-' + p.id + '">' +
-      '<img src="' + logoSrc + '" alt="' + esc(p.name) + '" ' +
-        'class="w-10 h-10 object-contain rounded-lg flex-shrink-0 border border-line/8 bg-white p-0.5" ' +
-        'onerror="this.src=\'' + FALLBACK_LOGO + '\'">' +
-      '<div class="flex-1 min-w-0">' +
-        '<div class="flex items-center gap-2 flex-wrap">' +
-          '<span class="text-[0.88rem] font-semibold text-ink font-display">' + esc(p.name) + '</span>' +
-          statusBadge +
-        '</div>' +
-        '<p class="text-[0.75rem] text-muted mt-0.5 leading-snug">' + esc(p.description) + '</p>' +
-      '</div>' +
-      '<div class="flex-shrink-0">' + btn + '</div>' +
-    '</div>';
-  }
 
   function rowHtml(p) {
     var hasChildren = (p.children && p.children.length > 0);
@@ -726,22 +796,29 @@
     input.focus();
   };
 
+
+  // ── Download source tab helpers (mock-up only) ────────────────
+  window.toggleOnPrem = function (checked) {
+    var fields = document.getElementById("onprem-fields");
+    if (fields) fields.style.display = checked ? "" : "none";
+  };
+
   // ── Load ──────────────────────────────────────────────────────
   function loadPackages() {
     document.getElementById("pkg-loading").style.display = "";
     document.getElementById("pkg-list").style.display = "none";
     fetch("/api/settings/packages")
       .then(function (r) { return r.json(); })
-      .then(function (d) { renderPackages(d.packages, d.categories); renderHardware(d.packages, d.categories); })
+      .then(function (d) { renderPackages(d.packages, d.categories); })
       .catch(function (e) {
         document.getElementById("pkg-loading").textContent = "Error: " + e;
       });
   }
 
-  // ใช้ immediate call แทน DOMContentLoaded เพื่อรองรับ SPA navigate
-  // (DOMContentLoaded จะไม่ fire อีกหลัง SPA swap)
-  setTab("software");
-  loadPackages();
+  document.addEventListener("DOMContentLoaded", function () {
+    setTab("software");
+    loadPackages();
+  });
 })();
 </script>
 {% endblock %}

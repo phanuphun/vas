@@ -50,7 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     update = subcommands.add_parser("update", help="Update the installed CLI wrapper source from GitHub.")
     update.add_argument("--repo", default=DEFAULT_REPO)
-    update.add_argument("--version", default="latest", help="Git tag to install, or latest for main.")
+    update.add_argument("--version", default="latest", help="Git tag to install, or latest for branch head.")
+    update.add_argument("--branch", default="main", help="Branch to pull from when --version is latest.")
     update.add_argument("--install-dir", type=Path, default=DEFAULT_INSTALL_DIR, help=argparse.SUPPRESS)
     update.add_argument("--bin-dir", type=Path, default=Path("/usr/local/bin"), help=argparse.SUPPRESS)
 
@@ -297,6 +298,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             runner,
             repo=args.repo,
             version=args.version,
+            branch=args.branch,
             install_dir=args.install_dir,
             bin_dir=args.bin_dir,
         ).update()

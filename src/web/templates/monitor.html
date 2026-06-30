@@ -572,10 +572,10 @@
     btn.addEventListener("click", function () { setInterval_(parseInt(btn.dataset.sec)); });
   });
 
-  document.addEventListener("DOMContentLoaded", function () {
-    mon.load();
-    setInterval_(5); // default 5s
-  });
+  // ใช้ immediate call แทน DOMContentLoaded เพื่อรองรับ SPA navigate
+  // (DOMContentLoaded จะไม่ fire อีกหลัง SPA swap)
+  mon.load();
+  setInterval_(5);
 
   // SPA cleanup
   window.__vasCleanup = window.__vasCleanup || [];

@@ -2,6 +2,63 @@
 
 ## [2026-07-01]
 
+### เปลี่ยนชื่อ Settings → โปรแกรมเพิ่มเติม + Download Source tab
+- เปลี่ยนชื่อเมนู "ตั้งค่า" → "โปรแกรมเพิ่มเติม" พร้อม icon `package-plus`
+- เปลี่ยน route `/settings` → `/apps` (endpoint `apps_page`); `/settings` redirect 301 → `/apps`
+- สร้าง template ใหม่ `apps.html` (ลบ `settings.html` ออกจาก route หลัก)
+- ลบ tab Hardware, General, Network, Security ออก — เหลือเฉพาะ Software
+- เพิ่ม tab "แหล่งดาวน์โหลด" (mock-up): เลือกระหว่าง VAS Default กับ On-Premise Server พร้อม URL input / API token / test connection
+- เพิ่ม per-package override table (mock-up, disabled)
+- ลบ `renderHardware` และ `hwRowHtml` ออกจาก JS ของ apps.html
+- เพิ่ม `docs/download-source.md` — spec สำหรับ On-Premise Package API, data model, และแผนการ implement
+
+
+
+### เพิ่มหน้าอัปเดตระบบ (`/update`) พร้อม Download Progress Bar
+- เพิ่มหน้า `/update` — ตรวจสอบ GitHub releases และแสดงเวอร์ชั่นปัจจุบัน vs ล่าสุด
+- เพิ่ม API `GET /api/update/check` — เรียก GitHub API (`releases/latest`) เปรียบเทียบกับ `APP_VERSION`
+- เพิ่ม API `GET /api/update/stream` — SSE stream ส่ง progress events ระหว่าง download + extract + install wrappers (รองรับ `Content-Length` → คำนวณ % จริง)
+- เพิ่ม API `POST /api/server/restart` — restart via PM2 หรือ systemd (ใช้ thread delay 1.5s)
+- `base.html` — footer (`VAS v0.1 · online`) เปลี่ยนเป็น `<a class="nav-link">` ชี้ไป `/update`; SPA router intercept ได้ปกติ
+- UI: progress bar 6px + step indicators (ตรวจสอบ / ดาวน์โหลด / แตกไฟล์ / ติดตั้ง / เสร็จสิ้น), terminal log box, done bar พร้อมปุ่ม restart
+
+
+
+### เพิ่ม --branch parameter ใน install.sh และ vas update
+- `scripts/install.sh` รับ `--branch <name>` (default: `main`) และใช้ `${BRANCH}` แทน hardcode `/refs/heads/main`
+- `src/services/updater.py` — `SelfUpdater.__init__()` รับ `branch: str = "main"` และ `archive_url()` ใช้ `self.branch` เมื่อ version เป็น `latest`
+- `src/cli.py` — `update` subparser เพิ่ม `--branch` argument และ pass ไปยัง `SelfUpdater`
+- พฤติกรรมเดิมไม่เปลี่ยน: ไม่ระบุ `--branch` → ดึงจาก `main` เหมือนเดิม; ระบุ `--version <tag>` → ใช้ Git tag (branch ถูก ignore)
+- แก้ไข pre-existing bug: `src/services/updater.py` ถูก truncate ที่ `_can_import_flask()` — append บรรทัดที่หายไป
+
+### FIX display.html — Config Files tab เปิดดูไฟล์ไม่ได้
+- ลบ `.config-pre` dark theme CSS (ไม่ตรง design system)
+- เปลี่ยน `<pre>` เป็น `<textarea readonly>` + `div.p-4` wrapper ตาม INSTRUCTIONS.md (Accordion Card Convention)
+- แก้ JS: เพิ่ม `window.toggleConfig()` ที่ตรงกับ `onclick` ใน HTML, และ `window.loadConfig()` ที่ใช้ `.value =` แทน `.textContent =`
+- แก้ padding toolbar จาก `py-4` → `py-3` ให้ตรง standard
+
+### FIX SPA — หน้าค้าง skeleton หลัง navigate (DOMContentLoaded ไม่ fire ซ้ำ)
+- **Root cause**: `monitor.html`, `settings.html`, `display.html`, `database.html`, `qr.html` ใช้ `document.addEventListener("DOMContentLoaded", ...)` เพื่อ init — event นี้ fire เพียงครั้งเดียวตอน full page load; หลัง SPA swap `execScripts()` re-run script แต่ callback ไม่ถูกเรียก → หน้าค้าง skeleton / loading ตลอด ต้อง refresh
+- แก้: เปลี่ยนทุกไฟล์เป็น immediate call ตรงๆ ท้าย IIFE (DOM พร้อมแล้วตอน `execScripts()` รัน)
+
+### FIX SPA Router — extra_scripts ไม่ถูก execute หลัง navigate
+- **Root cause**: `{% block extra_scripts %}` อยู่นอก `<div id="spa-content">` ใน `base_partial.html` → SPA router swap เฉพาะ content block, scripts ของแต่ละหน้าไม่รัน → ไม่มี event listeners → คลิก element ไม่ได้ ต้อง reload เอง
+- แก้: ย้าย `{% block extra_scripts %}` เข้าไปใน `#spa-content` ใน `base_partial.html` → `execScripts()` จับ scripts ได้และ execute หลัง swap
+- เพิ่ม hard fallback ใน `navigate()`: ถ้า `#spa-content` ไม่พบใน partial response → `location.href = url` แทน silent fail
+
+
+
+### Settings Software — Sub-item: PM2 ฝังใต้ Node.js
+- PM2 ไม่แสดงเป็น row แยกอีกต่อไป — render เป็น sub-row อยู่ภายใต้ Node.js พร้อม connector line สีม่วงอ่อน
+- เมื่อ Node.js ยังไม่ได้ติดตั้ง → ปุ่ม "ติดตั้ง" เปิด sub-select modal ให้เลือกว่าจะลง Node.js อย่างเดียวหรือพร้อม PM2
+- เมื่อ Node.js ติดตั้งแล้ว → PM2 sub-row แสดงปุ่ม Install ของตัวเอง (ถ้ายังไม่ได้ลง)
+- `renderPackages` ข้ามการ render child IDs เป็น top-level row
+- `filterPackages` อัปเดตให้ sub-row ค้นหาได้ — ถ้า sub-row match แต่ parent ไม่ match ก็ยังแสดง parent
+- `streamInstall` รับ optional `onComplete` callback เพื่อรองรับ sequential install
+- เพิ่ม `installSequential(pkgIds)` — ติดตั้งทีละ package ใน modal เดียวกัน แสดง separator label แต่ละ package
+
+
+
 ### คืน SPA Router ใน base.html (sidebar ไม่ Re-Render)
 - เพิ่ม `id="spa-content-wrap"` ใน wrapper div ภายใน `#spa-main` เพื่อเป็น swap target
 - เพิ่ม SPA router script ใน `base.html` — intercept `.nav-link` clicks, fetch partial ด้วย `X-VAS-Partial: 1`, swap เฉพาะ `#spa-content-wrap` (sidebar/header ไม่ถูก re-render)

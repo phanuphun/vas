@@ -1,156 +1,179 @@
 {% extends base_template %}
-{% set title = "WireGuard" %}
-{% block header_title %}VPN{% endblock %}
+{% block header_title %}Wireguard{% endblock %}
 
-{% block header_actions %}
-<span id="connectionBadge"
-  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
-    {% if vpn.service_active == 'active' and vpn.interface_exists %}
-      bg-safe/8 border-safe/22 text-[#0f766e]
-    {% else %}
-      bg-danger/8 border-danger/22 text-[#b1453a]
-    {% endif %}">
-  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0
-    {% if vpn.service_active == 'active' and vpn.interface_exists %}bg-safe{% else %}bg-danger{% endif %}"></span>
-  {{ 'Connected' if vpn.service_active == 'active' and vpn.interface_exists else 'Disconnected' }}
-</span>
-{% endblock %}
 
-{% block extra_styles %}
+{% block content %}
 <style>
-  /* ── Tab panels ──────────────────────────────────────────── */
   .tab-panel { display: none; }
-  .tab-panel.is-active { display: flex; flex-direction: column; }
+  .tab-panel.is-active { display: flex; flex-direction: column; animation: tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-  /* ── Validation panel ────────────────────────────────────── */
   .val-panel { padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.82rem; border-width: 1px; border-style: solid; }
-  .val-panel ul { list-style: none; margin-top: 0.35rem; display: flex; flex-direction: column; gap: 0.2rem; }
+  .val-panel ul { list-style: none; margin-top: 0.35rem; display: flex; flex-direction: column; gap: 0.25rem; }
   .val-panel li { font-size: 0.78rem; }
   .val-ok   { background: rgb(var(--c-safe)    / 0.06); border-color: rgb(var(--c-safe)    / 0.22); color: #0f766e; }
   .val-warn { background: rgb(var(--c-caution) / 0.08); border-color: rgb(var(--c-caution) / 0.25); color: #92660b; }
 
-  /* ── Result message ──────────────────────────────────────── */
   .msg { font-size: 0.82rem; min-height: 1.2rem; }
   .msg-ok    { color: #0f766e; }
   .msg-error { color: #b1453a; }
 
-  /* ── Confirm Modal ───────────────────────────────────────── */
-  #confirm-modal { display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; }
+  #wireguardConfig { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; }
+  .history-accordion[hidden] { display: none; }
+
+#confirm-modal { display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; }
   #confirm-modal.is-open { display: flex; }
   #confirm-backdrop { position: absolute; inset: 0; background: rgb(var(--c-ink) / 0.35); backdrop-filter: blur(2px); }
   #confirm-box { position: relative; background: rgb(var(--c-card)); border: 1px solid rgb(var(--c-line) / 0.12); border-radius: 1rem; box-shadow: 0 8px 32px rgb(0 0 0 / 0.12); width: 100%; max-width: 400px; margin: 1rem; padding: 1.5rem; animation: fadeUp 0.18s ease forwards; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 </style>
-{% endblock %}
 
-{% block content %}
-<section data-interface="{{ vpn.interface_name }}">
+<div class="flex flex-col gap-4" data-interface="{{ vpn.interface_name }}">
 
-  <!-- ── 1. PAGE HEADER ─────────────────────────────────────── -->
+  <!-- ── 1. PAGE HEADER ── -->
   <div class="border-b border-line/10 pb-4">
     <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · เครือข่าย</p>
-    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">WireGuard VPN</h1>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">WireGuard</h1>
     <p class="text-[0.82rem] text-muted mt-1">จัดการ config และตรวจสอบสถานะ WireGuard interface</p>
   </div>
 
-  <!-- ── 2. SECTION MENU (Tab Nav) ─────────────────────────── -->
+  <!-- ── 2. TAB NAV ── -->
   <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    {% set wg_tabs = [
+      ("status",  "lucide:shield",      "สถานะ"),
+      ("config",  "lucide:file-text",   "Config Files"),
+      ("sync",    "lucide:refresh-cw",  "Sync"),
+      ("history", "lucide:clock",       "ประวัติ"),
+    ] %}
     <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
-
-      <button data-tab="tab-status"
-              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors
-                     bg-accent/8 text-accent font-semibold">
-        <!-- shield icon -->
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        สถานะ
+      {% for tid, icon, label in wg_tabs %}
+      <button type="button" data-tab="{{ tid }}" onclick="wgTab('{{ tid }}')"
+              class="wg-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+        <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>{{ label }}</span>
       </button>
-
-      <button data-tab="tab-config"
-              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors
-                     text-muted hover:bg-surface hover:text-ink">
-        <!-- file-text icon -->
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-        Config
-      </button>
-
-      <button data-tab="tab-history"
-              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors
-                     text-muted hover:bg-surface hover:text-ink">
-        <!-- clock icon -->
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        ประวัติ
-      </button>
-
+      {% endfor %}
     </div>
   </nav>
 
-  <!-- ── 3. CONTENT SECTION ────────────────────────────────── -->
+  <!-- ── 3. CONTENT ── -->
   <div>
 
-    <!-- ══ TAB: สถานะ ════════════════════════════════════════ -->
-    <div id="tab-status" class="tab-panel is-active gap-4">
+    <!-- ════════ TAB: สถานะ ════════ -->
+    <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
 
-      <!-- Status rows card -->
+      <!-- Stat grid: Tools / Service Enabled / Service Active / Connection -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+
+        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center
+            {% if vpn.wg_installed %}bg-safe/8{% else %}bg-danger/8{% endif %}">
+            <iconify-icon icon="lucide:wrench" width="15" height="15"
+              class="{% if vpn.wg_installed %}text-safe{% else %}text-danger{% endif %}"></iconify-icon>
+          </div>
+          <div>
+            <p class="font-display text-[1.15rem] font-bold leading-none
+              {% if vpn.wg_installed %}text-safe{% else %}text-danger{% endif %}">
+              {{ 'ติดตั้งแล้ว' if vpn.wg_installed else 'ไม่มี' }}
+            </p>
+            <p class="text-[0.7rem] text-faint mt-0.5">WireGuard Tools</p>
+          </div>
+        </div>
+
+        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center
+            {% if vpn.service_enabled == 'enabled' %}bg-safe/8{% else %}bg-surface{% endif %}">
+            <iconify-icon icon="lucide:power" width="15" height="15"
+              class="{% if vpn.service_enabled == 'enabled' %}text-safe{% else %}text-faint{% endif %}"></iconify-icon>
+          </div>
+          <div>
+            <p class="font-display text-[1.15rem] font-bold leading-none
+              {% if vpn.service_enabled == 'enabled' %}text-safe{% else %}text-muted{% endif %}">
+              {{ vpn.service_enabled or 'unknown' }}
+            </p>
+            <p class="text-[0.7rem] text-faint mt-0.5">Service Enabled</p>
+          </div>
+        </div>
+
+        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center
+            {% if vpn.service_active == 'active' %}bg-safe/8{% else %}bg-danger/8{% endif %}">
+            <iconify-icon icon="lucide:activity" width="15" height="15"
+              class="{% if vpn.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}"></iconify-icon>
+          </div>
+          <div>
+            <p class="font-display text-[1.15rem] font-bold leading-none
+              {% if vpn.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}">
+              {{ vpn.service_active or 'unknown' }}
+            </p>
+            <p class="text-[0.7rem] text-faint mt-0.5">Service Active</p>
+          </div>
+        </div>
+
+        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center
+            {% if vpn.interface_exists %}bg-safe/8{% else %}bg-surface{% endif %}">
+            <iconify-icon icon="lucide:wifi" width="15" height="15"
+              class="{% if vpn.interface_exists %}text-safe{% else %}text-faint{% endif %}"></iconify-icon>
+          </div>
+          <div>
+            <p class="font-display text-[1.15rem] font-bold leading-none
+              {% if vpn.interface_exists %}text-safe{% else %}text-muted{% endif %}">
+              {{ vpn.interface_name }}
+            </p>
+            <p class="text-[0.7rem] text-faint mt-0.5">Interface</p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- System info card -->
       <div class="bg-card border border-line/10 rounded-xl">
-        <div class="flex items-center px-4 py-3 border-b border-line/10">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:info" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
           <h2 class="text-[0.88rem] font-semibold text-ink">ข้อมูลระบบ</h2>
         </div>
         <div class="divide-y divide-line/7">
 
-          <!-- Tool -->
           <div class="flex items-start gap-3 px-4 py-3">
             <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Tool</span>
-            <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap min-w-0">
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
-                {% if vpn.wg_installed %}bg-safe/8 border-safe/22 text-[#0f766e]{% else %}bg-danger/8 border-danger/22 text-[#b1453a]{% endif %}">
+            <span class="flex-1 flex items-center gap-1.5 flex-wrap min-w-0">
+              <span class="zone {% if vpn.wg_installed %}zone-safe{% else %}zone-danger{% endif %}">
                 {{ 'OK' if vpn.wg_installed else 'MISSING' }}
               </span>
-              <span class="break-all text-faint text-[0.78rem]">{{ vpn.wg_version or "not installed" }}</span>
+              <span class="break-all text-faint text-[0.78rem]">{{ vpn.wg_version or 'not installed' }}</span>
             </span>
           </div>
 
-          <!-- App config -->
-          <div class="flex items-start gap-3 px-4 py-3">
-            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">App config</span>
-            <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap min-w-0">
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
-                {% if vpn.app_config_exists %}bg-safe/8 border-safe/22 text-[#0f766e]{% else %}bg-caution/10 border-caution/25 text-[#92660b]{% endif %}">
-                {{ 'OK' if vpn.app_config_exists else 'WARN' }}
-              </span>
-              <span class="break-all text-faint text-[0.78rem]">{{ vpn.app_config_path.as_posix() }}</span>
-            </span>
-          </div>
-
-          <!-- Active config -->
-          <div class="flex items-start gap-3 px-4 py-3">
-            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Active config</span>
-            <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap min-w-0">
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
-                {% if vpn.active_config_exists %}bg-safe/8 border-safe/22 text-[#0f766e]{% else %}bg-caution/10 border-caution/25 text-[#92660b]{% endif %}">
-                {{ 'OK' if vpn.active_config_exists else 'WARN' }}
-              </span>
-              <span class="break-all text-faint text-[0.78rem]">{{ vpn.active_config_path.as_posix() }}</span>
-            </span>
-          </div>
-
-          <!-- History -->
           <div class="flex items-start gap-3 px-4 py-3">
             <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">History</span>
-            <span class="flex-1 text-[0.82rem] text-ink flex items-center gap-1.5 flex-wrap min-w-0">
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
-                {% if vpn.history_exists %}bg-safe/8 border-safe/22 text-[#0f766e]{% else %}bg-caution/10 border-caution/25 text-[#92660b]{% endif %}">
+            <span class="flex-1 flex items-center gap-1.5 flex-wrap min-w-0">
+              <span class="zone {% if vpn.history_exists %}zone-safe{% else %}zone-caution{% endif %}">
                 {{ 'OK' if vpn.history_exists else 'WARN' }}
               </span>
               <span class="break-all text-faint text-[0.78rem]">{{ vpn.history_dir.as_posix() }}</span>
             </span>
           </div>
 
-          <!-- Service -->
           <div class="flex items-start gap-3 px-4 py-3">
             <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Service</span>
-            <span class="text-[0.82rem] text-ink font-mono">{{ vpn.service_enabled }} / {{ vpn.service_active }}</span>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="zone {% if vpn.service_enabled == 'enabled' %}zone-safe{% else %}zone-mute{% endif %}">
+                {{ vpn.service_enabled or 'unknown' }}
+              </span>
+              <span class="text-faint text-[0.72rem]">/</span>
+              <span class="zone {% if vpn.service_active == 'active' %}zone-safe{% else %}zone-mute{% endif %}">
+                {{ vpn.service_active or 'unknown' }}
+              </span>
+            </div>
           </div>
 
-          <!-- Connection -->
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Interface</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ vpn.interface_name }}</span>
+          </div>
+
           <div class="flex items-start gap-3 px-4 py-3">
             <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Connection</span>
             <span class="text-[0.82rem] text-ink">{{ vpn_connection_label(vpn) }}</span>
@@ -159,165 +182,276 @@
         </div>
       </div>
 
-      <!-- Actions card -->
-      <div class="bg-card border border-line/10 rounded-xl">
-        <div class="flex items-center px-4 py-3 border-b border-line/10">
-          <h2 class="text-[0.88rem] font-semibold text-ink">การดำเนินการ</h2>
-        </div>
-        <div class="px-4 py-4 flex flex-col gap-3">
-
-          <div class="flex flex-col sm:flex-row gap-2">
-            <button data-wireguard-action="sync" type="button"
-                    class="flex-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
-              <!-- refresh-cw icon -->
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-              Sync active config
-            </button>
-            <button data-wireguard-action="unsync" type="button"
-                    class="flex-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 py-2.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
-              <!-- x-circle icon -->
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              Unsync active config
-            </button>
-          </div>
-
-          <p class="text-[0.75rem] text-faint leading-relaxed">
-            Sync เขียน app config ที่บันทึกไว้ลงใน WireGuard config และ restart interface
-          </p>
-
-          <div class="msg" id="wireguardResult" aria-live="polite"></div>
-        </div>
-      </div>
-
     </div><!-- /tab-status -->
 
 
-    <!-- ══ TAB: Config ═══════════════════════════════════════ -->
-    <div id="tab-config" class="tab-panel gap-4">
+    <!-- ════════ TAB: Config ════════ -->
+    <div id="tab-config" class="tab-panel flex flex-col gap-4">
 
-      <div class="bg-card border border-line/10 rounded-xl">
-
-        <!-- Card header -->
-        <div class="flex items-start justify-between gap-3 px-4 py-3 border-b border-line/10 flex-wrap">
-          <div class="min-w-0">
-            <h2 class="text-[0.88rem] font-semibold text-ink">App Config</h2>
-            <p class="text-[0.7rem] text-faint mt-0.5 break-all">{{ vpn.app_config_path.as_posix() }}</p>
+      <!-- App Config accordion card -->
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-app">
+        <button type="button" onclick="toggleCfg('app')"
+                class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+          <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+            <iconify-icon icon="lucide:file-text" width="16" height="16" class="text-muted"></iconify-icon>
           </div>
-          <!-- Action buttons: mobile wraps, desktop row -->
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <button id="loadTemplate" type="button"
-                    class="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors">
-              <!-- file-plus icon -->
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-              Template
-            </button>
-            <button id="validateConfig" type="button"
-                    class="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors">
-              <!-- check-circle icon -->
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-              Validate
-            </button>
-            <button id="saveConfig" type="button"
-                    class="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.78rem] font-semibold hover:bg-blue-700 transition-colors">
-              <!-- save icon -->
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-              Save
-            </button>
-            <button id="deleteConfig" type="button"
-                    class="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.78rem] font-semibold hover:bg-danger/5 transition-colors">
-              <!-- trash-2 icon -->
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-              Delete
-            </button>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-[0.88rem] text-ink font-display">App Config</span>
+              <span class="zone {{ 'zone-safe' if vpn.app_config_exists else 'zone-caution' }}">{{ 'OK' if vpn.app_config_exists else 'MISSING' }}</span>
+            </div>
+            <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ vpn.app_config_path.as_posix() }}</code>
+            <p class="text-[0.73rem] text-muted mt-1 leading-snug">ไฟล์ config ที่แก้ไขและบันทึกผ่าน VAS ก่อน sync ไปยัง WireGuard</p>
+            <div class="flex items-center gap-1 mt-1.5">
+              <iconify-icon icon="{{ 'lucide:check-circle' if vpn.app_config_exists else 'lucide:alert-circle' }}" width="11" height="11" class="{{ 'text-safe' if vpn.app_config_exists else 'text-caution' }}"></iconify-icon>
+              <span class="text-[0.68rem] {{ 'text-safe' if vpn.app_config_exists else 'text-caution' }}">{{ 'ไฟล์ config พบแล้ว' if vpn.app_config_exists else 'ยังไม่มีไฟล์ config' }}</span>
+            </div>
+          </div>
+          <iconify-icon icon="lucide:chevron-down" width="15" height="15"
+                        class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-app"></iconify-icon>
+        </button>
+        <div id="cfg-viewer-app" class="hidden border-t border-line/10">
+          <div class="flex items-center justify-between px-4 py-3 bg-surface/40 flex-wrap gap-2">
+            <span class="text-[0.72rem] font-semibold text-muted">แก้ไข Config</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button id="btnTemplate" type="button"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+                <iconify-icon icon="lucide:file-plus" width="11" height="11"></iconify-icon>Template
+              </button>
+              <button id="btnValidate" type="button"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+                <iconify-icon icon="lucide:check-circle" width="11" height="11"></iconify-icon>Validate
+              </button>
+              <button id="btnSave" type="button"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors">
+                <iconify-icon icon="lucide:save" width="11" height="11"></iconify-icon>Save
+              </button>
+              <button id="btnDelete" type="button"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors">
+                <iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Delete
+              </button>
+            </div>
+          </div>
+          <div class="p-4 flex flex-col gap-3">
+            <textarea id="wireguardConfig" spellcheck="false"
+                      class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition resize-y font-mono leading-relaxed min-h-[240px] outline-none">{{ config_content }}</textarea>
+            <div id="configValidation" class="val-panel {{ 'val-ok' if config_validation.valid else 'val-warn' }}">
+              <strong>{{ 'Valid config' if config_validation.valid else 'Config needs attention' }}</strong>
+              <ul>
+                {% for e in config_validation.errors %}<li>{{ e }}</li>{% endfor %}
+                {% for w in config_validation.warnings %}<li>{{ w }}</li>{% endfor %}
+                {% if config_validation.valid and not config_validation.warnings %}<li>No validation issues.</li>{% endif %}
+              </ul>
+            </div>
+            <div class="msg" id="configResult" aria-live="polite"></div>
           </div>
         </div>
-
-        <!-- Editor -->
-        <div class="p-4 flex flex-col gap-3">
-          <textarea id="wireguardConfig" spellcheck="false"
-                    class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition resize-y font-mono leading-relaxed min-h-[220px]">{{ config_content }}</textarea>
-
-          <div id="configValidation"
-               class="val-panel {{ 'val-ok' if config_validation.valid else 'val-warn' }}">
-            <strong>{{ 'Valid config' if config_validation.valid else 'Config needs attention' }}</strong>
-            <ul>
-              {% for error in config_validation.errors %}<li>{{ error }}</li>{% endfor %}
-              {% for warning in config_validation.warnings %}<li>{{ warning }}</li>{% endfor %}
-              {% if config_validation.valid and not config_validation.warnings %}<li>No validation issues.</li>{% endif %}
-            </ul>
-          </div>
-
-          <div class="msg" id="configResult" aria-live="polite"></div>
-        </div>
-
       </div>
+
+      <!-- Active Config accordion card (read-only) -->
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-active">
+        <button type="button" onclick="toggleCfg('active')"
+                class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+          <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+            <iconify-icon icon="lucide:server" width="16" height="16" class="text-muted"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-[0.88rem] text-ink font-display">Active Config</span>
+              <span class="zone {{ 'zone-safe' if vpn.active_config_exists else 'zone-mute' }}">{{ 'ACTIVE' if vpn.active_config_exists else 'NONE' }}</span>
+            </div>
+            <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ vpn.active_config_path.as_posix() }}</code>
+            <p class="text-[0.73rem] text-muted mt-1 leading-snug">ไฟล์ config ที่ใช้งานจริงโดย WireGuard — คัดลอกมาจาก app config ด้วย Sync</p>
+            <div class="flex items-center gap-1 mt-1.5">
+              <iconify-icon icon="{{ 'lucide:check-circle' if vpn.active_config_exists else 'lucide:minus-circle' }}" width="11" height="11" class="{{ 'text-safe' if vpn.active_config_exists else 'text-faint' }}"></iconify-icon>
+              <span class="text-[0.68rem] {{ 'text-safe' if vpn.active_config_exists else 'text-faint' }}">{{ 'กำลัง active อยู่' if vpn.active_config_exists else 'ยังไม่ได้ sync' }}</span>
+            </div>
+          </div>
+          <iconify-icon icon="lucide:chevron-down" width="15" height="15"
+                        class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-active"></iconify-icon>
+        </button>
+        <div id="cfg-viewer-active" class="hidden border-t border-line/10">
+          <div class="flex items-center justify-between px-4 py-3 bg-surface/40">
+            <span class="text-[0.72rem] font-semibold text-muted">เนื้อหาไฟล์ (อ่านอย่างเดียว)</span>
+            <button onclick="loadActiveConfig()" type="button"
+                    class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+              <iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Reload
+            </button>
+          </div>
+          <div class="p-4">
+            <textarea id="cfg-content-active" readonly spellcheck="false"
+                      class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[240px] outline-none resize-y cursor-default select-all"></textarea>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /tab-config -->
 
 
-    <!-- ══ TAB: ประวัติ ══════════════════════════════════════ -->
-    <div id="tab-history" class="tab-panel gap-4">
+    <!-- ════════ TAB: Sync ════════ -->
+    <div id="tab-sync" class="tab-panel flex flex-col gap-4">
+
+      <!-- Info banner -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+        <div class="text-[0.82rem] flex flex-col gap-1">
+          <span class="font-semibold text-ink">วิธีทำงานของ Sync</span>
+          <span class="text-muted leading-relaxed">
+            <strong>Sync</strong> คัดลอก app config ที่บันทึกไว้ไปยัง
+            <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">/etc/wireguard/wg0.conf</code>
+            แล้ว enable service และ restart — interface จะเชื่อมต่อทันที<br>
+            <strong>Unsync</strong> ปิดและ disable service, ลบ active config และ backup ไว้ใน history ก่อนลบ
+          </span>
+        </div>
+      </div>
+
+      <!-- Sync / Unsync cards -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">การดำเนินการ</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-4">
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+            <!-- Sync -->
+            <div class="border border-line/10 rounded-xl p-4 flex flex-col gap-3">
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-lg bg-accent/8 border border-accent/15 grid place-items-center flex-shrink-0">
+                  <iconify-icon icon="lucide:upload-cloud" width="15" height="15" class="text-accent"></iconify-icon>
+                </div>
+                <span class="text-[0.85rem] font-semibold text-ink">Sync</span>
+              </div>
+              <p class="text-[0.75rem] text-muted leading-relaxed">
+                เขียน app config ไปยัง
+                <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">/etc/wireguard/</code>
+                และ restart service ทันที
+              </p>
+              <button data-wg-action="sync" type="button"
+                      class="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+                <iconify-icon icon="lucide:refresh-cw" width="14" height="14"></iconify-icon>
+                Sync active config
+              </button>
+            </div>
+
+            <!-- Unsync -->
+            <div class="border border-line/10 rounded-xl p-4 flex flex-col gap-3">
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-lg bg-surface border border-line/15 grid place-items-center flex-shrink-0">
+                  <iconify-icon icon="lucide:x-circle" width="15" height="15" class="text-muted"></iconify-icon>
+                </div>
+                <span class="text-[0.85rem] font-semibold text-ink">Unsync</span>
+              </div>
+              <p class="text-[0.75rem] text-muted leading-relaxed">
+                ปิดและ disable service, ลบ
+                <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">/etc/wireguard/wg0.conf</code>
+                พร้อม backup ไว้ใน history
+              </p>
+              <button data-wg-action="unsync" type="button"
+                      class="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 py-2.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+                <iconify-icon icon="lucide:x-circle" width="14" height="14"></iconify-icon>
+                Unsync active config
+              </button>
+            </div>
+
+          </div>
+
+          <div class="msg" id="syncResult" aria-live="polite"></div>
+
+        </div>
+      </div>
+
+      <!-- Current status strip -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-center gap-3 flex-wrap">
+        <iconify-icon icon="lucide:activity" width="14" height="14" class="text-faint flex-shrink-0"></iconify-icon>
+        <span class="text-[0.78rem] text-muted font-medium">สถานะปัจจุบัน:</span>
+        <span class="text-[0.78rem] font-semibold {% if vpn.service_active == 'active' %}text-safe{% else %}text-muted{% endif %}">
+          service {{ vpn.service_active }}
+        </span>
+        <span class="text-faint text-[0.72rem]">·</span>
+        <span class="text-[0.78rem] {% if vpn.active_config_exists %}text-ink{% else %}text-caution{% endif %}">
+          active config: {{ 'พร้อม' if vpn.active_config_exists else 'ไม่พบ' }}
+        </span>
+        <span class="text-faint text-[0.72rem]">·</span>
+        <span class="text-[0.78rem] {% if vpn.app_config_exists %}text-ink{% else %}text-caution{% endif %}">
+          app config: {{ 'บันทึกแล้ว' if vpn.app_config_exists else 'ยังไม่มี' }}
+        </span>
+      </div>
+
+    </div><!-- /tab-sync -->
+
+
+    <!-- ════════ TAB: ประวัติ ════════ -->
+    <div id="tab-history" class="tab-panel flex flex-col gap-4">
 
       <div class="bg-card border border-line/10 rounded-xl">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-line/10">
-          <div class="min-w-0">
-            <h2 class="text-[0.88rem] font-semibold text-ink">Config History</h2>
-            <p class="text-[0.7rem] text-faint mt-0.5 break-all">{{ vpn.history_dir.as_posix() }}</p>
+        <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <iconify-icon icon="lucide:clock" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+            <div class="min-w-0">
+              <h2 class="text-[0.88rem] font-semibold text-ink">Config History</h2>
+              <code class="text-[0.68rem] text-faint font-mono break-all block mt-0.5">{{ vpn.history_dir.as_posix() }}</code>
+            </div>
           </div>
-          <button id="refreshHistory" type="button"
+          <button id="btnRefreshHistory" type="button"
                   class="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors flex-shrink-0">
-            <!-- refresh-cw icon -->
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            Refresh
+            <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Refresh
           </button>
         </div>
 
         <div id="historyList">
           {% for entry in history_entries %}
-          <div class="history-entry border-b border-line/7 last:border-b-0" data-history-id="{{ entry.id }}">
-            <button class="history-item w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-surface transition-colors text-left min-h-[52px]" type="button">
+          <div class="history-entry border-b border-line/7 last:border-b-0" data-hid="{{ entry.id }}">
+            <button class="history-btn w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-surface transition-colors text-left min-h-[52px]" type="button">
               <span class="min-w-0">
                 <strong class="text-[0.82rem] font-semibold text-ink block truncate">{{ entry.id }}</strong>
-                <small class="text-[0.7rem] text-faint break-all">{{ entry.path }}</small>
+                <small class="text-[0.68rem] text-faint break-all font-mono">{{ entry.path }}</small>
               </span>
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border flex-shrink-0
-                {{ 'bg-safe/8 border-safe/22 text-[#0f766e]' if entry.valid else 'bg-caution/10 border-caution/25 text-[#92660b]' }}">
-                {{ 'OK' if entry.valid else 'WARN' }}
-              </span>
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border
+                  {{ 'bg-safe/8 border-safe/22 text-[#0f766e]' if entry.valid else 'bg-caution/10 border-caution/25 text-[#92660b]' }}">
+                  {{ 'OK' if entry.valid else 'WARN' }}
+                </span>
+                <iconify-icon icon="lucide:chevron-down" width="14" height="14" class="text-faint history-chevron transition-transform"></iconify-icon>
+              </div>
             </button>
             <div class="history-accordion" hidden>
-              <div class="flex items-start justify-between gap-3 px-4 py-3 border-t border-line/7">
-                <div class="min-w-0">
-                  <h3 class="text-[0.82rem] font-semibold text-ink">Snapshot Preview</h3>
-                  <p class="history-path text-[0.7rem] text-faint mt-0.5 break-all"></p>
-                </div>
-                <button class="delete-history inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0" type="button">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                  Delete
+              <div class="flex items-center justify-between gap-3 px-4 py-3 border-t border-line/7 bg-surface/40">
+                <span class="text-[0.78rem] font-semibold text-ink">Snapshot Preview</span>
+                <button class="btn-del-history inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors" type="button">
+                  <iconify-icon icon="lucide:trash-2" width="12" height="12"></iconify-icon>Delete
                 </button>
               </div>
-              <div class="history-validation val-panel mx-4 mb-3"></div>
-              <pre class="history-content mx-0 px-4 py-3 font-mono text-[0.78rem] leading-relaxed whitespace-pre overflow-x-auto bg-surface text-ink border-t border-line/7 rounded-b-xl"></pre>
+              <div class="history-val val-panel mx-4 mt-3 mb-3"></div>
+              <pre class="history-pre mx-0 px-4 py-3 font-mono text-[0.78rem] leading-relaxed whitespace-pre overflow-x-auto bg-surface text-ink border-t border-line/7 rounded-b-xl"></pre>
             </div>
           </div>
           {% else %}
-          <p class="text-muted text-[0.82rem] px-4 py-5" id="historyEmpty">No history snapshots found.</p>
+          <div class="flex flex-col items-center gap-2 px-4 py-8 text-center" id="historyEmpty">
+            <iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>
+            <p class="text-muted text-[0.82rem]">ยังไม่มี history snapshots</p>
+            <p class="text-faint text-[0.72rem]">snapshots จะถูกสร้างอัตโนมัติเมื่อ sync / unsync</p>
+          </div>
           {% endfor %}
         </div>
       </div>
 
+      <div class="msg" id="historyMsg" aria-live="polite"></div>
+
     </div><!-- /tab-history -->
 
-  </div><!-- /content section -->
+  </div><!-- /content -->
 
-</section>
+</div><!-- /root -->
 
-<!-- ── Confirm Modal ────────────────────────────────────────── -->
+<!-- ── Confirm Modal ── -->
 <div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
   <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
   <div id="confirm-box">
     <div class="flex items-start gap-3 mb-4">
       <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-danger"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
       </div>
       <div class="min-w-0">
         <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
@@ -327,278 +461,302 @@
     <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
       <button id="confirm-cancel"
               class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
-              onclick="window._confirmModal && window._confirmModal.cancel()">
-        ยกเลิก
-      </button>
+              onclick="window._confirmModal && window._confirmModal.cancel()">ยกเลิก</button>
       <button id="confirm-ok"
               class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
         ลบ
       </button>
     </div>
   </div>
 </div>
+
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
 (function () {
-  /* ── Tab switching ─────────────────────────────────────────── */
-  document.querySelectorAll(".tab-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var target = btn.dataset.tab;
-      document.querySelectorAll(".tab-btn").forEach(function (b) {
-        b.className = b.className
-          .replace(/\s*(bg-accent\/8|text-accent|font-semibold)\s*/g, " ").trim()
-          + " text-muted hover:bg-surface hover:text-ink";
-      });
-      btn.className = btn.className
-        .replace(/\s*(text-muted|hover:bg-surface|hover:text-ink)\s*/g, " ").trim()
-        + " bg-accent/8 text-accent font-semibold";
-      document.querySelectorAll(".tab-panel").forEach(function (p) {
-        p.classList.remove("is-active");
-      });
-      var panel = document.getElementById(target);
-      if (panel) panel.classList.add("is-active");
-    });
-  });
+  "use strict";
 
-  /* ── Core variables ────────────────────────────────────────── */
-  var wireguardPage  = document.querySelector("[data-interface]");
-  var interfaceName  = wireguardPage.dataset.interface || "wg0";
-  var configText     = document.getElementById("wireguardConfig");
-  var configValidEl  = document.getElementById("configValidation");
-  var resultEl       = document.getElementById("wireguardResult");
-  var configResultEl = document.getElementById("configResult");
+  var root       = document.querySelector("[data-interface]");
+  var ifaceName  = root ? (root.dataset.interface || "wg0") : "wg0";
+  var syncResultEl   = document.getElementById("syncResult");
+  var historyMsgEl   = document.getElementById("historyMsg");
   var historyList    = document.getElementById("historyList");
 
-  /* ── Helpers ───────────────────────────────────────────────── */
-  function renderValidation(target, validation) {
-    target.className = "val-panel " + (validation.valid ? "val-ok" : "val-warn");
-    var items = [].concat(validation.errors || [], validation.warnings || []);
-    target.innerHTML = "";
-    var title = document.createElement("strong");
-    title.textContent = validation.valid ? "Valid config" : "Config needs attention";
-    target.appendChild(title);
-    var list = document.createElement("ul");
-    (items.length ? items : ["No validation issues."]).forEach(function (msg) {
-      var li = document.createElement("li");
-      li.textContent = msg;
-      list.appendChild(li);
+  function cfgEl(id) { return document.getElementById(id); }
+  function configArea()    { return cfgEl("wireguardConfig"); }
+  function configValEl()   { return cfgEl("configValidation"); }
+  function configResultEl(){ return cfgEl("configResult"); }
+
+  /* ── Tab switching ── */
+  window.wgTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
+    document.querySelectorAll(".wg-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent\/8",  on);
+      btn.classList.toggle("text-accent",    on);
+      btn.classList.toggle("font-semibold",  on);
+      btn.classList.toggle("text-muted",    !on);
     });
-    target.appendChild(list);
+  };
+
+  /* ── Helpers ── */
+  function setMsg(el, text, type) {
+    if (!el) return;
+    el.className = "msg" + (type === "ok" ? " msg-ok" : type === "error" ? " msg-error" : "");
+    el.textContent = text;
   }
 
-  function setResult(el, message, status) {
-    el.className = "msg" + (status === "success" ? " msg-ok" : status === "error" ? " msg-error" : "");
-    el.textContent = message;
-  }
-
-  function postJson(url, payload) {
+  function postJson(url, body) {
     return fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).then(function (res) {
-      return res.json().then(function (data) {
-        if (!res.ok) throw new Error((data.errors || ["Request failed."]).join(" "));
-        return data;
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d.errors || ["Request failed"]).join(" "));
+        return d;
       });
     });
   }
 
-  function validateConfig() {
-    return postJson("{{ url_for('wireguard_validate_api') }}", { name: interfaceName, content: configText.value })
-      .then(function (data) {
-        renderValidation(configValidEl, data.validation);
-        return data.validation;
-      });
+  function renderVal(el, v) {
+    if (!el) return;
+    el.className = "val-panel " + (v.valid ? "val-ok" : "val-warn");
+    var items = (v.errors || []).concat(v.warnings || []);
+    el.innerHTML = "<strong>" + (v.valid ? "Valid config" : "Config needs attention") + "</strong>";
+    var ul = document.createElement("ul");
+    (items.length ? items : ["No validation issues."]).forEach(function (m) {
+      var li = document.createElement("li"); li.textContent = m; ul.appendChild(li);
+    });
+    el.appendChild(ul);
   }
 
-  /* ── Config tab buttons ────────────────────────────────────── */
-  document.getElementById("loadTemplate").addEventListener("click", function () {
-    postJson("{{ url_for('wireguard_template_api') }}", { name: interfaceName })
-      .then(function (data) {
-        configText.value = data.content;
-        renderValidation(configValidEl, data.validation);
-        setResult(configResultEl, "Template loaded.", "success");
+  /* ── Config tab — accordion ── */
+  window.toggleCfg = function (key) {
+    var viewer = cfgEl("cfg-viewer-" + key);
+    var chev   = cfgEl("chevron-" + key);
+    if (!viewer) return;
+    var open = viewer.classList.toggle("hidden");  /* open = true means now hidden (closed) */
+    if (chev) chev.style.transform = open ? "" : "rotate(180deg)";
+    if (!open && key === "active") loadActiveConfig();
+  };
+
+  window.loadActiveConfig = function () {
+    var ta = cfgEl("cfg-content-active");
+    if (!ta) return;
+    ta.value = "# กำลังโหลด...";
+    fetch("{{ url_for('wireguard_config') }}?name=" + encodeURIComponent(ifaceName))
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.d.exists) {
+          ta.value = "# ยังไม่มี active config\n# ใช้ Sync เพื่อคัดลอก app config ไปยัง /etc/wireguard/";
+          return;
+        }
+        ta.value = x.d.content || "(ไฟล์ว่าง)";
       })
-      .catch(function (err) { setResult(configResultEl, err.message, "error"); });
+      .catch(function (e) { ta.value = "# โหลดล้มเหลว: " + e.message; });
+  };
+
+  document.getElementById("btnTemplate").addEventListener("click", function () {
+    postJson("{{ url_for('wireguard_template_api') }}", { name: ifaceName })
+      .then(function (d) {
+        configArea().value = d.content;
+        renderVal(configValEl(), d.validation);
+        setMsg(configResultEl(), "Template loaded.", "ok");
+      })
+      .catch(function (e) { setMsg(configResultEl(), e.message, "error"); });
   });
 
-  document.getElementById("validateConfig").addEventListener("click", function () {
-    validateConfig()
-      .then(function (validation) {
-        setResult(configResultEl, validation.valid ? "Config is valid." : "Config has validation issues.",
-          validation.valid ? "success" : "error");
+  document.getElementById("btnValidate").addEventListener("click", function () {
+    postJson("{{ url_for('wireguard_validate_api') }}", { name: ifaceName, content: configArea().value })
+      .then(function (d) {
+        renderVal(configValEl(), d.validation);
+        setMsg(configResultEl(), d.validation.valid ? "Config is valid." : "Config has issues.", d.validation.valid ? "ok" : "error");
       })
-      .catch(function (err) { setResult(configResultEl, err.message, "error"); });
+      .catch(function (e) { setMsg(configResultEl(), e.message, "error"); });
   });
 
-  document.getElementById("saveConfig").addEventListener("click", function () {
-    postJson("{{ url_for('wireguard_save_config_api') }}", { name: interfaceName, content: configText.value })
-      .then(function (data) {
-        renderValidation(configValidEl, data.validation);
-        setResult(configResultEl, "Saved " + data.path + ".", "success");
+  document.getElementById("btnSave").addEventListener("click", function () {
+    postJson("{{ url_for('wireguard_save_config_api') }}", { name: ifaceName, content: configArea().value })
+      .then(function (d) {
+        renderVal(configValEl(), d.validation);
+        setMsg(configResultEl(), "Saved " + d.path + ".", "ok");
       })
-      .catch(function (err) { setResult(configResultEl, err.message, "error"); });
+      .catch(function (e) { setMsg(configResultEl(), e.message, "error"); });
   });
 
-  document.getElementById("deleteConfig").addEventListener("click", function () {
-    window.showConfirm({
-      title:   "ลบ WireGuard Config?",
-      body:    "ไฟล์ config ที่บันทึกไว้จะถูกลบถาวร",
+  document.getElementById("btnDelete").addEventListener("click", function () {
+    showConfirm({
+      title: "ลบ WireGuard Config?",
+      body:  "ไฟล์ app config จะถูกลบถาวร ไม่สามารถกู้คืนได้",
       okLabel: "ลบ",
       onOk: function () {
-        fetch("{{ url_for('wireguard_delete_config_api') }}?name=" + encodeURIComponent(interfaceName), { method: "DELETE" })
-          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-          .then(function (r) {
-            if (!r.ok) { setResult(configResultEl, (r.data.errors || ["Delete failed."]).join(" "), "error"); return; }
-            configText.value = "";
-            renderValidation(configValidEl, { valid: false, errors: ["missing [Interface] section", "missing [Peer] section"], warnings: [] });
-            setResult(configResultEl, "Deleted " + r.data.path + ".", "success");
+        fetch("{{ url_for('wireguard_delete_config_api') }}?name=" + encodeURIComponent(ifaceName), { method: "DELETE" })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (x) {
+            if (!x.ok) { setMsg(configResultEl(), (x.d.errors || ["Delete failed"]).join(" "), "error"); return; }
+            configArea().value = "";
+            renderVal(configValEl(), { valid: false, errors: ["missing [Interface] section", "missing [Peer] section"], warnings: [] });
+            setMsg(configResultEl(), "Deleted " + x.d.path + ".", "ok");
           });
       }
     });
   });
 
-  /* ── Sync / Unsync (status tab) ────────────────────────────── */
-  document.querySelectorAll("[data-wireguard-action]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      var action = button.dataset.wireguardAction;
-      setResult(resultEl, action + " running...");
-      postJson("{{ url_for('wireguard_action_api') }}", { name: interfaceName, action: action })
+  /* ── Sync tab ── */
+  document.querySelectorAll("[data-wg-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var action = btn.dataset.wgAction;
+      setMsg(syncResultEl, action + " กำลังดำเนินการ...");
+      postJson("{{ url_for('wireguard_action_api') }}", { name: ifaceName, action: action })
         .then(function () {
-          setResult(resultEl, action + " completed.", "success");
-          return refreshHistory();
+          setMsg(syncResultEl, action + " เสร็จสิ้น", "ok");
+          refreshHistory();
         })
-        .catch(function (err) { setResult(resultEl, err.message, "error"); });
+        .catch(function (e) { setMsg(syncResultEl, e.message, "error"); });
     });
   });
 
-  /* ── History ───────────────────────────────────────────────── */
+  /* ── History tab ── */
+  function refreshHistory() {
+    return fetch("{{ url_for('wireguard_history_api') }}?name=" + encodeURIComponent(ifaceName))
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        if (!x.ok) { setMsg(historyMsgEl, (x.d.errors || ["Refresh failed"]).join(" "), "error"); return; }
+        renderHistory(x.d.entries || []);
+      });
+  }
+
   function renderHistory(entries) {
     historyList.innerHTML = "";
     if (!entries.length) {
-      var empty = document.createElement("p");
-      empty.className = "text-muted text-[0.82rem] px-4 py-5";
-      empty.textContent = "No history snapshots found.";
-      historyList.appendChild(empty);
+      historyList.innerHTML =
+        '<div class="flex flex-col items-center gap-2 px-4 py-8 text-center">' +
+        '<iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>' +
+        '<p class="text-muted text-[0.82rem]">ยังไม่มี history snapshots</p>' +
+        '<p class="text-faint text-[0.72rem]">snapshots จะถูกสร้างอัตโนมัติเมื่อ sync / unsync</p></div>';
       return;
     }
     entries.forEach(function (entry) {
-      var wrapper = document.createElement("div");
-      wrapper.className = "history-entry border-b border-line/7 last:border-b-0";
-      wrapper.dataset.historyId = entry.id;
-      wrapper.innerHTML =
-        '<button class="history-item w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-surface transition-colors text-left min-h-[52px]" type="button">' +
-          '<span class="min-w-0"><strong class="text-[0.82rem] font-semibold text-ink block truncate"></strong>' +
-          '<small class="text-[0.7rem] text-faint break-all"></small></span>' +
-          '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border flex-shrink-0 ' +
-            (entry.valid ? 'bg-safe/8 border-safe/22 text-[#0f766e]' : 'bg-caution/10 border-caution/25 text-[#92660b]') + '">' +
-            (entry.valid ? 'OK' : 'WARN') + '</span></button>' +
-        '<div class="history-accordion" hidden>' +
-          '<div class="flex items-start justify-between gap-3 px-4 py-3 border-t border-line/7">' +
-            '<div class="min-w-0"><h3 class="text-[0.82rem] font-semibold text-ink">Snapshot Preview</h3>' +
-            '<p class="history-path text-[0.7rem] text-faint mt-0.5 break-all"></p></div>' +
-            '<button class="delete-history inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0" type="button">Delete</button>' +
+      var div = document.createElement("div");
+      div.className = "history-entry border-b border-line/7 last:border-b-0";
+      div.dataset.hid = entry.id;
+      div.innerHTML =
+        '<button class="history-btn w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-surface transition-colors text-left min-h-[52px]" type="button">' +
+          '<span class="min-w-0">' +
+            '<strong class="text-[0.82rem] font-semibold text-ink block truncate"></strong>' +
+            '<small class="text-[0.68rem] text-faint break-all font-mono"></small>' +
+          '</span>' +
+          '<div class="flex items-center gap-2 flex-shrink-0">' +
+            '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border ' +
+              (entry.valid ? 'bg-safe/8 border-safe/22 text-[#0f766e]' : 'bg-caution/10 border-caution/25 text-[#92660b]') + '">' +
+              (entry.valid ? 'OK' : 'WARN') +
+            '</span>' +
+            '<iconify-icon icon="lucide:chevron-down" width="14" height="14" class="text-faint history-chevron transition-transform"></iconify-icon>' +
           '</div>' +
-          '<div class="history-validation val-panel mx-4 mb-3"></div>' +
-          '<pre class="history-content mx-0 px-4 py-3 font-mono text-[0.78rem] leading-relaxed whitespace-pre overflow-x-auto bg-surface text-ink border-t border-line/7 rounded-b-xl"></pre>' +
+        '</button>' +
+        '<div class="history-accordion" hidden>' +
+          '<div class="flex items-center justify-between gap-3 px-4 py-3 border-t border-line/7 bg-surface/40">' +
+            '<span class="text-[0.78rem] font-semibold text-ink">Snapshot Preview</span>' +
+            '<button class="btn-del-history inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors" type="button">' +
+              '<iconify-icon icon="lucide:trash-2" width="12" height="12"></iconify-icon>Delete' +
+            '</button>' +
+          '</div>' +
+          '<div class="history-val val-panel mx-4 mt-3 mb-3"></div>' +
+          '<pre class="history-pre mx-0 px-4 py-3 font-mono text-[0.78rem] leading-relaxed whitespace-pre overflow-x-auto bg-surface text-ink border-t border-line/7 rounded-b-xl"></pre>' +
         '</div>';
-      wrapper.querySelector("strong").textContent = entry.id;
-      wrapper.querySelector("small").textContent  = entry.path;
-      bindHistoryEntry(wrapper);
-      historyList.appendChild(wrapper);
+      div.querySelector("strong").textContent = entry.id;
+      div.querySelector("small").textContent  = entry.path;
+      bindEntry(div);
+      historyList.appendChild(div);
     });
   }
 
-  function refreshHistory() {
-    return fetch("{{ url_for('wireguard_history_api') }}?name=" + encodeURIComponent(interfaceName))
-      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-      .then(function (r) {
-        if (!r.ok) { setResult(resultEl, (r.data.errors || ["History refresh failed."]).join(" "), "error"); return; }
-        renderHistory(r.data.entries || []);
+  function loadEntry(hid) {
+    var row  = historyList.querySelector('[data-hid="' + CSS.escape(hid) + '"]');
+    if (!row) return;
+    var acc  = row.querySelector(".history-accordion");
+    var chev = row.querySelector(".history-chevron");
+    if (!acc.hidden) {
+      acc.hidden = true;
+      if (chev) chev.style.transform = "";
+      return;
+    }
+    fetch("/api/wireguard/history/" + encodeURIComponent(hid) + "?name=" + encodeURIComponent(ifaceName))
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        if (!x.ok) { setMsg(historyMsgEl, (x.d.errors || ["Load failed"]).join(" "), "error"); return; }
+        historyList.querySelectorAll(".history-accordion").forEach(function (a) {
+          a.hidden = (a !== acc);
+          var c = a.closest(".history-entry");
+          if (c) { var cv = c.querySelector(".history-chevron"); if (cv) cv.style.transform = ""; }
+        });
+        row.querySelector(".history-pre").textContent = x.d.content;
+        renderVal(row.querySelector(".history-val"), x.d.validation);
+        acc.hidden = false;
+        if (chev) chev.style.transform = "rotate(180deg)";
       });
   }
 
-  function loadHistory(historyId) {
-    var wrapper   = historyList.querySelector('[data-history-id="' + CSS.escape(historyId) + '"]');
-    if (!wrapper) return;
-    var accordion = wrapper.querySelector(".history-accordion");
-    if (!accordion.hidden) { accordion.hidden = true; return; }
-    fetch("/api/wireguard/history/" + encodeURIComponent(historyId) + "?name=" + encodeURIComponent(interfaceName))
-      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-      .then(function (r) {
-        if (!r.ok) { setResult(resultEl, (r.data.errors || ["History load failed."]).join(" "), "error"); return; }
-        historyList.querySelectorAll(".history-accordion").forEach(function (item) { item.hidden = item !== accordion; });
-        wrapper.querySelector(".history-path").textContent    = r.data.path;
-        wrapper.querySelector(".history-content").textContent = r.data.content;
-        renderValidation(wrapper.querySelector(".history-validation"), r.data.validation);
-        accordion.hidden = false;
-      });
-  }
-
-  function deleteHistory(historyId) {
-    if (!historyId) return;
-    window.showConfirm({
-      title:   "ลบ History Snapshot?",
-      body:    "ไม่สามารถกู้คืนได้หลังจากลบ",
+  function delEntry(hid) {
+    showConfirm({
+      title: "ลบ History Snapshot?",
+      body:  "snapshot นี้จะถูกลบถาวร ไม่สามารถกู้คืนได้",
       okLabel: "ลบ",
       onOk: function () {
-        fetch("/api/wireguard/history/" + encodeURIComponent(historyId) + "?name=" + encodeURIComponent(interfaceName), { method: "DELETE" })
-          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-          .then(function (r) {
-            if (!r.ok) { setResult(resultEl, (r.data.errors || ["History delete failed."]).join(" "), "error"); return; }
-            setResult(resultEl, "Deleted history " + r.data.id + ".", "success");
+        fetch("/api/wireguard/history/" + encodeURIComponent(hid) + "?name=" + encodeURIComponent(ifaceName), { method: "DELETE" })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (x) {
+            if (!x.ok) { setMsg(historyMsgEl, (x.d.errors || ["Delete failed"]).join(" "), "error"); return; }
+            setMsg(historyMsgEl, "Deleted " + x.d.id + ".", "ok");
             refreshHistory();
           });
       }
     });
   }
 
-  function bindHistoryEntry(wrapper) {
-    var historyId = wrapper.dataset.historyId;
-    wrapper.querySelector(".history-item").addEventListener("click", function () { loadHistory(historyId); });
-    wrapper.querySelector(".delete-history").addEventListener("click", function (e) { e.stopPropagation(); deleteHistory(historyId); });
+  function bindEntry(row) {
+    var hid = row.dataset.hid;
+    row.querySelector(".history-btn").addEventListener("click", function () { loadEntry(hid); });
+    row.querySelector(".btn-del-history").addEventListener("click", function (e) { e.stopPropagation(); delEntry(hid); });
   }
 
-  document.querySelectorAll(".history-entry").forEach(bindHistoryEntry);
-  document.getElementById("refreshHistory").addEventListener("click", refreshHistory);
+  document.querySelectorAll(".history-entry").forEach(bindEntry);
+  document.getElementById("btnRefreshHistory").addEventListener("click", refreshHistory);
 
-  /* ── Confirm Modal ─────────────────────────────────────────── */
-  window.showConfirm = function (opts) {
-    var modal  = document.getElementById("confirm-modal");
-    var btnOk  = document.getElementById("confirm-ok");
-    var clone  = btnOk.cloneNode(true);
+  /* ── Confirm Modal ── */
+  function showConfirm(opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
     btnOk.parentNode.replaceChild(clone, btnOk);
     btnOk = document.getElementById("confirm-ok");
-    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยัน";
     document.getElementById("confirm-body").textContent  = opts.body  || "";
     if (opts.okLabel) {
-      var nodes = btnOk.childNodes;
-      for (var i = nodes.length - 1; i >= 0; i--) {
-        if (nodes[i].nodeType === 3) { nodes[i].textContent = " " + opts.okLabel; break; }
-      }
+      Array.from(btnOk.childNodes).reverse().forEach(function (n) {
+        if (n.nodeType === 3 && n.textContent.trim()) { n.textContent = " " + opts.okLabel; }
+      });
     }
-    window._confirmModal = {
-      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
-    };
-    btnOk.onclick = function () {
-      modal.classList.remove("is-open"); window._confirmModal = null;
-      if (opts.onOk) opts.onOk();
-    };
+    window._confirmModal = { cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; } };
+    btnOk.onclick = function () { modal.classList.remove("is-open"); window._confirmModal = null; if (opts.onOk) opts.onOk(); };
     modal.classList.add("is-open");
     document.getElementById("confirm-cancel").focus();
-  };
+  }
+  window.showConfirm = showConfirm;
 
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
   });
 
-  /* ── SPA cleanup ───────────────────────────────────────────── */
+  /* ── SPA cleanup ── */
   window.__vasCleanup = window.__vasCleanup || [];
-  window.__vasCleanup.push(function () { /* no intervals/SSE on this page */ });
+  window.__vasCleanup.push(function () { /* no intervals/SSE */ });
+
 })();
 </script>
 {% endblock %}

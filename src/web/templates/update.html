@@ -1,0 +1,425 @@
+{% extends base_template %}
+{% block page_title %}อัปเดตระบบ — VAS{% endblock %}
+{% block header_title %}อัปเดตระบบ{% endblock %}
+
+{% block content %}
+<meta name="spa-header-title" content="อัปเดตระบบ">
+
+<style>
+  /* ── Progress bar ───────────────────────────────────────────── */
+  .update-progress-track {
+    height: 6px; border-radius: 999px;
+    background: rgb(var(--c-line) / 0.1);
+    overflow: hidden;
+  }
+  .update-progress-fill {
+    height: 100%; border-radius: 999px;
+    background: rgb(var(--c-accent));
+    transition: width 0.35s ease;
+  }
+  .update-progress-fill.is-done {
+    background: rgb(var(--c-safe));
+  }
+  .update-progress-fill.is-error {
+    background: rgb(var(--c-danger));
+  }
+
+  /* ── Terminal ─────────────────────────────────────────────────── */
+  .terminal-box {
+    font-family: 'Bai Jamjuree', monospace; font-size: 0.72rem; line-height: 1.65;
+    background: #0f1117; color: #e2e8f0; border-radius: 0.5rem;
+    padding: 0.875rem 1rem; overflow-y: auto; max-height: 280px;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .terminal-box::-webkit-scrollbar { width: 4px; }
+  .terminal-box::-webkit-scrollbar-track { background: transparent; }
+  .terminal-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+  /* ── Pulse dot ──────────────────────────────────────────────── */
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .dot-pulse { animation: pulse-dot 1.2s ease infinite; }
+</style>
+
+<div id="spa-content" class="flex flex-col gap-4">
+
+  <!-- ── 1. Page Header ─────────────────────────────────────────── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · อัปเดต</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">อัปเดตระบบ</h1>
+    <p class="text-[0.82rem] text-muted mt-1">ตรวจสอบและติดตั้ง VAS เวอร์ชั่นใหม่</p>
+  </div>
+
+  <!-- ── 2. Version Info Card ───────────────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-4 py-4 border-b border-line/10">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 border border-accent/28 rounded-lg bg-accent/6 text-accent grid place-items-center flex-shrink-0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <div>
+          <div class="text-[0.88rem] font-semibold text-ink">เวอร์ชั่นปัจจุบัน</div>
+          <div class="text-[0.72rem] text-faint font-display font-bold mt-0.5">
+            VAS <span id="current-version">{{ current_version }}</span>
+          </div>
+        </div>
+      </div>
+      <button id="btn-check" onclick="checkUpdate()"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors cursor-pointer">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        ตรวจสอบ
+      </button>
+    </div>
+
+    <!-- Status area -->
+    <div id="update-status-area" class="px-4 py-4">
+      <!-- idle -->
+      <div id="state-idle" class="flex items-center gap-2 text-[0.82rem] text-muted">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-faint flex-shrink-0">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+        </svg>
+        กดปุ่ม "ตรวจสอบ" เพื่อดูว่ามีเวอร์ชั่นใหม่หรือไม่
+      </div>
+
+      <!-- checking -->
+      <div id="state-checking" class="hidden flex items-center gap-2 text-[0.82rem] text-muted">
+        <span class="spin flex-shrink-0"></span>
+        กำลังตรวจสอบ...
+      </div>
+
+      <!-- up-to-date -->
+      <div id="state-uptodate" class="hidden flex items-center gap-2 text-[0.82rem]">
+        <div class="w-5 h-5 rounded-full bg-safe/10 grid place-items-center flex-shrink-0">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-safe">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+        <span class="text-[#0f766e] font-medium">อัปเดตล่าสุดแล้ว</span>
+        <span id="uptodate-label" class="text-muted text-[0.78rem]"></span>
+      </div>
+
+      <!-- has update -->
+      <div id="state-has-update" class="hidden flex flex-col gap-3">
+        <div class="flex items-start gap-3">
+          <div class="w-9 h-9 border border-caution/28 rounded-lg bg-caution/8 text-[#92660b] grid place-items-center flex-shrink-0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[0.88rem] font-semibold text-ink">มีเวอร์ชั่นใหม่</span>
+              <span id="new-version-badge"
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-caution/10 border border-caution/25 text-[#92660b]">
+              </span>
+            </div>
+            <p class="text-[0.78rem] text-muted mt-0.5">
+              ปัจจุบัน: <span id="compare-current" class="font-semibold text-ink"></span>
+              → ใหม่: <span id="compare-latest" class="font-semibold text-[#0f766e]"></span>
+            </p>
+            <a id="release-link" href="#" target="_blank" rel="noopener"
+               class="inline-flex items-center gap-1 text-[0.75rem] text-accent hover:underline mt-1">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>
+              ดู Release Notes
+            </a>
+          </div>
+          <button id="btn-update" onclick="startUpdate()"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors cursor-pointer flex-shrink-0">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            อัปเดตเลย
+          </button>
+        </div>
+      </div>
+
+      <!-- error -->
+      <div id="state-error" class="hidden flex items-start gap-2 px-3 py-2.5 rounded-lg bg-danger/6 border border-danger/20">
+        <svg width="14" height="14" class="flex-shrink-0 mt-0.5 text-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+        </svg>
+        <span id="error-msg" class="text-[0.82rem] text-[#b1453a]"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Download Progress Card (hidden until updating) ─────── -->
+  <div id="progress-card" class="hidden bg-card border border-line/10 rounded-xl">
+    <div class="px-4 py-4 border-b border-line/10 flex items-center gap-3">
+      <div class="w-9 h-9 border border-accent/28 rounded-lg bg-accent/6 text-accent grid place-items-center flex-shrink-0" id="progress-icon">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="text-[0.88rem] font-semibold text-ink" id="progress-title">กำลังอัปเดต...</span>
+          <span id="progress-pct" class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-accent/10 border border-accent/20 text-accent font-display tabular-nums">0%</span>
+        </div>
+        <p id="progress-msg" class="text-[0.75rem] text-muted mt-0.5 truncate">เตรียมพร้อม...</p>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="px-4 pt-4 pb-2">
+      <div class="update-progress-track">
+        <div id="progress-fill" class="update-progress-fill" style="width:0%"></div>
+      </div>
+      <!-- Step indicators -->
+      <div class="flex justify-between mt-2">
+        <span id="step-check"    class="text-[0.65rem] text-faint">ตรวจสอบ</span>
+        <span id="step-download" class="text-[0.65rem] text-faint">ดาวน์โหลด</span>
+        <span id="step-extract"  class="text-[0.65rem] text-faint">แตกไฟล์</span>
+        <span id="step-install"  class="text-[0.65rem] text-faint">ติดตั้ง</span>
+        <span id="step-done"     class="text-[0.65rem] text-faint">เสร็จสิ้น</span>
+      </div>
+    </div>
+
+    <!-- Terminal log -->
+    <div class="px-4 pb-4">
+      <div class="terminal-box" id="update-log">
+      </div>
+    </div>
+
+    <!-- Done state with restart button -->
+    <div id="done-bar" class="hidden px-4 pb-4">
+      <div class="flex items-center justify-between px-4 py-3 rounded-xl bg-safe/6 border border-safe/20">
+        <div class="flex items-center gap-2">
+          <svg width="15" height="15" class="text-safe flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-[0.82rem] font-semibold text-[#0f766e]">อัปเดตสำเร็จ! รีสตาร์ทเพื่อใช้เวอร์ชั่นใหม่</span>
+        </div>
+        <button onclick="restartServer()"
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-safe/30 rounded-lg bg-safe/10 text-[#0f766e] text-[0.82rem] font-semibold hover:bg-safe/15 transition-colors cursor-pointer">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          รีสตาร์ท
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Info Card ───────────────────────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl px-4 py-4">
+    <h2 class="text-[0.88rem] font-semibold text-ink mb-3">ข้อมูลระบบ</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div class="flex flex-col gap-0.5">
+        <span class="text-[0.72rem] text-faint font-semibold uppercase tracking-[0.06em]">เวอร์ชั่น</span>
+        <span class="text-[0.88rem] font-semibold text-ink font-display">{{ current_version }}</span>
+      </div>
+      <div class="flex flex-col gap-0.5">
+        <span class="text-[0.72rem] text-faint font-semibold uppercase tracking-[0.06em]">Repository</span>
+        <a href="https://github.com/phanuphun/vending-auto-setup" target="_blank" rel="noopener"
+           class="text-[0.82rem] text-accent hover:underline truncate">
+          phanuphun/vending-auto-setup
+        </a>
+      </div>
+      <div class="flex flex-col gap-0.5">
+        <span class="text-[0.72rem] text-faint font-semibold uppercase tracking-[0.06em]">Install Path</span>
+        <code class="text-[0.75rem] text-muted font-mono">/opt/vending-auto-setup</code>
+      </div>
+      <div class="flex flex-col gap-0.5">
+        <span class="text-[0.72rem] text-faint font-semibold uppercase tracking-[0.06em]">คำเตือน</span>
+        <span class="text-[0.78rem] text-[#92660b]">การอัปเดตจะรีสตาร์ทระบบชั่วคราว</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  'use strict';
+
+  var _state = 'idle';
+  var _updateSse = null;
+
+  // ── State machine ─────────────────────────────────────────────
+  function showState(name) {
+    ['idle','checking','uptodate','has-update','error'].forEach(function(s) {
+      var el = document.getElementById('state-' + s);
+      if (el) el.classList.add('hidden');
+    });
+    var target = document.getElementById('state-' + name);
+    if (target) target.classList.remove('hidden');
+    _state = name;
+  }
+
+  // ── Check for update ──────────────────────────────────────────
+  window.checkUpdate = function () {
+    if (_state === 'checking') return;
+    showState('checking');
+    var btn = document.getElementById('btn-check');
+    if (btn) btn.disabled = true;
+
+    fetch('/api/update/check')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (btn) btn.disabled = false;
+        if (d.status === 'error') {
+          showState('error');
+          var em = document.getElementById('error-msg');
+          if (em) em.textContent = d.errors ? d.errors.join(', ') : 'ตรวจสอบไม่สำเร็จ';
+          return;
+        }
+        if (d.has_update) {
+          showState('has-update');
+          var b = document.getElementById('new-version-badge');
+          var cc = document.getElementById('compare-current');
+          var cl = document.getElementById('compare-latest');
+          var rl = document.getElementById('release-link');
+          if (b)  b.textContent = 'v' + d.latest;
+          if (cc) cc.textContent = 'v' + d.current;
+          if (cl) cl.textContent = 'v' + d.latest;
+          if (rl && d.release_url) rl.href = d.release_url;
+        } else {
+          showState('uptodate');
+          var ul = document.getElementById('uptodate-label');
+          if (ul) ul.textContent = '(v' + d.current + ')';
+        }
+      })
+      .catch(function(e) {
+        if (btn) btn.disabled = false;
+        showState('error');
+        var em = document.getElementById('error-msg');
+        if (em) em.textContent = 'เชื่อมต่อไม่ได้: ' + e.message;
+      });
+  };
+
+  // ── Update ────────────────────────────────────────────────────
+  window.startUpdate = function () {
+    if (_updateSse) return;
+
+    // Hide update button, show progress card
+    var btnU = document.getElementById('btn-update');
+    if (btnU) btnU.disabled = true;
+    var pCard = document.getElementById('progress-card');
+    if (pCard) pCard.classList.remove('hidden');
+
+    setProgress(2, 'check', 'เชื่อมต่อ...');
+    logLine('▶ เริ่มการอัปเดต VAS...');
+
+    _updateSse = new EventSource('/api/update/stream');
+
+    _updateSse.addEventListener('progress', function(e) {
+      var data = JSON.parse(e.data);
+      setProgress(data.percent || 0, data.step || '', data.msg || '');
+      if (data.msg) logLine('  ' + data.msg);
+    });
+
+    _updateSse.addEventListener('log', function(e) {
+      var data = JSON.parse(e.data);
+      if (data.msg) logLine(data.msg);
+    });
+
+    _updateSse.addEventListener('done', function(e) {
+      closeUpdateSse();
+      setProgress(100, 'done', 'อัปเดตเสร็จสิ้น');
+      logLine('✓ อัปเดตสำเร็จ');
+      var fill = document.getElementById('progress-fill');
+      if (fill) fill.classList.add('is-done');
+      var title = document.getElementById('progress-title');
+      if (title) title.textContent = 'อัปเดตเสร็จสิ้น';
+      var pct = document.getElementById('progress-pct');
+      if (pct) { pct.textContent = '100%'; pct.className = pct.className.replace('text-accent border-accent/20 bg-accent/10', 'text-[#0f766e] border-safe/22 bg-safe/8'); }
+      // Show done bar
+      var doneBar = document.getElementById('done-bar');
+      if (doneBar) doneBar.classList.remove('hidden');
+    });
+
+    _updateSse.addEventListener('error-event', function(e) {
+      var data = JSON.parse(e.data);
+      closeUpdateSse();
+      logLine('✗ ข้อผิดพลาด: ' + (data.msg || 'unknown'));
+      var fill = document.getElementById('progress-fill');
+      if (fill) fill.classList.add('is-error');
+      var title = document.getElementById('progress-title');
+      if (title) title.textContent = 'เกิดข้อผิดพลาด';
+      if (btnU) btnU.disabled = false;
+    });
+
+    _updateSse.onerror = function() {
+      if (_updateSse && _updateSse.readyState === EventSource.CLOSED) {
+        closeUpdateSse();
+      }
+    };
+  };
+
+  function closeUpdateSse() {
+    if (_updateSse) { _updateSse.close(); _updateSse = null; }
+  }
+
+  // ── Progress helpers ──────────────────────────────────────────
+  var STEP_ORDER = ['check', 'download', 'extract', 'install', 'done'];
+
+  function setProgress(pct, step, msg) {
+    var fill = document.getElementById('progress-fill');
+    var pctEl = document.getElementById('progress-pct');
+    var msgEl = document.getElementById('progress-msg');
+    if (fill) fill.style.width = Math.min(100, pct) + '%';
+    if (pctEl) pctEl.textContent = Math.min(100, pct) + '%';
+    if (msgEl && msg) msgEl.textContent = msg;
+
+    // Highlight current step
+    STEP_ORDER.forEach(function(s) {
+      var el = document.getElementById('step-' + s);
+      if (!el) return;
+      var idx = STEP_ORDER.indexOf(s);
+      var curIdx = STEP_ORDER.indexOf(step);
+      if (s === step) {
+        el.className = 'text-[0.65rem] text-accent font-semibold dot-pulse';
+      } else if (idx < curIdx) {
+        el.className = 'text-[0.65rem] text-safe font-semibold';
+      } else {
+        el.className = 'text-[0.65rem] text-faint';
+      }
+    });
+  }
+
+  function logLine(text) {
+    var box = document.getElementById('update-log');
+    if (!box) return;
+    var ts = new Date().toLocaleTimeString('th', { hour12: false });
+    box.textContent += '[' + ts + '] ' + text + '\n';
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // ── Restart ───────────────────────────────────────────────────
+  window.restartServer = function () {
+    logLine('⟳ กำลังรีสตาร์ท...');
+    fetch('/api/server/restart', { method: 'POST' })
+      .then(function() {
+        logLine('รอระบบกลับมา...');
+        setTimeout(function() { location.reload(); }, 5000);
+      })
+      .catch(function() {
+        // restart might kill connection — just reload after delay
+        setTimeout(function() { location.reload(); }, 5000);
+      });
+  };
+
+  // ── Cleanup ───────────────────────────────────────────────────
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function() { closeUpdateSse(); });
+
+  // Auto-check on load
+  checkUpdate();
+
+})();
+</script>
+{% endblock %}
