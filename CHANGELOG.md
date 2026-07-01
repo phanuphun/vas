@@ -1,6 +1,52 @@
 # Changelog
 
+## [2026-07-02]
+
+### เพิ่ม dev-mode toggle `VAS_DEV_FAKE_INSTALLED` — ทดสอบ UI โดยไม่ต้องมี package/systemd จริง
+- เพิ่ม `dev_fake_installed()` ใน `src/system/utils.py` — อ่าน env var `VAS_DEV_FAKE_INSTALLED=1` (ค่า `1`/`true`/`yes`)
+- เมื่อเปิดใช้: `system/status.py` (`_check_tool`, `collect_remote_access_status`, `collect_openssh_status`, `collect_vpn_status`) และ `features/packages/settings.py` (`_which_check`, `_file_check`, `_python_import_check`) จะรายงานว่าทุก package/service "ติดตั้งแล้วและทำงานอยู่" โดยจำลองค่า version/id/service state แทนการเรียก `shutil.which`/`systemctl`/binary จริง
+- `server.py` (`nav_status_api`) และ `features/remote/anydesk.py` (`service_action`, `set_unattended_password`) รองรับ flag เดียวกัน — ปุ่ม start/stop/restart และตั้งรหัสผ่าน Unattended Access ในหน้า AnyDesk จะจำลองผลสำเร็จโดยไม่รันคำสั่งจริง (ไม่บันทึก/ส่งรหัสผ่านที่ใดเลย)
+- เปิดใช้ค่านี้อัตโนมัติใน `dev.bat` (`set VAS_DEV_FAKE_INSTALLED=1`) เพื่อให้ sidebar/หน้า AnyDesk, WireGuard, โปรแกรมเพิ่มเติม แสดงสถานะ "ติดตั้งแล้ว" ทันทีบนเครื่อง dev (เช่น Windows) ที่ไม่มี apt package หรือ systemd จริง — **ห้ามตั้งค่านี้บน production** (systemd service ที่รันจริงไม่ได้ set env var นี้)
+
+### FIX apps.html (โปรแกรมเพิ่มเติม) — หน้าค้าง "กำลังตรวจสอบสถานะ..." เมื่อเข้าจาก SPA navigate
+- สาเหตุ: `loadPackages()` และ `setTab("software")` ถูกเรียกใน `document.addEventListener("DOMContentLoaded", ...)` แต่ `DOMContentLoaded` fire แค่ครั้งเดียวตอนโหลดหน้าเว็บจริง — เมื่อ SPA router (`base.html`) swap `#spa-content-wrap` แล้ว `execScripts()` re-run สคริปต์ event นี้จะไม่ fire อีก ทำให้ `loadPackages()` ไม่ถูกเรียก และ spinner "กำลังตรวจสอบสถานะ..." ค้างตลอดไปจนกว่าจะ refresh (hard reload)
+- แก้ไข: เปลี่ยนจาก `document.addEventListener("DOMContentLoaded", ...)` เป็นเรียก `setTab("software")` และ `loadPackages()` ทันที (immediate call) — รูปแบบเดียวกับที่เคยแก้ไว้แล้วใน `settings.html` (เทมเพลตเดิมก่อนเปลี่ยนชื่อเป็น "โปรแกรมเพิ่มเติม") แต่ตกหล่นตอนสร้าง `apps.html` ใหม่
+- ขอบเขต: แก้เฉพาะ `src/web/templates/apps.html` (ส่วน `extra_scripts`) ไม่กระทบ SPA router ใน `base.html` หรือหน้าอื่น
+
+### Re-design หน้า System Logs (`/logs`) + เพิ่มฟีเจอร์ที่ขาด
+- ออกแบบใหม่ `src/web/templates/logs.html` ตาม design system เดิมของ VAS (page header + card pattern, `zone` badge, accordion/list convention จาก `INSTRUCTIONS.md`)
+- รายการ snapshot: แสดงเวลาแบบ relative + absolute (แปลงจาก id `YYYYMMDDTHHMMSSZ`) และขนาดไฟล์แบบ human-readable (`fmtBytes`) แทนตัวเลข bytes ดิบ พร้อม badge จำนวน snapshot ทั้งหมด
+- Log viewer: เพิ่มเลขบรรทัด, ไฮไลต์สีตามระดับ (error/critical แดง, warning เหลือง, `## header` เป็นหัวข้อ section), ช่องค้นหาในเนื้อหาพร้อมไฮไลต์คำที่ตรง, ปุ่ม Copy และ Download (.log) แบบ client-side
+- เพิ่มฟีเจอร์ที่ขาด — **ลบ snapshot**: เพิ่ม `delete_system_snapshot()` ใน `src/system/audit.py` และ route `DELETE /api/logs/system/<snapshot_id>` ใน `src/server.py` (บันทึก audit event `snapshot_deleted`) พร้อม confirm modal ตาม convention ของโปรเจกต์ (`showConfirm`, ห้ามใช้ `window.confirm`)
+- เพิ่มการ์ด "เหตุการณ์ล่าสุด" (Audit Trail) ต่อท้ายหน้า — ใช้ endpoint `/api/database/audit_log` ที่มีอยู่แล้ว เพื่อให้ตรงกับคำอธิบายเมนู sidebar ("Log และ audit เหตุการณ์") ที่เดิมหน้านี้ยังไม่มีส่วนนี้ พร้อมลิงก์ "ดูทั้งหมด" ไปหน้า Database
+- Empty/loading state ใหม่ตาม convention (`lucide:inbox`, `.spin`) และปุ่ม header เพิ่มไอคอนให้ตรงกับหน้าอื่น
+- ตรวจสอบด้วย `ruff` + `mypy --strict` (เทียบ error ก่อน/หลัง — ไม่มี error ใหม่นอกจาก pattern เดิมที่มีอยู่แล้วในทุก route ของไฟล์) เนื่องจาก mount ของ sandbox sync ไฟล์จริงไม่ตรงกับต้นทาง จึงตรวจสอบผ่านสำเนาที่ patch จาก git HEAD แทน
+- พบว่า test suite เดิม (`tests/test_audit_log.py` และอีก 7 ไฟล์) collection fail อยู่ก่อนแล้วจาก import path ที่ไม่ตรงกับโครงสร้าง `src/` ปัจจุบัน (เช่น `import audit_log` ควรเป็น `system.audit`) — ไม่เกี่ยวกับการแก้ไขครั้งนี้ แนะนำให้ทำ ticket แยกเพื่ออัปเดต import path ของ test suite
+
+### ลบหน้า Dashboard — ให้ Monitor เป็นหน้าแรกแทน
+- ลบ `src/web/templates/dashboard.html` และ nav link "แดชบอร์ด" ใน `base.html` ออกทั้งหมด
+- route `/` (เดิมชื่อฟังก์ชัน `dashboard`) เปลี่ยนไปเรนเดอร์ `monitor.html` แทน (rename เป็น `monitor_page`) — Monitor กลายเป็นหน้าแรกของระบบ
+- route เดิม `/monitor` เปลี่ยนเป็น redirect ไปที่ `/` เพื่อไม่ให้ลิงก์/bookmark เดิมพัง
+- อัปเดตทุกจุดที่ `url_for("dashboard")` (setup/login/login_post) ให้ชี้ไปที่ `url_for("monitor_page")` แทน
+- ลบ import ที่ไม่ได้ใช้แล้วใน `src/server.py` (`collect_status`, `collect_remote_access_status`, `collect_openssh_status`, `collect_web_server_status`) เนื่องจากถูกใช้เฉพาะใน route dashboard เดิม
+- อัปเดต `tests/test_server.py`: แทนที่ `test_dashboard_route_renders_status_without_command_preview` ด้วย `test_home_route_renders_monitor_page` และเพิ่ม `test_monitor_route_redirects_to_home`, ลบ helper `_patched_status_collectors` และ import ที่ไม่ใช้แล้ว
+- เนื่องจาก sandbox mount sync ไฟล์จริงไม่ตรงกับต้นทาง (ปัญหาเดิมที่บันทึกไว้ด้านบน) จึงตรวจสอบผ่านสำเนาที่ patch จาก git HEAD แทน: `ruff check` และ `mypy --strict` เทียบ error ก่อน/หลัง — ไม่มี error ใหม่ (54 errors เท่าเดิมทั้งคู่ เป็น debt เดิมของไฟล์ ไม่เกี่ยวกับการแก้ไขนี้)
+- รัน `pytest tests/test_server.py` พบว่า 5 tests fail ด้วย 302 redirect ไป `/setup` หรือ `/login` — ยืนยันแล้วว่าเป็นปัญหาเดิมของ sandbox (ไม่มี test DB/session fixture ให้ผ่าน auth gate) เกิดขึ้นเหมือนกันทั้งก่อนและหลังแก้ไข (รวมถึง test เดิมที่ถูกแทนที่) ไม่ใช่จากการเปลี่ยนแปลงนี้ — ตรวจ logic จริงด้วยการ patch `is_first_run`/`get_user_by_id` และตั้ง session ปลอมแทน ยืนยันว่า `test_home_route_renders_monitor_page` และ `test_monitor_route_redirects_to_home` ผ่านตามที่คาดไว้
+
+### เพิ่มหน้าใหม่ + เมนู Sidebar สำหรับจัดการ AnyDesk
+- เพิ่ม route `GET /anydesk` (`anydesk_page`) ใน `src/server.py` — เรนเดอร์ `anydesk.html` ด้วยข้อมูลจาก `collect_remote_access_status()` (มีอยู่แล้วใน `system/status.py`)
+- สร้าง `src/features/remote/anydesk.py` (ใหม่) — `service_action()` สำหรับ `systemctl start/stop/restart/enable/disable anydesk` และ `set_unattended_password()` สำหรับตั้งรหัสผ่าน Unattended Access ผ่าน `anydesk --set-password` ทาง stdin โดยตั้งใจไม่ใช้ `CommandRunner` เพื่อไม่ให้รหัสผ่านหลุดไปอยู่ใน log
+- เพิ่ม API 3 endpoint ใน `src/server.py`: `GET /api/anydesk/status`, `POST /api/anydesk/action`, `POST /api/anydesk/password` (log audit event แต่ไม่บันทึกค่ารหัสผ่าน)
+- สร้าง template ใหม่ `src/web/templates/anydesk.html` ตาม page-structure convention ของ VAS (page header + tab nav "สถานะ" / "Unattended Access") พร้อม banner แจ้งเตือนและลิงก์ไปหน้า "โปรแกรมเพิ่มเติม" เมื่อยังไม่ได้ติดตั้ง AnyDesk
+- เพิ่ม `nav_link('anydesk_page', ...)` ในหมวด "เครือข่าย" ของ sidebar (`base.html`) ใช้ `data-nav-pkg="anydesk"` — ซ่อน/แสดงอัตโนมัติผ่าน `/api/nav/status` ที่ return field `anydesk` อยู่แล้ว ไม่ต้องแก้ JS เพิ่ม
+- ตรวจสอบ `features/remote/anydesk.py` ด้วย `py_compile` + `ruff` + `mypy --strict` ผ่านทั้งหมด (ไม่มี error ของโค้ดตัวเอง) และตรวจ syntax template ทั้งหมดผ่าน Jinja2 parser ผ่าน — ส่วน `server.py` เจอปัญหา sandbox mount sync ช้า/ค้าง (ปัญหาเดียวกับที่บันทึกไว้ในหัวข้อ "Re-design หน้า System Logs" ข้างต้น) จึงตรวจ syntax ด้วยการอ่านไฟล์เต็มแทน และยืนยันตำแหน่ง route/endpoint ใหม่ด้วย grep บนไฟล์จริง
+
 ## [2026-07-01]
+
+### ย้ายเมนู "คำสั่ง CLI" จาก Sidebar ไปเป็นไอคอนใน Navigation bar
+- ลบ `nav_link('commands', ...)` ออกจากหมวด "ระบบ" ใน sidebar (`base.html`)
+- เพิ่มปุ่มไอคอน `lucide:circle-alert` (ตกใจ/แจ้งเตือน) ไว้ใน header ข้างๆ ปุ่ม account (user dropdown) ลิงก์ไปที่ `url_for('commands')`
+- ปุ่มใช้ class `nav-link` เพื่อให้ SPA router intercept และสลับหน้าแบบ partial ได้เหมือนลิงก์อื่นในระบบ
 
 ### เปลี่ยนชื่อ Settings → โปรแกรมเพิ่มเติม + Download Source tab
 - เปลี่ยนชื่อเมนู "ตั้งค่า" → "โปรแกรมเพิ่มเติม" พร้อม icon `package-plus`

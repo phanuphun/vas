@@ -2,19 +2,7 @@
 {% block page_title %}ZKTeco QR500 — VAS{% endblock %}
 {% block header_title %}ZKTeco QR500{% endblock %}
 
-{% block header_actions %}
-<span class="zone {{ 'zone-safe' if qr_reader.reader_running else 'zone-mute' }}" id="header-reader-badge"
-      style="font-size:0.72rem;">
-  <span class="pulse-dot" id="header-pulse" style="display:none;"></span>
-  <span id="header-badge-text">{{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}</span>
-</span>
-<button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors" onclick="qrRestart()">
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-  </svg>
-  Restart
-</button>
-{% endblock %}
+{% block header_actions %}{% endblock %}
 
 {% block content %}
 <style>
@@ -119,6 +107,21 @@
     </button>
   </div>
 </nav>
+
+<!-- ── Reader status + Restart (moved from top header) ── -->
+<div class="flex items-center justify-end gap-2">
+  <span class="zone {{ 'zone-safe' if qr_reader.reader_running else 'zone-mute' }}" id="header-reader-badge"
+        style="font-size:0.72rem;">
+    <span class="pulse-dot" id="header-pulse" style="display:none;"></span>
+    <span id="header-badge-text">{{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}</span>
+  </span>
+  <button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors" onclick="qrRestart()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+    </svg>
+    Restart
+  </button>
+</div>
 
 <!-- ── Top tab panels ─────────────────────────────────── -->
 <div id="toptab-live" class="qr500-all-panel is-active" style="display:flex;flex-direction:column;gap:1rem;">

@@ -815,10 +815,11 @@
       });
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
-    setTab("software");
-    loadPackages();
-  });
+  // ใช้ immediate call แทน DOMContentLoaded เพื่อรองรับ SPA navigate
+  // (DOMContentLoaded จะไม่ fire อีกหลัง SPA swap — เป็นสาเหตุที่หน้านี้ค้าง
+  //  loading เมื่อกดเข้ามาจากหน้าอื่นผ่าน SPA router จนกว่าจะ refresh)
+  setTab("software");
+  loadPackages();
 })();
 </script>
 {% endblock %}

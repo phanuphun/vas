@@ -21,6 +21,8 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
+from system.utils import dev_fake_installed
+
 
 # ---------------------------------------------------------------------------
 # Check helpers
@@ -29,6 +31,8 @@ from typing import Any, Callable
 def _python_import_check(module: str):
     """คืน (installed, version_str|None) สำหรับ Python library"""
     def _check() -> tuple[bool, str | None]:
+        if dev_fake_installed():
+            return True, "dev-mode"
         result = subprocess.run(
             ["python3", "-c", f"import {module}; print(getattr({module}, '__version__', None))"],
             capture_output=True, text=True, timeout=5,
@@ -43,6 +47,8 @@ def _python_import_check(module: str):
 def _which_check(cmd: str, version_args: tuple[str, ...] | None = None):
     """คืน (installed, version_str|None)"""
     def _check() -> tuple[bool, str | None]:
+        if dev_fake_installed():
+            return True, "dev-mode"
         path = shutil.which(cmd)
         if path is None:
             return False, None
@@ -62,6 +68,8 @@ def _which_check(cmd: str, version_args: tuple[str, ...] | None = None):
 
 def _file_check(path: str):
     def _check() -> tuple[bool, str | None]:
+        if dev_fake_installed():
+            return True, "dev-mode"
         exists = Path(path).exists()
         return exists, "installed" if exists else None
     return _check

@@ -19,17 +19,7 @@ from server import (
     parse_xrandr_outputs,
     validate_display_apply,
 )
-from status import (
-    DisplaySessionConfigStatus,
-    DisplaySessionScriptStatus,
-    DisplaySessionStatus,
-    GdmWaylandStatus,
-    RemoteAccessStatus,
-    ToolStatus,
-    VpnStatus,
-    WebServerStatus,
-    XorgTouchscreenConfigStatus,
-)
+from status import GdmWaylandStatus
 
 VALID_WIREGUARD_CONFIG = """\
 [Interface]
@@ -67,22 +57,25 @@ def test_command_previews_are_allowlisted_vas_commands() -> None:
     )
 
 
-def test_dashboard_route_renders_status_without_command_preview() -> None:
+def test_home_route_renders_monitor_page() -> None:
     app = create_app()
 
-    with _patched_status_collectors():
-        response = app.test_client().get("/")
+    response = app.test_client().get("/")
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "Core Tools" in body
-    assert "VPN" in body
-    assert "Remote" in body
-    assert "123456789" in body
-    assert "Web Server" in body
+    assert "System Monitor" in body
+    assert "/api/monitor/metrics" in body
     assert "sudo vas install --component all" not in body
-    assert "sudo vas wireguard sync --name wg0" not in body
-    assert "http://0.0.0.0:8888" in body
+
+
+def test_monitor_route_redirects_to_home() -> None:
+    app = create_app()
+
+    response = app.test_client().get("/monitor", follow_redirects=False)
+
+    assert response.status_code in (301, 302)
+    assert response.headers["Location"] == "/"
 
 
 def test_health_route_returns_ok() -> None:
@@ -293,54 +286,3 @@ def test_display_apply_validation_rejects_unknown_values() -> None:
     assert "Touchscreen device is not available: Mouse" in errors
 
 
-def _patched_status_collectors() -> Any:
-    return patch.multiple(
-        "server",
-        collect_status=lambda: (
-            ToolStatus("Git", "git", True, "git version 2.34.1", "/usr/bin/git"),
-            ToolStatus("Docker", "docker", True, "Docker version 29.5.3", "/usr/bin/docker"),
-        ),
-        collect_display_session_status=lambda: DisplaySessionStatus("x11", True, "XDG_SESSION_TYPE"),
-        collect_display_session_config_status=lambda: DisplaySessionConfigStatus(Path("/home/first/.xprofile"), True, True),
-        collect_display_session_script_status=lambda: DisplaySessionScriptStatus(
-            Path("/home/first/.config/vending-auto-setup/display-session.sh"),
-            True,
-            True,
-            True,
-        ),
-        collect_xorg_touchscreen_config_status=lambda: XorgTouchscreenConfigStatus(
-            Path("/etc/X11/xorg.conf.d/99-vending-touchscreen.conf"),
-            True,
-            True,
-        ),
-        collect_remote_access_status=lambda: RemoteAccessStatus(
-            anydesk_installed=True,
-            anydesk_version="anydesk version 7.1.0",
-            anydesk_id="123456789",
-            anydesk_status="online",
-            service_enabled="enabled",
-            service_active="active",
-        ),
-        collect_vpn_status=lambda: VpnStatus(
-            interface_name="wg0",
-            wg_installed=True,
-            wg_version="wireguard-tools v1.0.0",
-            app_config_path=Path("/home/first/.config/vending-auto-setup/wireguard/configs/wg0.conf"),
-            app_config_exists=True,
-            active_config_path=Path("/etc/wireguard/wg0.conf"),
-            active_config_exists=True,
-            history_dir=Path("/home/first/.config/vending-auto-setup/wireguard/history/wg0"),
-            history_exists=True,
-            service_enabled="enabled",
-            service_active="active",
-            interface_exists=True,
-            handshake_peers=1,
-        ),
-        collect_web_server_status=lambda: WebServerStatus(
-            host="0.0.0.0",
-            port=8888,
-            url="http://0.0.0.0:8888",
-            service_enabled="enabled",
-            service_active="active",
-        ),
-    )

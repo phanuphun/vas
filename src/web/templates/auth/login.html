@@ -51,28 +51,28 @@
 </head>
 <body class="bg-page text-ink min-h-screen flex items-center justify-center px-4">
 
-  <div class="w-full max-w-[380px] fade-up">
-
-    <!-- Brand -->
-    <div class="flex flex-col items-center mb-8">
-      <div class="w-12 h-12 rounded-xl bg-accent flex items-center justify-center mb-3">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="3" width="20" height="14" rx="2"/>
-          <line x1="8" y1="21" x2="16" y2="21"/>
-          <line x1="12" y1="17" x2="12" y2="21"/>
-        </svg>
-      </div>
-      <h1 class="font-display text-[1.4rem] font-bold text-ink">VAS</h1>
-      <p class="text-[0.8rem] text-faint mt-0.5">Vending Auto Setup</p>
-    </div>
+  <div class="w-full max-w-[400px] fade-up">
 
     <!-- Card -->
-    <div class="bg-card border border-line/10 rounded-xl p-6">
-      <h2 class="font-display text-[1rem] font-bold text-ink mb-1">เข้าสู่ระบบ</h2>
-      <p class="text-[0.8rem] text-muted mb-5">กรอกชื่อผู้ใช้และรหัสผ่านเพื่อเข้าใช้งาน</p>
+    <div class="bg-card border border-line/10 rounded-2xl p-7">
+
+      <!-- Brand row -->
+      <div class="flex items-center gap-2.5 pb-5 border-b border-line/10 mb-6">
+        <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+        </div>
+        <span class="font-display text-[1.1rem] font-bold text-ink">VAS</span>
+      </div>
+
+      <!-- Heading -->
+      <h1 class="font-display text-[1.5rem] font-bold text-ink mb-6">ยินดีต้อนรับกลับ, เข้าสู่ระบบ</h1>
 
       {% if error %}
-      <div class="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-danger/8 border border-danger/20 mb-4">
+      <div class="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-danger/8 border border-danger/20 mb-5">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(239 68 68)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0">
           <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
@@ -80,14 +80,15 @@
       </div>
       {% endif %}
 
-      <form method="POST" action="{{ url_for('auth_login') }}" class="flex flex-col gap-4">
+      <form method="POST" action="{{ url_for('auth_login') }}" class="flex flex-col gap-5">
         <input type="hidden" name="next" value="{{ next or '' }}">
 
         <div class="flex flex-col gap-1.5">
           <label class="text-[0.78rem] font-semibold text-ink">ชื่อผู้ใช้</label>
           <input type="text" name="username" value="{{ username or '' }}" autocomplete="username"
-                 placeholder="ชื่อผู้ใช้" required autofocus
-                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.875rem]
+                 placeholder="username"
+                 required autofocus
+                 class="w-full px-3.5 py-2.5 border border-line/15 rounded-xl bg-card text-ink text-[0.9rem]
                         outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10
                         placeholder:text-faint transition">
         </div>
@@ -96,12 +97,12 @@
           <label class="text-[0.78rem] font-semibold text-ink">รหัสผ่าน</label>
           <div class="relative">
             <input type="password" name="password" id="password-field" autocomplete="current-password"
-                   placeholder="รหัสผ่าน" required
-                   class="w-full px-3 py-2 pr-10 border border-line/15 rounded-lg bg-card text-ink text-[0.875rem]
+                   placeholder="••••••••" required
+                   class="w-full px-3.5 py-2.5 pr-10 border border-line/15 rounded-xl bg-card text-ink text-[0.9rem]
                           outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10
                           placeholder:text-faint transition">
             <button type="button" onclick="togglePw()" tabindex="-1"
-                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-ink transition-colors p-0.5">
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-faint hover:text-ink transition-colors p-0.5">
               <svg id="eye-open" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
               </svg>
@@ -113,11 +114,18 @@
         </div>
 
         <button type="submit"
-                class="w-full py-2.5 bg-accent text-white font-semibold text-[0.875rem] rounded-lg
-                       hover:bg-blue-700 active:scale-[0.99] transition-all">
+                class="w-full flex items-center justify-center gap-2 py-3 mt-1 bg-accent text-white font-semibold text-[0.9rem] rounded-xl
+                       hover:bg-blue-700 active:scale-[0.99] transition-all min-h-[44px]">
           เข้าสู่ระบบ
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+          </svg>
         </button>
       </form>
+
+      <p class="text-center text-[0.82rem] text-muted mt-6">
+        ยังไม่มีบัญชี? <a href="#" class="text-accent font-semibold underline underline-offset-2">สมัครสมาชิก</a>
+      </p>
     </div>
 
     <p class="text-center text-[0.72rem] text-faint mt-5">VAS · Vending Auto Setup</p>

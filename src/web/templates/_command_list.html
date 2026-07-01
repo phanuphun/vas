@@ -1,11 +1,54 @@
 <ul class="flex flex-col divide-y divide-line/7">
   {% for command in commands %}
-  <li class="px-5 py-3">
+  <li class="px-5 py-4">
     <div class="flex items-center gap-1.5 mb-1">
-      <strong class="text-[0.82rem] font-semibold text-ink">{{ command.label }}</strong>
+      <strong class="text-[0.85rem] font-semibold text-ink font-display">{{ command.label }}</strong>
       {% if command.requires_root %}<span class="zone zone-caution">sudo</span>{% endif %}
     </div>
-    <code class="block font-mono text-[0.78rem] text-muted bg-surface px-3 py-1.5 rounded-md whitespace-pre-wrap break-all">{{ command.command }}</code>
+    {% if command.description %}
+    <p class="text-[0.78rem] text-muted leading-relaxed mb-2">{{ command.description }}</p>
+    {% endif %}
+    <div class="relative">
+      <code class="block font-mono text-[0.78rem] text-ink bg-surface pl-3 pr-10 py-2 rounded-md whitespace-pre-wrap break-all">{{ command.command }}</code>
+      <button type="button" onclick="copyVasCommand(this)" data-command="{{ command.command }}"
+              title="คัดลอกคำสั่ง"
+              class="copy-cmd-btn absolute right-1.5 top-1.5 w-7 h-7 grid place-items-center rounded-md text-faint
+                     hover:text-ink hover:bg-line/6 transition-colors">
+        <iconify-icon icon="lucide:copy" width="13" height="13"></iconify-icon>
+      </button>
+    </div>
   </li>
   {% endfor %}
 </ul>
+
+<script>
+  // ป้องกันประกาศซ้ำเวลา partial ถูก include หลายครั้งในหน้าเดียว (Install / Reset / Display / VPN / Server)
+  if (typeof window.copyVasCommand !== "function") {
+    window.copyVasCommand = function (btn) {
+      var text = btn.getAttribute("data-command") || "";
+      var icon = btn.querySelector("iconify-icon");
+      var restore = function () {
+        icon.setAttribute("icon", "lucide:copy");
+        btn.classList.remove("text-safe");
+      };
+      var markCopied = function () {
+        icon.setAttribute("icon", "lucide:check");
+        btn.classList.add("text-safe");
+        window.clearTimeout(btn._copyTimer);
+        btn._copyTimer = window.setTimeout(restore, 1200);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(markCopied).catch(function () {});
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); markCopied(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    };
+  }
+</script>

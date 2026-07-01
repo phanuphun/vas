@@ -26,6 +26,7 @@ from flask import Flask, render_template, request, redirect
 
 from system.audit import (
     create_system_log_snapshot,
+    delete_system_snapshot,
     list_system_snapshots,
     read_system_snapshot,
     system_snapshot_dir,
@@ -47,13 +48,15 @@ from system.status import (
     collect_display_session_config_status,
     collect_display_session_script_status,
     collect_display_session_status,
-    collect_openssh_status,
     collect_qr_reader_status,
     collect_remote_access_status,
-    collect_status,
     collect_vpn_status,
-    collect_web_server_status,
     collect_xorg_touchscreen_config_status,
+)
+from features.remote.anydesk import (
+    VALID_SERVICE_ACTIONS as ANYDESK_SERVICE_ACTIONS,
+    service_action as anydesk_service_action,
+    set_unattended_password as anydesk_set_unattended_password,
 )
 from features.wireguard.manager import (
     WireGuardValidationResult,
@@ -71,38 +74,105 @@ WEB_DIR = Path(__file__).parent / "web"
 INSTALL_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk", "openssh", "qr-udev")
 LIFECYCLE_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk", "openssh", "qr-udev")
 WIREGUARD_ACTIONS = (
-    ("Install", "sudo vas wireguard install"),
-    ("Create template", "vas wireguard init-config --name wg0 --output ./wg0.conf"),
-    ("Validate config", "vas wireguard validate --config ./wg0.conf"),
-    ("Save config", "vas wireguard save --name wg0 --config ./wg0.conf"),
-    ("Sync config", "sudo vas wireguard sync --name wg0"),
-    ("Show status", "vas wireguard status --name wg0"),
-    ("List history", "vas wireguard history --name wg0"),
-    ("Unsync config", "sudo vas wireguard unsync --name wg0"),
+    (
+        "Install",
+        "sudo vas wireguard install",
+        "ติดตั้งแพ็กเกจ WireGuard และ wireguard-tools ผ่าน apt",
+    ),
+    (
+        "Create template",
+        "vas wireguard init-config --name wg0 --output ./wg0.conf",
+        "สร้างไฟล์ config ตัวอย่างสำหรับ interface ที่ระบุ ไว้แก้ไขก่อนใช้งานจริง",
+    ),
+    (
+        "Validate config",
+        "vas wireguard validate --config ./wg0.conf",
+        "ตรวจสอบ syntax และค่าที่จำเป็นในไฟล์ config ก่อนนำไปใช้",
+    ),
+    (
+        "Save config",
+        "vas wireguard save --name wg0 --config ./wg0.conf",
+        "บันทึก config ที่ผ่านการตรวจสอบแล้วเข้าประวัติของระบบ",
+    ),
+    (
+        "Sync config",
+        "sudo vas wireguard sync --name wg0",
+        "นำ config ที่บันทึกไว้ไปเขียนทับที่ /etc/wireguard และเริ่ม service ให้ตรงกัน",
+    ),
+    (
+        "Show status",
+        "vas wireguard status --name wg0",
+        "แสดงสถานะการเชื่อมต่อและ service ปัจจุบันของ interface นี้",
+    ),
+    (
+        "List history",
+        "vas wireguard history --name wg0",
+        "แสดงรายการ config เวอร์ชันก่อนหน้าที่เคยบันทึกไว้",
+    ),
+    (
+        "Unsync config",
+        "sudo vas wireguard unsync --name wg0",
+        "หยุด service และถอด config ออกจาก /etc/wireguard โดยไม่ลบประวัติ",
+    ),
 )
 DISPLAY_ACTIONS = (
-    ("Show display status", "vas display status --display :0"),
-    ("List touchscreens", "vas display list-touch --display :0"),
-    ("Disable GDM Wayland", "sudo vas display disable-wayland"),
-    ("Enable GDM Wayland", "sudo vas display enable-wayland"),
+    (
+        "Show display status",
+        "vas display status --display :0",
+        "แสดงค่าจอแสดงผลปัจจุบัน (ความละเอียด ตำแหน่ง การหมุนจอ) ของ display ที่ระบุ",
+    ),
+    (
+        "List touchscreens",
+        "vas display list-touch --display :0",
+        "แสดงรายชื่ออุปกรณ์ touchscreen ที่ตรวจพบบน display นี้",
+    ),
+    (
+        "Disable GDM Wayland",
+        "sudo vas display disable-wayland",
+        "ปิดใช้งาน Wayland ใน GDM เพื่อบังคับให้ desktop session ใช้ Xorg แทน",
+    ),
+    (
+        "Enable GDM Wayland",
+        "sudo vas display enable-wayland",
+        "เปิดใช้งาน Wayland ใน GDM กลับคืน (ยกเลิกการบังคับ Xorg)",
+    ),
     (
         "Apply runtime",
         "vas display apply --display :0 --output Virtual1 --touch 'Vending Virtual Touchscreen' --rotate normal",
+        "ปรับ output, touch mapping และการหมุนจอทันทีในเซสชันปัจจุบัน (ไม่ถาวร)",
     ),
     (
         "Persist session",
         "vas display persist-session --display :0 --output Virtual1 --touch 'Vending Virtual Touchscreen' --rotate normal",
+        "บันทึกค่าการตั้งค่าจอ/ทัชให้รันอัตโนมัติทุกครั้งที่ desktop session เริ่มทำงาน",
     ),
     (
         "Persist touch in Xorg",
         "sudo vas display persist-xorg --touch 'Vending Virtual Touchscreen' --rotate normal",
+        "เขียนค่าการหมุนจอทัชลงไฟล์ Xorg config ให้มีผลถาวรระดับระบบ",
     ),
 )
 SERVER_ACTIONS = (
-    ("Start background service", "sudo vas server start --host 0.0.0.0 --port 8888"),
-    ("Show service status", "vas server status"),
-    ("Run foreground", "vas server run --host 0.0.0.0 --port 8888"),
-    ("Stop service", "sudo vas server stop"),
+    (
+        "Start background service",
+        "sudo vas server start --host 0.0.0.0 --port 8888",
+        "ติดตั้ง systemd service และเริ่มรัน VAS web server เป็น background process",
+    ),
+    (
+        "Show service status",
+        "vas server status",
+        "แสดงสถานะ systemd service ของ VAS server (running/stopped, uptime)",
+    ),
+    (
+        "Run foreground",
+        "vas server run --host 0.0.0.0 --port 8888",
+        "รัน VAS web server แบบ foreground ในเทอร์มินัลปัจจุบัน เหมาะสำหรับ debug",
+    ),
+    (
+        "Stop service",
+        "sudo vas server stop",
+        "หยุด systemd service ของ VAS server",
+    ),
 )
 ROTATION_LABELS = (
     ("normal", "Normal"),
@@ -117,6 +187,7 @@ class CommandPreview:
     label: str
     command: str
     requires_root: bool
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -206,20 +277,8 @@ def create_app() -> Flask:
         }
 
     @app.get("/")
-    def dashboard() -> str:
-        return render_template(
-            "dashboard.html",
-            tools=collect_status(),
-            session=collect_display_session_status(),
-            display_config=collect_display_session_config_status(),
-            display_script=collect_display_session_script_status(),
-            touchscreen=collect_xorg_touchscreen_config_status(),
-            remote=collect_remote_access_status(),
-            openssh=collect_openssh_status(),
-            vpn=collect_vpn_status(),
-            web_server=collect_web_server_status(),
-            qr_reader=collect_qr_reader_status(),
-        )
+    def monitor_page() -> str:
+        return render_template("monitor.html")
 
     @app.get("/install")
     def install() -> str:
@@ -239,6 +298,10 @@ def create_app() -> Flask:
             config_validation=_validate_wireguard_path(vpn.app_config_path),
             history_entries=collect_wireguard_history(vpn.interface_name),
         )
+
+    @app.get("/anydesk")
+    def anydesk_page() -> str:
+        return render_template("anydesk.html", remote=collect_remote_access_status())
 
     @app.get("/logs")
     def logs() -> str:
@@ -272,6 +335,19 @@ def create_app() -> Flask:
         except (FileNotFoundError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 404
         return {"status": "ok", "snapshot": snapshot}
+
+    @app.delete("/api/logs/system/<snapshot_id>")
+    def logs_system_delete_api(snapshot_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        try:
+            deleted = delete_system_snapshot(snapshot_id)
+        except (FileNotFoundError, OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 404
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("snapshot_deleted", {"id": deleted.get("id"), "path": deleted.get("path")})
+        except Exception:
+            pass
+        return {"status": "ok", "snapshot": deleted}
 
     @app.get("/api/wireguard/config")
     def wireguard_config() -> dict[str, object]:
@@ -390,12 +466,61 @@ def create_app() -> Flask:
             return {"status": "error", "errors": [str(error)]}, 400
         return {"status": "ok", "id": sanitize_history_id(history_id), "deleted": not path.exists()}
 
+    @app.get("/api/anydesk/status")
+    def anydesk_status_api() -> dict[str, object]:
+        remote = collect_remote_access_status()
+        return {
+            "status": "ok",
+            "installed": remote.anydesk_installed,
+            "version": remote.anydesk_version,
+            "id": remote.anydesk_id,
+            "online_status": remote.anydesk_status,
+            "service_enabled": remote.service_enabled,
+            "service_active": remote.service_active,
+        }
+
+    @app.post("/api/anydesk/action")
+    def anydesk_action_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action", "")).strip()
+        if action not in ANYDESK_SERVICE_ACTIONS:
+            return {"status": "error", "errors": [f"Unknown AnyDesk action: {action}"]}, 400
+        try:
+            result = anydesk_service_action(CommandRunner(), action)
+        except (CommandExecutionError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip() or f"systemctl {action} anydesk ล้มเหลว"
+            return {"status": "error", "errors": [detail]}, 500
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("anydesk_service_action", {"action": action})
+        except Exception:
+            pass
+        return {"status": "ok", "action": action}
+
+    @app.post("/api/anydesk/password")
+    def anydesk_password_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        password = str(payload.get("password", ""))
+        ok, message = anydesk_set_unattended_password(password)
+        if not ok:
+            return {"status": "error", "errors": [message]}, 400
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("anydesk_password_set", {})
+        except Exception:
+            pass
+        return {"status": "ok", "message": message}
+
     @app.get("/commands")
     def commands() -> str:
+        reset_all = build_reset_commands()
         return render_template(
             "command_docs.html",
             install_commands=build_install_commands(),
-            reset_commands=build_reset_commands(),
+            uninstall_commands=[c for c in reset_all if c.command.startswith("sudo vas uninstall")],
+            reset_only_commands=[c for c in reset_all if c.command.startswith("sudo vas reset")],
             display_commands=build_display_commands(),
             wireguard_commands=build_wireguard_commands(),
             server_commands=build_server_commands(),
@@ -1169,13 +1294,15 @@ def create_app() -> Flask:
     def nav_status_api() -> dict[str, object]:
         import shutil as _shutil
         from features.qr.registry import load_installed_devices
+        from system.utils import dev_fake_installed
         installed_devices = {d["id"]: True for d in load_installed_devices()}
+        fake = dev_fake_installed()
         return {
             "status": "ok",
             "installed": {
-                "wireguard": _shutil.which("wg") is not None,
-                "anydesk":   _shutil.which("anydesk") is not None,
-                "openssh":   _shutil.which("sshd") is not None,
+                "wireguard": fake or _shutil.which("wg") is not None,
+                "anydesk":   fake or _shutil.which("anydesk") is not None,
+                "openssh":   fake or _shutil.which("sshd") is not None,
             },
             "devices": installed_devices,
         }  # type: ignore[return-value]
@@ -1261,10 +1388,13 @@ def create_app() -> Flask:
         )
 
     # ── System Monitor routes ────────────────────────────────────
+    # Monitor is now the home page (see "/" route above); keep the old
+    # /monitor URL working as a redirect for existing bookmarks/links.
 
     @app.get("/monitor")
-    def monitor_page() -> str:
-        return render_template("monitor.html")
+    def monitor_page_redirect():  # type: ignore[no-untyped-def]  # matches auth_setup/auth_login redirect-only handlers below
+        from flask import redirect as _redir, url_for as _url_for
+        return _redir(_url_for("monitor_page"))
 
     @app.get("/api/monitor/metrics")
     def monitor_metrics_api() -> dict[str, object]:
@@ -1343,7 +1473,7 @@ def create_app() -> Flask:
         user, _ = authenticate(username, password)
         if user:
             _sess["vas_user_id"] = user["id"]
-        return _redir(_url_for("dashboard"))
+        return _redir(_url_for("monitor_page"))
 
     @app.get("/login")
     def auth_login():
@@ -1352,7 +1482,7 @@ def create_app() -> Flask:
         if is_first_run():
             return _redir(_url_for("auth_setup"))
         if _sess.get("vas_user_id"):
-            return _redir(_url_for("dashboard"))
+            return _redir(_url_for("monitor_page"))
         return render_template("auth/login.html", next=request.args.get("next", ""))
 
     @app.post("/login")
@@ -1366,10 +1496,10 @@ def create_app() -> Flask:
         if user is None:
             return render_template("auth/login.html", error=err, username=username, next=next_url)
         _sess["vas_user_id"] = user["id"]
-        # Redirect to next or dashboard — ป้องกัน open redirect
+        # Redirect to next or home (Monitor) — ป้องกัน open redirect
         if next_url and next_url.startswith("/") and not next_url.startswith("//"):
             return _redir(next_url)
-        return _redir(_url_for("dashboard"))
+        return _redir(_url_for("monitor_page"))
 
     @app.post("/logout")
     def auth_logout():
@@ -1543,6 +1673,74 @@ def create_app() -> Flask:
             return {"status": "error", "errors": [err]}, 400
         return {"status": "ok"}
 
+    # ── Update routes ─────────────────────────────────────────────
+
+    @app.get("/update")
+    def update_page() -> str:
+        from core.config import APP_VERSION
+        return render_template("update.html", current_version=APP_VERSION)
+
+    @app.get("/api/update/check")
+    def update_check_api() -> dict[str, object]:
+        from services.updater import check_latest_release
+        return check_latest_release()  # type: ignore[return-value]
+
+    @app.get("/api/update/stream")
+    def update_stream_api():  # type: ignore[return]
+        """SSE stream ของขั้นตอนการอัปเดต — เริ่มอัปเดตทันทีถ้ายังไม่มีงานทำอยู่"""
+        from flask import stream_with_context, Response
+        from services.updater import start_web_update, get_update_queue, is_updating
+
+        if not is_updating():
+            ok, err = start_web_update()
+            if not ok:
+                def _err_only():
+                    yield f"event: error-event\ndata: {_json_dumps({'msg': err})}\n\n"
+                return Response(stream_with_context(_err_only()), mimetype="text/event-stream")
+
+        def generate():
+            q = get_update_queue()
+            if q is None:
+                yield f"event: error-event\ndata: {_json_dumps({'msg': 'Update queue not found'})}\n\n"
+                return
+            while True:
+                try:
+                    item = q.get(timeout=30)
+                except Exception:
+                    yield "event: heartbeat\ndata: {}\n\n"
+                    continue
+                ev = item.get("event")
+                if ev == "progress":
+                    yield f"event: progress\ndata: {_json_dumps(item)}\n\n"
+                elif ev == "log":
+                    yield f"event: log\ndata: {_json_dumps(item)}\n\n"
+                elif ev == "done":
+                    yield f"event: done\ndata: {_json_dumps({})}\n\n"
+                    return
+                elif ev == "error":
+                    yield f"event: error-event\ndata: {_json_dumps({'msg': item.get('msg', '')})}\n\n"
+                    return
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/api/server/restart")
+    def server_restart_api() -> dict[str, object]:
+        import threading as _threading
+        from services.server_service import SERVICE_UNIT
+        from core.runner import CommandRunner as _CommandRunner
+
+        def _delayed_restart() -> None:
+            import time as _time
+            _time.sleep(0.5)  # ให้ response กลับไปถึง client ก่อน service จะ restart
+            _CommandRunner(dry_run=False).run(["systemctl", "restart", SERVICE_UNIT], check=False)
+
+        _threading.Thread(target=_delayed_restart, daemon=True).start()
+        return {"status": "ok"}
+
     return app
 
 
@@ -1557,12 +1755,42 @@ def run_server(host: str, port: int, debug: bool) -> None:
     create_app().run(host=host, port=port, debug=debug)
 
 
+def _component_label(component: str) -> str:
+    """คืนชื่อเรียกสั้นๆ ของ component จาก PACKAGES manifest, fallback เป็น component id เอง"""
+    if component == "all":
+        return "ทุกคอมโพเนนต์"
+    from features.packages.settings import PACKAGES
+    for package in PACKAGES:
+        if package["id"] == component:
+            return str(package.get("name", component))
+    return component
+
+
+def _component_description(component: str) -> str:
+    """คืนคำอธิบายของ component จาก PACKAGES manifest (ใช้ข้อมูลชุดเดียวกับหน้าติดตั้งแพ็กเกจ)"""
+    if component == "all":
+        return (
+            "ติดตั้งทุกคอมโพเนนต์ที่รองรับในคำสั่งเดียว "
+            "(git, node, docker, wireguard, anydesk, openssh, qr-udev)"
+        )
+    from features.packages.settings import PACKAGES
+    for package in PACKAGES:
+        if package["id"] == component:
+            return str(package.get("description", ""))
+    return ""
+
+
+_UNINSTALL_NOTE = "ถอนการติดตั้งแพ็กเกจ แต่เก็บไฟล์ config ที่เกี่ยวข้องไว้"
+_RESET_NOTE = "ถอนการติดตั้งแพ็กเกจและลบไฟล์ config ที่เกี่ยวข้องทั้งหมด กลับสู่ค่าเริ่มต้น"
+
+
 def build_install_commands() -> tuple[CommandPreview, ...]:
     return tuple(
         CommandPreview(
             label=f"Install {component}",
             command=f"sudo vas install --component {component}",
             requires_root=True,
+            description=_component_description(component),
         )
         for component in INSTALL_COMPONENTS
     )
@@ -1571,12 +1799,14 @@ def build_install_commands() -> tuple[CommandPreview, ...]:
 def build_reset_commands() -> tuple[CommandPreview, ...]:
     commands: list[CommandPreview] = []
     for action in ("uninstall", "reset"):
+        note = _UNINSTALL_NOTE if action == "uninstall" else _RESET_NOTE
         for component in LIFECYCLE_COMPONENTS:
             commands.append(
                 CommandPreview(
                     label=f"{action.title()} {component}",
                     command=f"sudo vas {action} --component {component}",
                     requires_root=True,
+                    description=f"{note} ({_component_label(component)})",
                 )
             )
     return tuple(commands)
@@ -1584,15 +1814,25 @@ def build_reset_commands() -> tuple[CommandPreview, ...]:
 
 def build_wireguard_commands() -> tuple[CommandPreview, ...]:
     return tuple(
-        CommandPreview(label=label, command=command, requires_root=command.startswith("sudo "))
-        for label, command in WIREGUARD_ACTIONS
+        CommandPreview(
+            label=label,
+            command=command,
+            requires_root=command.startswith("sudo "),
+            description=description,
+        )
+        for label, command, description in WIREGUARD_ACTIONS
     )
 
 
 def build_display_commands() -> tuple[CommandPreview, ...]:
     return tuple(
-        CommandPreview(label=label, command=command, requires_root=command.startswith("sudo "))
-        for label, command in DISPLAY_ACTIONS
+        CommandPreview(
+            label=label,
+            command=command,
+            requires_root=command.startswith("sudo "),
+            description=description,
+        )
+        for label, command, description in DISPLAY_ACTIONS
     )
 
 
@@ -1657,8 +1897,13 @@ def _wireguard_history_path(name: str, history_id: str) -> Path:
 
 def build_server_commands() -> tuple[CommandPreview, ...]:
     return tuple(
-        CommandPreview(label=label, command=command, requires_root=command.startswith("sudo "))
-        for label, command in SERVER_ACTIONS
+        CommandPreview(
+            label=label,
+            command=command,
+            requires_root=command.startswith("sudo "),
+            description=description,
+        )
+        for label, command, description in SERVER_ACTIONS
     )
 
 

@@ -1,105 +1,566 @@
 {% extends base_template %}
+{% block page_title %}บันทึกระบบ — VAS{% endblock %}
 {% block header_title %}บันทึกระบบ{% endblock %}
 
 {% block header_actions %}
-<button class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors" id="refreshSystemLogs" type="button">Refresh</button>
-<button class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors" id="collectSystemLog" type="button">Collect Snapshot</button>
+<button class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors" id="refreshSystemLogs" type="button">
+  <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Refresh
+</button>
+<button class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors" id="collectSystemLog" type="button">
+  <iconify-icon icon="lucide:camera" width="13" height="13"></iconify-icon>Collect Snapshot
+</button>
 {% endblock %}
 
 {% block content %}
-<div class="mb-1">
-  <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · บันทึกระบบ</p>
-  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1">System Logs</h1>
-  <p class="text-[0.82rem] text-muted mt-0.5">{{ system_snapshot_dir }}</p>
+<style>
+  #systemLogContent { font-variant-numeric: tabular-nums; }
+  .log-line { display: flex; gap: 0.75rem; padding: 0.06rem 1rem; white-space: pre-wrap; word-break: break-all; }
+  .log-line:hover { background: rgb(var(--c-surface)); }
+  .log-line .ln { flex-shrink: 0; width: 2.75rem; text-align: right; color: rgb(var(--c-faint) / 0.7); user-select: none; }
+  .log-line .txt { flex: 1; min-width: 0; }
+  .log-line.is-section { background: rgb(var(--c-accent) / 0.06); font-weight: 600; color: rgb(var(--c-ink)); }
+  .log-line.is-meta { color: rgb(var(--c-faint)); font-style: italic; }
+  .log-line.is-error { color: #b1453a; }
+  .log-line.is-warn { color: #92660b; }
+  .log-line.is-filtered { display: none; }
+  mark.log-hit { background: rgb(var(--c-caution) / 0.4); color: rgb(var(--c-ink)); border-radius: 2px; padding: 0 1px; }
+
+  .snap-item.is-active { background: rgb(var(--c-accent) / 0.06); }
+  .snap-item.is-active .snap-title { color: rgb(var(--c-accent)); }
+  .snap-item .snap-del { opacity: 0; }
+  .snap-item:hover .snap-del { opacity: 1; }
+
+  #confirm-modal { display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; }
+  #confirm-modal.is-open { display: flex; }
+  #confirm-backdrop { position: absolute; inset: 0; background: rgb(var(--c-ink) / 0.35); backdrop-filter: blur(2px); }
+  #confirm-box { position: relative; background: rgb(var(--c-card)); border: 1px solid rgb(var(--c-line) / 0.12); border-radius: 1rem; box-shadow: 0 8px 32px rgb(0 0 0 / 0.12); width: 100%; max-width: 400px; margin: 1rem; padding: 1.5rem; animation: fadeUp 0.18s ease forwards; }
+</style>
+
+<div class="flex flex-col gap-4" id="logsRoot" data-snapshot-dir="{{ system_snapshot_dir }}">
+
+  <!-- ── 1. PAGE HEADER ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · บันทึกระบบ</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">System Logs</h1>
+    <p class="text-[0.82rem] text-muted mt-1 flex items-center gap-1.5 min-w-0">
+      <iconify-icon icon="lucide:folder" width="13" height="13" class="text-faint flex-shrink-0"></iconify-icon>
+      <code class="text-[0.72rem] font-mono truncate" title="{{ system_snapshot_dir }}">{{ system_snapshot_dir }}</code>
+    </p>
+  </div>
+
+  <!-- ── 2. SYSTEM LOG SNAPSHOTS ── -->
+  <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+
+    <div class="flex items-center justify-between gap-3 px-4 py-4 border-b border-line/10 flex-wrap">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0">
+          <iconify-icon icon="lucide:scroll-text" width="16" height="16" class="text-muted"></iconify-icon>
+        </div>
+        <div class="min-w-0">
+          <h2 class="text-[0.88rem] font-semibold text-ink font-display">System Log Snapshots</h2>
+          <p class="text-[0.73rem] text-muted mt-0.5 leading-snug">รวม auth.log, syslog, kern.log และ journalctl ล่าสุด ณ เวลาที่เก็บ — ใช้ตรวจสอบปัญหาระบบย้อนหลัง</p>
+        </div>
+      </div>
+      <span class="zone zone-info flex-shrink-0" id="snapshotCountBadge">0 snapshots</span>
+    </div>
+
+    <div class="flex flex-col lg:flex-row" style="min-height:520px;">
+
+      <!-- Snapshot list -->
+      <div class="w-full lg:w-72 lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-line/10 flex flex-col">
+        <div class="px-4 py-2.5 border-b border-line/10 bg-surface/40 flex-shrink-0">
+          <span class="text-[0.72rem] font-semibold text-muted">รายการ Snapshot</span>
+        </div>
+        <div id="systemSnapshotList" class="flex-1 overflow-y-auto" style="max-height:520px;">
+          {% for snapshot in system_snapshots %}
+          <button class="snap-item w-full flex items-start justify-between gap-2 px-4 py-3 text-left hover:bg-surface transition-colors border-b border-line/7 last:border-b-0 focus:outline-none focus:bg-surface"
+                  data-system-snapshot="{{ snapshot.id }}" type="button">
+            <span class="min-w-0">
+              <strong class="snap-title text-[0.78rem] font-semibold text-ink block truncate">{{ snapshot.id }}</strong>
+              <small class="snap-meta text-[0.68rem] text-faint block mt-0.5">{{ snapshot.size }} bytes</small>
+            </span>
+            <span class="snap-del flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-faint hover:text-danger hover:bg-danger/8 transition-colors" title="ลบ snapshot นี้">
+              <iconify-icon icon="lucide:trash-2" width="12" height="12"></iconify-icon>
+            </span>
+          </button>
+          {% else %}
+          <div class="flex flex-col items-center gap-2 px-4 py-10 text-center">
+            <iconify-icon icon="lucide:inbox" width="26" height="26" class="text-faint"></iconify-icon>
+            <p class="text-muted text-[0.8rem]">No system log snapshots collected yet.</p>
+            <p class="text-faint text-[0.7rem]">กด "Collect Snapshot" เพื่อเก็บ log ปัจจุบัน</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Log viewer -->
+      <div class="flex-1 flex flex-col min-w-0">
+        <div class="flex items-center gap-3 px-4 py-2.5 border-b border-line/10 flex-wrap flex-shrink-0">
+          <div class="min-w-0 flex-1">
+            <strong class="text-[0.82rem] font-semibold text-ink block truncate" id="systemLogTitle">Select a snapshot</strong>
+            <span class="text-[0.68rem] text-faint truncate block" id="systemLogPath"></span>
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap" id="viewerActions" style="display:none;">
+            <div class="flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card">
+              <iconify-icon icon="lucide:search" width="12" height="12" class="text-faint flex-shrink-0"></iconify-icon>
+              <input type="text" id="systemLogSearch" placeholder="ค้นหาในบันทึก..."
+                     class="w-32 sm:w-44 bg-transparent text-[0.75rem] text-ink outline-none placeholder:text-faint">
+            </div>
+            <button id="btnCopyLog" type="button" title="คัดลอกทั้งหมด"
+                    class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+              <iconify-icon icon="lucide:copy" width="11" height="11"></iconify-icon>Copy
+            </button>
+            <button id="btnDownloadLog" type="button" title="ดาวน์โหลดเป็นไฟล์"
+                    class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+              <iconify-icon icon="lucide:download" width="11" height="11"></iconify-icon>Download
+            </button>
+            <button id="btnDeleteLog" type="button" title="ลบ snapshot นี้"
+                    class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors">
+              <iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Delete
+            </button>
+          </div>
+        </div>
+        <div class="flex-1 overflow-auto bg-surface" style="max-height:520px;">
+          <div id="systemLogEmpty" class="flex flex-col items-center justify-center gap-2 py-16 text-center h-full">
+            <iconify-icon icon="lucide:file-search" width="28" height="28" class="text-faint"></iconify-icon>
+            <p class="text-muted text-[0.82rem]">System log content will appear here.</p>
+            <p class="text-faint text-[0.72rem]">เลือก snapshot ทางซ้ายเพื่อดูรายละเอียด</p>
+          </div>
+          <div id="systemLogContent" class="hidden font-mono text-[0.75rem] leading-relaxed py-2"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── 3. AUDIT TRAIL ── -->
+  <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="flex items-center justify-between gap-3 px-4 py-4 border-b border-line/10 flex-wrap">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0">
+          <iconify-icon icon="lucide:history" width="16" height="16" class="text-muted"></iconify-icon>
+        </div>
+        <div class="min-w-0">
+          <h2 class="text-[0.88rem] font-semibold text-ink font-display">เหตุการณ์ล่าสุด</h2>
+          <p class="text-[0.73rem] text-muted mt-0.5 leading-snug">Audit trail ของการกระทำในระบบ เช่น snapshot, config, ผู้ใช้งาน</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <a href="{{ url_for('database_page') }}" class="nav-link inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+          ดูทั้งหมด<iconify-icon icon="lucide:arrow-right" width="11" height="11"></iconify-icon>
+        </a>
+        <button id="btnRefreshAudit" type="button"
+                class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+          <iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Refresh
+        </button>
+      </div>
+    </div>
+    <div class="overflow-x-auto" style="min-height:120px;">
+      <div id="auditLoading" class="flex items-center justify-center py-10 gap-2 text-faint text-[0.8rem]">
+        <span class="spin"></span> กำลังโหลด...
+      </div>
+      <table class="w-full border-collapse text-[0.8rem] hidden" id="auditTable">
+        <thead>
+          <tr class="border-b border-line/10 bg-surface/60">
+            <th class="text-left px-4 py-2 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint whitespace-nowrap">เวลา</th>
+            <th class="text-left px-4 py-2 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint whitespace-nowrap">Action</th>
+            <th class="text-left px-4 py-2 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint whitespace-nowrap">Details</th>
+          </tr>
+        </thead>
+        <tbody id="auditBody" class="divide-y divide-line/7"></tbody>
+      </table>
+      <div id="auditEmpty" class="hidden flex-col items-center justify-center gap-2 py-10 text-center">
+        <iconify-icon icon="lucide:inbox" width="24" height="24" class="text-faint"></iconify-icon>
+        <p class="text-muted text-[0.8rem]">ยังไม่มีเหตุการณ์ที่บันทึกไว้</p>
+      </div>
+      <div id="auditError" class="hidden px-4 py-3 text-[0.8rem] text-danger"></div>
+    </div>
+  </div>
+
 </div>
 
-<div class="bg-card border border-line/10 rounded-xl overflow-hidden">
-  <div class="flex flex-col lg:flex-row" style="min-height:520px;">
-
-    <!-- Snapshot list -->
-    <div class="w-full lg:w-64 lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-line/10 overflow-y-auto">
-      <div id="systemSnapshotList">
-        {% for snapshot in system_snapshots %}
-        <button class="w-full flex flex-col gap-0.5 px-4 py-3 text-left hover:bg-surface transition-colors border-b border-line/7 last:border-b-0 focus:outline-none focus:bg-surface"
-                data-system-snapshot="{{ snapshot.id }}" type="button">
-          <strong class="text-[0.78rem] font-semibold text-ink block">{{ snapshot.id }}</strong>
-          <small class="text-[0.68rem] text-faint">{{ snapshot.path }} | {{ snapshot.size }} bytes</small>
-        </button>
-        {% else %}
-        <p class="text-muted text-[0.82rem] px-4 py-4">No system log snapshots collected yet.</p>
-        {% endfor %}
+<!-- ── Confirm Modal ── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
       </div>
     </div>
-
-    <!-- Log viewer -->
-    <div class="flex-1 flex flex-col min-w-0">
-      <div class="flex items-baseline gap-3 px-4 py-2.5 border-b border-line/10 flex-shrink-0">
-        <strong class="text-[0.82rem] font-semibold text-ink" id="systemLogTitle">Select a snapshot</strong>
-        <span class="text-[0.7rem] text-faint truncate" id="systemLogPath"></span>
-      </div>
-      <pre class="flex-1 overflow-auto px-4 py-3 font-mono text-[0.75rem] leading-relaxed text-ink whitespace-pre bg-surface" id="systemLogContent">System log content will appear here.</pre>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">ยกเลิก</button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        <span>ลบ</span>
+      </button>
     </div>
-
   </div>
 </div>
 
+{% endblock %}
+
+{% block extra_scripts %}
 <script>
-const systemList = document.getElementById("systemSnapshotList");
-const systemTitle = document.getElementById("systemLogTitle");
-const systemPath = document.getElementById("systemLogPath");
-const systemContent = document.getElementById("systemLogContent");
+(function () {
+  "use strict";
 
-function renderSystemSnapshots(snapshots) {
-  if (!snapshots.length) {
-    systemList.innerHTML = '<p class="text-muted text-[0.82rem] px-4 py-4">No system log snapshots collected yet.</p>';
-    return;
+  var listEl      = document.getElementById("systemSnapshotList");
+  var countBadge  = document.getElementById("snapshotCountBadge");
+  var titleEl     = document.getElementById("systemLogTitle");
+  var pathEl      = document.getElementById("systemLogPath");
+  var contentEl   = document.getElementById("systemLogContent");
+  var emptyEl     = document.getElementById("systemLogEmpty");
+  var actionsEl   = document.getElementById("viewerActions");
+  var searchEl    = document.getElementById("systemLogSearch");
+  var collectBtn  = document.getElementById("collectSystemLog");
+
+  var state = { snapshots: [], currentId: null, rawContent: "", searchTimer: null };
+
+  /* ── Helpers ── */
+  function escapeHtml(value) {
+    return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
   }
-  systemList.innerHTML = snapshots.map((snapshot) => `
-    <button class="w-full flex flex-col gap-0.5 px-4 py-3 text-left hover:bg-surface transition-colors border-b border-line/7 last:border-b-0 focus:outline-none focus:bg-surface"
-            data-system-snapshot="${escapeHtml(snapshot.id || "")}" type="button">
-      <strong class="text-[0.78rem] font-semibold text-ink block">${escapeHtml(snapshot.id || "")}</strong>
-      <small class="text-[0.68rem] text-faint">${escapeHtml(snapshot.path || "")} | ${Number(snapshot.size || 0)} bytes</small>
-    </button>
-  `).join("");
-}
+  function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-async function refreshSystemLogs() {
-  const response = await fetch("{{ url_for('logs_system_api') }}");
-  const data = await response.json();
-  renderSystemSnapshots(data.snapshots || []);
-}
-
-async function collectSystemLog() {
-  systemContent.textContent = "Collecting system logs...";
-  const response = await fetch("{{ url_for('logs_system_snapshot_api') }}", { method: "POST" });
-  const data = await response.json();
-  if (!response.ok) { systemContent.textContent = (data.errors || ["Failed to collect system logs."]).join("\n"); return; }
-  await refreshSystemLogs();
-  await showSystemSnapshot(data.snapshot.id);
-}
-
-async function showSystemSnapshot(snapshotId) {
-  const response = await fetch(`/api/logs/system/${encodeURIComponent(snapshotId)}`);
-  const data = await response.json();
-  if (!response.ok) {
-    systemTitle.textContent = "Read error"; systemPath.textContent = "";
-    systemContent.textContent = (data.errors || ["Failed to read system snapshot."]).join("\n");
-    return;
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (!n) return "0 B";
+    var units = ["B","KB","MB","GB","TB"];
+    var u = 0;
+    while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
+    return n.toFixed(u === 0 ? 0 : 1) + " " + units[u];
   }
-  systemTitle.textContent = data.snapshot.id;
-  systemPath.textContent = data.snapshot.path;
-  systemContent.textContent = data.snapshot.content;
-}
 
-function escapeHtml(value) {
-  return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
-}
+  // snapshot id format: YYYYMMDDTHHMMSSZ (UTC, compact ISO)
+  function parseSnapshotDate(id) {
+    var m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(String(id || ""));
+    if (!m) return null;
+    return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+  }
 
-document.getElementById("refreshSystemLogs").addEventListener("click", refreshSystemLogs);
-document.getElementById("collectSystemLog").addEventListener("click", collectSystemLog);
-systemList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-system-snapshot]");
-  if (button) showSystemSnapshot(button.dataset.systemSnapshot);
-});
+  function relTime(date) {
+    var diffMs = Date.now() - date.getTime();
+    var mins = Math.round(diffMs / 60000);
+    if (mins < 1) return "เมื่อสักครู่";
+    if (mins < 60) return mins + " นาทีที่แล้ว";
+    var hrs = Math.round(mins / 60);
+    if (hrs < 24) return hrs + " ชั่วโมงที่แล้ว";
+    var days = Math.round(hrs / 24);
+    return days + " วันที่แล้ว";
+  }
+
+  function fmtSnapshotMeta(snapshot) {
+    var d = parseSnapshotDate(snapshot.id);
+    var sizeStr = fmtBytes(snapshot.size);
+    if (!d) return sizeStr;
+    var abs = d.toLocaleString("th-TH", { hour12: false });
+    return relTime(d) + " · " + abs + " · " + sizeStr;
+  }
+
+  /* ── Snapshot list ── */
+  function renderSnapshotList(snapshots) {
+    state.snapshots = snapshots || [];
+    countBadge.textContent = state.snapshots.length + " snapshot" + (state.snapshots.length === 1 ? "" : "s");
+
+    if (!state.snapshots.length) {
+      listEl.innerHTML =
+        '<div class="flex flex-col items-center gap-2 px-4 py-10 text-center">' +
+        '<iconify-icon icon="lucide:inbox" width="26" height="26" class="text-faint"></iconify-icon>' +
+        '<p class="text-muted text-[0.8rem]">No system log snapshots collected yet.</p>' +
+        '<p class="text-faint text-[0.7rem]">กด "Collect Snapshot" เพื่อเก็บ log ปัจจุบัน</p></div>';
+      return;
+    }
+
+    listEl.innerHTML = state.snapshots.map(function (snapshot) {
+      var id = escapeHtml(snapshot.id || "");
+      var active = snapshot.id === state.currentId;
+      return (
+        '<button class="snap-item w-full flex items-start justify-between gap-2 px-4 py-3 text-left hover:bg-surface transition-colors border-b border-line/7 last:border-b-0 focus:outline-none focus:bg-surface' +
+          (active ? " is-active" : "") + '" data-system-snapshot="' + id + '" type="button">' +
+          '<span class="min-w-0">' +
+            '<strong class="snap-title text-[0.78rem] font-semibold text-ink block truncate">' + id + '</strong>' +
+            '<small class="snap-meta text-[0.68rem] text-faint block mt-0.5">' + escapeHtml(fmtSnapshotMeta(snapshot)) + '</small>' +
+          '</span>' +
+          '<span class="snap-del flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-faint hover:text-danger hover:bg-danger/8 transition-colors" title="ลบ snapshot นี้">' +
+            '<iconify-icon icon="lucide:trash-2" width="12" height="12"></iconify-icon>' +
+          '</span>' +
+        '</button>'
+      );
+    }).join("");
+  }
+
+  function markActiveInList() {
+    listEl.querySelectorAll(".snap-item").forEach(function (btn) {
+      btn.classList.toggle("is-active", btn.dataset.systemSnapshot === state.currentId);
+    });
+  }
+
+  function refreshSystemLogs() {
+    return fetch("{{ url_for('logs_system_api') }}")
+      .then(function (r) { return r.json(); })
+      .then(function (data) { renderSnapshotList(data.snapshots || []); })
+      .catch(function () { showToast("โหลดรายการ snapshot ไม่สำเร็จ", "error"); });
+  }
+
+  /* ── Collect ── */
+  function collectSystemLog() {
+    collectBtn.disabled = true;
+    var original = collectBtn.innerHTML;
+    collectBtn.innerHTML = '<span class="spin spin-white"></span>กำลังเก็บ...';
+    fetch("{{ url_for('logs_system_snapshot_api') }}", { method: "POST" })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        if (!x.ok) { showToast((x.d.errors || ["เก็บ snapshot ไม่สำเร็จ"]).join(" "), "error"); return; }
+        showToast("เก็บ snapshot ใหม่เรียบร้อย", "ok");
+        return refreshSystemLogs().then(function () { return showSystemSnapshot(x.d.snapshot.id); });
+      })
+      .catch(function () { showToast("เก็บ snapshot ไม่สำเร็จ", "error"); })
+      .then(function () {
+        collectBtn.disabled = false;
+        collectBtn.innerHTML = original;
+        refreshAuditTrail();
+      });
+  }
+
+  /* ── Log line rendering ── */
+  function classifyLine(line) {
+    if (/^##\s/.test(line)) return "is-section";
+    if (/^#\s/.test(line)) return "is-meta";
+    if (/error|fail(ed|ure)?|critical|denied/i.test(line)) return "is-error";
+    if (/warn(ing)?/i.test(line)) return "is-warn";
+    return "";
+  }
+
+  function highlight(text, term) {
+    if (!term) return escapeHtml(text);
+    return escapeHtml(text).replace(
+      new RegExp("(" + escapeRegExp(escapeHtml(term)) + ")", "ig"),
+      '<mark class="log-hit">$1</mark>'
+    );
+  }
+
+  function renderLogContent(content, term) {
+    var lines = content.split("\n");
+    var html = lines.map(function (line, i) {
+      var cls = classifyLine(line);
+      var visible = !term || line.toLowerCase().indexOf(term.toLowerCase()) !== -1;
+      return (
+        '<div class="log-line' + (cls ? " " + cls : "") + (visible ? "" : " is-filtered") + '">' +
+          '<span class="ln">' + (i + 1) + '</span>' +
+          '<span class="txt">' + highlight(line, term) + '</span>' +
+        '</div>'
+      );
+    }).join("");
+    contentEl.innerHTML = html;
+  }
+
+  function applySearch() {
+    renderLogContent(state.rawContent, searchEl.value.trim());
+  }
+
+  /* ── Show snapshot ── */
+  function showSystemSnapshot(snapshotId) {
+    state.currentId = snapshotId;
+    markActiveInList();
+    titleEl.textContent = "กำลังโหลด...";
+    pathEl.textContent = "";
+    return fetch("/api/logs/system/" + encodeURIComponent(snapshotId))
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        if (!x.ok) {
+          titleEl.textContent = "Read error";
+          pathEl.textContent = "";
+          emptyEl.classList.remove("hidden");
+          contentEl.classList.add("hidden");
+          actionsEl.style.display = "none";
+          showToast((x.d.errors || ["อ่าน snapshot ไม่สำเร็จ"]).join(" "), "error");
+          return;
+        }
+        titleEl.textContent = x.d.snapshot.id;
+        pathEl.textContent = x.d.snapshot.path;
+        state.rawContent = x.d.snapshot.content || "";
+        searchEl.value = "";
+        renderLogContent(state.rawContent, "");
+        emptyEl.classList.add("hidden");
+        contentEl.classList.remove("hidden");
+        actionsEl.style.display = "";
+      })
+      .catch(function () { showToast("อ่าน snapshot ไม่สำเร็จ", "error"); });
+  }
+
+  /* ── Delete ── */
+  function deleteSnapshot(snapshotId) {
+    showConfirm({
+      title: "ลบ Snapshot " + snapshotId + "?",
+      body: "ไฟล์ snapshot นี้จะถูกลบถาวร ไม่สามารถกู้คืนได้",
+      okLabel: "ลบ",
+      onOk: function () {
+        fetch("/api/logs/system/" + encodeURIComponent(snapshotId), { method: "DELETE" })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (x) {
+            if (!x.ok) { showToast((x.d.errors || ["ลบ snapshot ไม่สำเร็จ"]).join(" "), "error"); return; }
+            showToast("ลบ snapshot เรียบร้อย", "ok");
+            if (state.currentId === snapshotId) {
+              state.currentId = null;
+              titleEl.textContent = "Select a snapshot";
+              pathEl.textContent = "";
+              emptyEl.classList.remove("hidden");
+              contentEl.classList.add("hidden");
+              actionsEl.style.display = "none";
+            }
+            refreshSystemLogs();
+            refreshAuditTrail();
+          })
+          .catch(function () { showToast("ลบ snapshot ไม่สำเร็จ", "error"); });
+      }
+    });
+  }
+
+  /* ── Copy / Download ── */
+  function copyLogContent() {
+    if (!state.rawContent) return;
+    var done = function () { showToast("คัดลอกเนื้อหาแล้ว", "ok"); };
+    var fail = function () { showToast("คัดลอกไม่สำเร็จ", "error"); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(state.rawContent).then(done, fail);
+    } else {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = state.rawContent;
+        ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        done();
+      } catch (e) { fail(); }
+    }
+  }
+
+  function downloadLogContent() {
+    if (!state.rawContent || !state.currentId) return;
+    var blob = new Blob([state.rawContent], { type: "text/plain;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = state.currentId + ".log";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  /* ── Audit trail ── */
+  var auditLoading = document.getElementById("auditLoading");
+  var auditTable   = document.getElementById("auditTable");
+  var auditBody    = document.getElementById("auditBody");
+  var auditEmpty   = document.getElementById("auditEmpty");
+  var auditError   = document.getElementById("auditError");
+
+  function fmtAuditTs(ts) {
+    try { return new Date(ts).toLocaleString("th-TH", { hour12: false }); }
+    catch (e) { return ts; }
+  }
+
+  function refreshAuditTrail() {
+    auditLoading.style.display = "";
+    auditTable.classList.add("hidden");
+    auditEmpty.classList.add("hidden");
+    auditError.classList.add("hidden");
+    return fetch("/api/database/audit_log?limit=15")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        auditLoading.style.display = "none";
+        if (data.error) { auditError.textContent = "Error: " + data.error; auditError.classList.remove("hidden"); return; }
+        var rows = data.rows || [];
+        if (!rows.length) { auditEmpty.classList.remove("hidden"); auditEmpty.style.display = "flex"; return; }
+        auditTable.classList.remove("hidden");
+        auditBody.innerHTML = rows.map(function (row) {
+          var ts = row[1], action = row[2], details = row[3];
+          var detailsShort = details ? (String(details).length > 100 ? String(details).slice(0, 100) + "…" : String(details)) : "—";
+          return (
+            '<tr class="hover:bg-surface/60 transition-colors">' +
+              '<td class="px-4 py-2 text-[0.75rem] text-muted tabular-nums whitespace-nowrap">' + escapeHtml(fmtAuditTs(ts)) + '</td>' +
+              '<td class="px-4 py-2 text-[0.8rem] text-ink font-semibold whitespace-nowrap">' + escapeHtml(action) + '</td>' +
+              '<td class="px-4 py-2 text-[0.75rem] text-muted font-mono" title="' + escapeHtml(details || "") + '">' + escapeHtml(detailsShort) + '</td>' +
+            '</tr>'
+          );
+        }).join("");
+      })
+      .catch(function () {
+        auditLoading.style.display = "none";
+        auditError.textContent = "โหลดเหตุการณ์ล่าสุดไม่สำเร็จ";
+        auditError.classList.remove("hidden");
+      });
+  }
+
+  /* ── Confirm Modal helper (project convention) ── */
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) btnOk.querySelector("span").textContent = opts.okLabel;
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
+
+  /* ── Wire up events ── */
+  document.getElementById("refreshSystemLogs").addEventListener("click", refreshSystemLogs);
+  collectBtn.addEventListener("click", collectSystemLog);
+  document.getElementById("btnCopyLog").addEventListener("click", copyLogContent);
+  document.getElementById("btnDownloadLog").addEventListener("click", downloadLogContent);
+  document.getElementById("btnDeleteLog").addEventListener("click", function () {
+    if (state.currentId) deleteSnapshot(state.currentId);
+  });
+  document.getElementById("btnRefreshAudit").addEventListener("click", refreshAuditTrail);
+
+  searchEl.addEventListener("input", function () {
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(applySearch, 150);
+  });
+
+  listEl.addEventListener("click", function (event) {
+    var delBtn = event.target.closest(".snap-del");
+    if (delBtn) {
+      var row = delBtn.closest("[data-system-snapshot]");
+      if (row) deleteSnapshot(row.dataset.systemSnapshot);
+      return;
+    }
+    var button = event.target.closest("[data-system-snapshot]");
+    if (button) showSystemSnapshot(button.dataset.systemSnapshot);
+  });
+
+  /* ── Init ── */
+  renderSnapshotList({{ system_snapshots | tojson }});
+  refreshAuditTrail();
+
+  /* ── SPA cleanup ── */
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () { clearTimeout(state.searchTimer); });
+
+})();
 </script>
 {% endblock %}

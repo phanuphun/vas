@@ -63,69 +63,36 @@
     <!-- ════════ TAB: สถานะ ════════ -->
     <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
 
-      <!-- Stat grid: Tools / Service Enabled / Service Active / Connection -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-
-        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center
-            {% if vpn.wg_installed %}bg-safe/8{% else %}bg-danger/8{% endif %}">
-            <iconify-icon icon="lucide:wrench" width="15" height="15"
-              class="{% if vpn.wg_installed %}text-safe{% else %}text-danger{% endif %}"></iconify-icon>
-          </div>
-          <div>
-            <p class="font-display text-[1.15rem] font-bold leading-none
-              {% if vpn.wg_installed %}text-safe{% else %}text-danger{% endif %}">
-              {{ 'ติดตั้งแล้ว' if vpn.wg_installed else 'ไม่มี' }}
-            </p>
-            <p class="text-[0.7rem] text-faint mt-0.5">WireGuard Tools</p>
-          </div>
+      <!-- Status strip: Tools / Service Enabled / Service Active / Interface -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:wrench" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Tools:</span>
+          <span class="text-[0.78rem] font-semibold {% if vpn.wg_installed %}text-safe{% else %}text-danger{% endif %}">
+            {{ 'ติดตั้งแล้ว' if vpn.wg_installed else 'ไม่มี' }}
+          </span>
         </div>
-
-        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center
-            {% if vpn.service_enabled == 'enabled' %}bg-safe/8{% else %}bg-surface{% endif %}">
-            <iconify-icon icon="lucide:power" width="15" height="15"
-              class="{% if vpn.service_enabled == 'enabled' %}text-safe{% else %}text-faint{% endif %}"></iconify-icon>
-          </div>
-          <div>
-            <p class="font-display text-[1.15rem] font-bold leading-none
-              {% if vpn.service_enabled == 'enabled' %}text-safe{% else %}text-muted{% endif %}">
-              {{ vpn.service_enabled or 'unknown' }}
-            </p>
-            <p class="text-[0.7rem] text-faint mt-0.5">Service Enabled</p>
-          </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Enabled:</span>
+          <span class="text-[0.78rem] font-semibold {% if vpn.service_enabled == 'enabled' %}text-safe{% else %}text-caution{% endif %}">
+            {{ vpn.service_enabled or 'unknown' }}
+          </span>
         </div>
-
-        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center
-            {% if vpn.service_active == 'active' %}bg-safe/8{% else %}bg-danger/8{% endif %}">
-            <iconify-icon icon="lucide:activity" width="15" height="15"
-              class="{% if vpn.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}"></iconify-icon>
-          </div>
-          <div>
-            <p class="font-display text-[1.15rem] font-bold leading-none
-              {% if vpn.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}">
-              {{ vpn.service_active or 'unknown' }}
-            </p>
-            <p class="text-[0.7rem] text-faint mt-0.5">Service Active</p>
-          </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:activity" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Active:</span>
+          <span class="text-[0.78rem] font-semibold {% if vpn.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}">
+            {{ vpn.service_active or 'unknown' }}
+          </span>
         </div>
-
-        <div class="bg-card border border-line/10 rounded-xl p-4 flex flex-col gap-2">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center
-            {% if vpn.interface_exists %}bg-safe/8{% else %}bg-surface{% endif %}">
-            <iconify-icon icon="lucide:wifi" width="15" height="15"
-              class="{% if vpn.interface_exists %}text-safe{% else %}text-faint{% endif %}"></iconify-icon>
-          </div>
-          <div>
-            <p class="font-display text-[1.15rem] font-bold leading-none
-              {% if vpn.interface_exists %}text-safe{% else %}text-muted{% endif %}">
-              {{ vpn.interface_name }}
-            </p>
-            <p class="text-[0.7rem] text-faint mt-0.5">Interface</p>
-          </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:wifi" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Interface:</span>
+          <span class="text-[0.78rem] font-semibold {% if vpn.interface_exists %}text-safe{% else %}text-muted{% endif %}">
+            {{ vpn.interface_name }}
+          </span>
         </div>
-
       </div>
 
       <!-- System info card -->
@@ -143,16 +110,6 @@
                 {{ 'OK' if vpn.wg_installed else 'MISSING' }}
               </span>
               <span class="break-all text-faint text-[0.78rem]">{{ vpn.wg_version or 'not installed' }}</span>
-            </span>
-          </div>
-
-          <div class="flex items-start gap-3 px-4 py-3">
-            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">History</span>
-            <span class="flex-1 flex items-center gap-1.5 flex-wrap min-w-0">
-              <span class="zone {% if vpn.history_exists %}zone-safe{% else %}zone-caution{% endif %}">
-                {{ 'OK' if vpn.history_exists else 'WARN' }}
-              </span>
-              <span class="break-all text-faint text-[0.78rem]">{{ vpn.history_dir.as_posix() }}</span>
             </span>
           </div>
 
@@ -179,8 +136,65 @@
             <span class="text-[0.82rem] text-ink">{{ vpn_connection_label(vpn) }}</span>
           </div>
 
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Public Key</span>
+            {% if vpn.public_key %}
+            <code class="flex-1 text-[0.78rem] text-ink font-mono break-all min-w-0">{{ vpn.public_key }}</code>
+            {% else %}
+            <span class="text-[0.78rem] text-faint">ไม่พบ (interface ยังไม่ขึ้น)</span>
+            {% endif %}
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Listen Port</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ vpn.listen_port or '—' }}</span>
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Peers</span>
+            <span class="flex-1 flex items-center gap-1.5 flex-wrap min-w-0">
+              <span class="zone {% if vpn.handshake_peers %}zone-safe{% else %}zone-mute{% endif %}">
+                {{ vpn.peers | length }} ตั้งค่าไว้
+              </span>
+              {% if vpn.peers %}
+              <span class="text-[0.78rem] text-faint">· {{ vpn.handshake_peers or 0 }} handshake ล่าสุด</span>
+              {% endif %}
+            </span>
+          </div>
+
         </div>
       </div>
+
+      <!-- Peer detail card — เฉพาะเมื่อมี peer จาก `wg show` -->
+      {% if vpn.peers %}
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:users" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Peers</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for peer in vpn.peers %}
+          <div class="px-4 py-3 flex flex-col gap-1.5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="zone {{ 'zone-safe' if peer.latest_handshake else 'zone-mute' }}">
+                {{ 'CONNECTED' if peer.latest_handshake else 'NO HANDSHAKE' }}
+              </span>
+              <code class="text-[0.72rem] text-ink font-mono break-all">{{ peer.public_key }}</code>
+            </div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-[0.75rem] text-muted">
+              <span>Endpoint: <span class="text-ink">{{ peer.endpoint or '—' }}</span></span>
+              <span>Allowed IPs: <span class="text-ink">{{ peer.allowed_ips or '—' }}</span></span>
+              <span>Handshake: <span class="text-ink">{{ peer.latest_handshake or 'ไม่เคย' }}</span></span>
+              <span>Transfer: <span class="text-ink">↓{{ peer.transfer_rx or '0 B' }} / ↑{{ peer.transfer_tx or '0 B' }}</span></span>
+              {% if peer.persistent_keepalive %}
+              <span>Keepalive: <span class="text-ink">{{ peer.persistent_keepalive }}</span></span>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
 
     </div><!-- /tab-status -->
 

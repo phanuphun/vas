@@ -3,18 +3,31 @@
 {% block page_title %}จัดการผู้ใช้งาน — VAS{% endblock %}
 
 {% block content %}
-<div class="mb-5">
+<!-- Page header -->
+<div class="border-b border-line/10 pb-4">
   <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">ระบบ · ผู้ใช้งาน</p>
-  <h1 class="font-display text-[1.25rem] font-bold text-ink mt-0.5">จัดการผู้ใช้งาน</h1>
-  <p class="text-[0.8rem] text-muted mt-0.5">เพิ่ม ลบ และจัดการสิทธิ์ผู้ใช้งานในระบบ</p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">จัดการผู้ใช้งาน</h1>
+  <p class="text-[0.82rem] text-muted mt-1">เพิ่ม ลบ และจัดการสิทธิ์ผู้ใช้งานในระบบ</p>
 </div>
 
 <!-- Stats row -->
-<div class="grid grid-cols-3 gap-3 mb-5">
+<div class="grid grid-cols-3 gap-4">
   {% for stat in stats %}
-  <div class="bg-card border border-line/10 rounded-xl px-4 py-3">
-    <div class="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-faint mb-1">{{ stat.label }}</div>
-    <div class="font-display text-[1.4rem] font-bold text-ink">{{ stat.count }}</div>
+  {%- if stat.label == 'Admin' -%}
+    {%- set icon, ink_cls, box_cls, border_cls = 'lucide:shield', 'text-[#92660b]', 'bg-caution/10', 'border-caution/25' -%}
+  {%- elif stat.label == 'User' -%}
+    {%- set icon, ink_cls, box_cls, border_cls = 'lucide:user', 'text-muted', 'bg-surface', 'border-line/12' -%}
+  {%- else -%}
+    {%- set icon, ink_cls, box_cls, border_cls = 'lucide:users', 'text-accent', 'bg-accent/8', 'border-accent/20' -%}
+  {%- endif -%}
+  <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-center gap-3">
+    <div class="w-10 h-10 rounded-lg border {{ border_cls }} {{ box_cls }} {{ ink_cls }} grid place-items-center flex-shrink-0">
+      <iconify-icon icon="{{ icon }}" width="17" height="17"></iconify-icon>
+    </div>
+    <div class="min-w-0">
+      <div class="text-[0.65rem] font-semibold uppercase tracking-[0.07em] text-faint truncate">{{ stat.label }}</div>
+      <div class="font-display text-[1.35rem] font-bold text-ink leading-tight">{{ stat.count }}</div>
+    </div>
   </div>
   {% endfor %}
 </div>
@@ -22,104 +35,102 @@
 <!-- Table card -->
 <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
   <!-- Card header -->
-  <div class="flex items-center justify-between px-5 py-3.5 border-b border-line/10">
-    <span class="font-display text-[0.85rem] font-bold text-ink">ผู้ใช้งานทั้งหมด</span>
-    {% if current_user.role in ('root', 'admin') %}
-    <button onclick="openAddModal()"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white text-[0.78rem] font-semibold rounded-lg hover:bg-blue-700 transition-colors">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-      </svg>
-      เพิ่มผู้ใช้งาน
-    </button>
-    {% endif %}
+  <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-4 border-b border-line/10">
+    <div class="flex items-center gap-2">
+      <span class="font-display text-[0.9rem] font-bold text-ink">ผู้ใช้งานทั้งหมด</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-surface border border-line/10 text-muted font-display tabular-nums">{{ users|length }}</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="relative">
+        <iconify-icon icon="lucide:search" width="13" height="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint pointer-events-none"></iconify-icon>
+        <input type="text" id="user-search" oninput="filterUsers(this.value)" placeholder="ค้นหาผู้ใช้งาน..."
+               class="pl-8 pr-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.78rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition w-full sm:w-48">
+      </div>
+      {% if current_user.role in ('root', 'admin') %}
+      <button onclick="openAddModal()"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white text-[0.78rem] font-semibold rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0">
+        <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>
+        เพิ่มผู้ใช้งาน
+      </button>
+      {% endif %}
+    </div>
   </div>
 
   <!-- Table -->
   <div class="overflow-x-auto">
-    <table class="w-full text-[0.82rem]">
+    <table class="w-full text-[0.82rem]" id="users-table">
       <thead>
-        <tr class="border-b border-line/10 bg-surface">
-          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint">ผู้ใช้งาน</th>
-          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint">สิทธิ์</th>
-          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint hidden md:table-cell">เข้าสู่ระบบล่าสุด</th>
-          <th class="text-left px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint hidden sm:table-cell">สร้างเมื่อ</th>
-          <th class="px-5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint text-right">จัดการ</th>
+        <tr class="border-b border-line/10 bg-surface/60">
+          <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint">ผู้ใช้งาน</th>
+          <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint">สิทธิ์</th>
+          <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint hidden md:table-cell">เข้าสู่ระบบล่าสุด</th>
+          <th class="text-left px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint hidden sm:table-cell">สร้างเมื่อ</th>
+          <th class="px-4 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.07em] text-faint text-right">จัดการ</th>
         </tr>
       </thead>
       <tbody>
         {% for u in users %}
-        <tr class="border-b border-line/8 hover:bg-surface/60 transition-colors group" data-user-id="{{ u.id }}">
-          <td class="px-5 py-3">
+        <tr class="user-row border-b border-line/8 hover:bg-surface/60 transition-colors" data-user-id="{{ u.id }}"
+            data-search="{{ ((u.display_name or '') ~ ' ' ~ u.username) | lower }}">
+          <td class="px-4 py-3">
             <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-accent/10 text-accent text-[0.65rem] font-bold font-display
-                          grid place-items-center flex-shrink-0
-                          {% if u.role == 'root' %}bg-danger/10 text-danger{% elif u.role == 'admin' %}bg-caution/10 text-[#92660b]{% endif %}">
+              <div class="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-[0.65rem] font-bold font-display border border-line/10
+                          {% if u.role == 'root' %}bg-danger/10 text-danger{% elif u.role == 'admin' %}bg-caution/10 text-[#92660b]{% else %}bg-accent/10 text-accent{% endif %}">
                 {{ u.display_name[:2].upper() if u.display_name else u.username[:2].upper() }}
               </div>
-              <div>
-                <div class="font-semibold text-ink flex items-center gap-1.5">
+              <div class="min-w-0">
+                <div class="font-semibold text-ink flex items-center gap-1.5 truncate">
                   {{ u.display_name or u.username }}
                   {% if u.id == current_user.id %}
-                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[0.58rem] font-bold bg-accent/10 text-accent leading-none">คุณ</span>
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[0.58rem] font-bold bg-accent/10 text-accent leading-none flex-shrink-0">คุณ</span>
                   {% endif %}
                 </div>
-                <div class="text-[0.72rem] text-faint">@{{ u.username }}</div>
+                <div class="text-[0.72rem] text-faint truncate">@{{ u.username }}</div>
               </div>
             </div>
           </td>
-          <td class="px-5 py-3">
+          <td class="px-4 py-3">
             <span class="zone {{ role_badge[u.role] }}">
               {% if u.role == 'root' %}
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-              </svg>
+              <iconify-icon icon="lucide:crown" width="10" height="10" class="mr-1"></iconify-icon>
               {% elif u.role == 'admin' %}
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
+              <iconify-icon icon="lucide:shield" width="10" height="10" class="mr-1"></iconify-icon>
               {% endif %}
               {{ role_labels[u.role] }}
             </span>
           </td>
-          <td class="px-5 py-3 text-muted hidden md:table-cell">
+          <td class="px-4 py-3 text-muted hidden md:table-cell">
             {{ u.last_login[:16].replace('T',' ') if u.last_login else '—' }}
           </td>
-          <td class="px-5 py-3 text-muted hidden sm:table-cell">
+          <td class="px-4 py-3 text-muted hidden sm:table-cell">
             {{ u.created_at[:10] if u.created_at else '—' }}
           </td>
-          <td class="px-5 py-3 text-right">
-            <div class="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <td class="px-4 py-3 text-right">
+            <div class="inline-flex items-center gap-1">
               <!-- Reset Password -->
               {% if current_user.id == u.id or can_manage(current_user.role, u.role) %}
               <button onclick="openResetModal({{ u.id }}, '{{ u.display_name or u.username }}')"
-                      class="w-7 h-7 rounded-lg border border-line/15 bg-card text-faint hover:text-caution hover:border-caution/30 transition-colors flex items-center justify-center"
+                      class="w-8 h-8 rounded-lg border border-line/12 bg-card text-faint hover:text-caution hover:border-caution/30 hover:bg-caution/5 transition-colors flex items-center justify-center"
                       title="รีเซ็ตรหัสผ่าน">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-                </svg>
+                <iconify-icon icon="lucide:key-round" width="13" height="13"></iconify-icon>
               </button>
               {% endif %}
 
               <!-- Edit -->
               {% if can_manage(current_user.role, u.role) %}
               <button onclick="openEditModal({{ u.id }}, '{{ u.username }}', '{{ u.display_name }}', '{{ u.role }}')"
-                      class="w-7 h-7 rounded-lg border border-line/15 bg-card text-faint hover:text-ink transition-colors flex items-center justify-center"
+                      class="w-8 h-8 rounded-lg border border-line/12 bg-card text-faint hover:text-ink hover:bg-surface transition-colors flex items-center justify-center"
                       title="แก้ไขข้อมูล">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
+                <iconify-icon icon="lucide:pencil" width="13" height="13"></iconify-icon>
               </button>
               {% endif %}
 
               <!-- Delete -->
               {% if u.role != 'root' and can_manage(current_user.role, u.role) and current_user.id != u.id %}
               <button onclick="openDeleteModal({{ u.id }}, '{{ u.display_name or u.username }}')"
-                      class="w-7 h-7 rounded-lg border border-line/15 bg-card text-faint hover:text-danger hover:border-danger/30 transition-colors flex items-center justify-center"
+                      class="w-8 h-8 rounded-lg border border-line/12 bg-card text-faint hover:text-danger hover:border-danger/30 hover:bg-danger/5 transition-colors flex items-center justify-center"
                       title="ลบผู้ใช้งาน">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                </svg>
+                <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
               </button>
               {% endif %}
             </div>
@@ -129,6 +140,7 @@
       </tbody>
     </table>
   </div>
+  <div id="users-empty" class="hidden px-4 py-10 text-center text-[0.82rem] text-faint">ไม่พบผู้ใช้งานที่ตรงกับการค้นหา</div>
 </div>
 
 <!-- ════════════════════════════════════════════════════
@@ -342,6 +354,20 @@ function setErr(id, msg) {
   var el = document.getElementById(id);
   if (msg) { el.textContent = msg; el.classList.remove('hidden'); }
   else { el.classList.add('hidden'); }
+}
+
+// ── Search filter ─────────────────────────────────────────────
+function filterUsers(q) {
+  q = (q || '').trim().toLowerCase();
+  var rows = document.querySelectorAll('#users-table .user-row');
+  var visible = 0;
+  rows.forEach(function(r) {
+    var match = q === '' || (r.dataset.search || '').indexOf(q) !== -1;
+    r.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  var empty = document.getElementById('users-empty');
+  if (empty) empty.classList.toggle('hidden', visible !== 0 || rows.length === 0);
 }
 
 // ── Add user ──────────────────────────────────────────────────

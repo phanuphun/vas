@@ -3,49 +3,155 @@
 {% block header_title %}คำสั่ง CLI{% endblock %}
 
 {% block content %}
-<div class="mb-1">
+<div class="border-b border-line/10 pb-4">
   <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · เอกสารคำสั่ง</p>
-  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1">คู่มือคำสั่ง VAS CLI</h1>
-  <p class="text-[0.82rem] text-muted mt-1">Commands are preview-only. Run them manually in a terminal on the vending machine.</p>
+  <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">คู่มือคำสั่ง VAS CLI</h1>
+  <p class="text-[0.82rem] text-muted mt-1">
+    รวมคำสั่งทั้งหมดของ VAS CLI พร้อมคำอธิบายการทำงานของแต่ละคำสั่ง — สำหรับ preview เท่านั้น
+    ต้องรันเองในเทอร์มินัลบนเครื่อง vending machine
+  </p>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<!-- ── Preview-only callout ── -->
+<div class="flex items-start gap-2.5 px-4 py-3 rounded-lg text-[0.82rem] border bg-accent/5 border-accent/18 text-muted">
+  <iconify-icon icon="lucide:info" width="14" height="14" class="flex-shrink-0 mt-0.5 text-accent"></iconify-icon>
+  <span>คำสั่งด้านล่างเป็นตัวอย่าง (preview) เท่านั้น ไม่ได้ถูกรันจากหน้านี้ — คัดลอกไปรันเองผ่าน SSH หรือเทอร์มินัลบนเครื่อง</span>
+</div>
 
-  <div class="bg-card border border-line/10 rounded-xl">
-    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-      <h2 class="text-[0.9rem] font-semibold text-ink">Install</h2>
+<!-- ── On this page — jump nav ── -->
+<nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+  <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+    <a href="#sec-install" class="px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap text-muted hover:bg-surface hover:text-ink transition-colors">
+      <iconify-icon icon="lucide:download" width="13" height="13"></iconify-icon> Install
+    </a>
+    <a href="#sec-reset" class="px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap text-muted hover:bg-surface hover:text-ink transition-colors">
+      <iconify-icon icon="lucide:rotate-ccw" width="13" height="13"></iconify-icon> Reset / Uninstall
+    </a>
+    <a href="#sec-display" class="px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap text-muted hover:bg-surface hover:text-ink transition-colors">
+      <iconify-icon icon="lucide:monitor" width="13" height="13"></iconify-icon> Display
+    </a>
+    <a href="#sec-vpn" class="px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap text-muted hover:bg-surface hover:text-ink transition-colors">
+      <iconify-icon icon="lucide:shield" width="13" height="13"></iconify-icon> VPN
+    </a>
+    <a href="#sec-server" class="px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap text-muted hover:bg-surface hover:text-ink transition-colors">
+      <iconify-icon icon="lucide:server" width="13" height="13"></iconify-icon> Server
+    </a>
+  </div>
+</nav>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ══════════════════════════════════════════════════════════════
+       Section: Install
+       ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-install" class="bg-card border border-line/10 rounded-xl overflow-hidden scroll-mt-20">
+    <div class="flex items-start gap-3 px-5 py-4 border-b border-line/10">
+      <div class="w-9 h-9 border border-accent/28 rounded-lg bg-accent/6 text-accent grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:download" width="16" height="16"></iconify-icon>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2 class="text-[0.95rem] font-bold text-ink font-display">Install</h2>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-surface border border-line/10 text-muted">{{ install_commands|length }} คำสั่ง</span>
+        </div>
+        <p class="text-[0.78rem] text-muted mt-0.5">
+          ติดตั้งซอฟต์แวร์แต่ละตัวทีละคอมโพเนนต์ผ่าน <code class="font-mono text-[0.75rem] bg-surface px-1 py-0.5 rounded">vas install --component &lt;name&gt;</code>
+        </p>
+      </div>
     </div>
     {% set commands = install_commands %}
-    {% include "_command_list.html" with context %}
-  </div>
-
-  <div class="bg-card border border-line/10 rounded-xl">
-    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-      <h2 class="text-[0.9rem] font-semibold text-ink">Reset</h2>
-    </div>
-    {% set commands = reset_commands %}
     {% include "_command_list.html" %}
   </div>
 
-  <div class="bg-card border border-line/10 rounded-xl">
-    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-      <h2 class="text-[0.9rem] font-semibold text-ink">Display</h2>
+  <!-- ══════════════════════════════════════════════════════════════
+       Section: Reset / Uninstall
+       ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-reset" class="bg-card border border-line/10 rounded-xl overflow-hidden scroll-mt-20">
+    <div class="flex items-start gap-3 px-5 py-4 border-b border-line/10">
+      <div class="w-9 h-9 border border-danger/28 rounded-lg bg-danger/6 text-danger grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:rotate-ccw" width="16" height="16"></iconify-icon>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2 class="text-[0.95rem] font-bold text-ink font-display">Reset / Uninstall</h2>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-surface border border-line/10 text-muted">{{ uninstall_commands|length + reset_only_commands|length }} คำสั่ง</span>
+        </div>
+        <p class="text-[0.78rem] text-muted mt-0.5">ถอนการติดตั้งหรือรีเซ็ตคอมโพเนนต์กลับสู่สถานะเริ่มต้น ทั้งสองคำสั่งต่างกันตรงที่การเก็บไฟล์ config</p>
+      </div>
+    </div>
+
+    <!-- Uninstall subgroup -->
+    <div class="px-5 pt-4 pb-1 flex items-center gap-2">
+      <h3 class="text-[0.8rem] font-semibold text-ink">Uninstall</h3>
+      <span class="text-[0.7rem] text-faint">— ลบแพ็กเกจ แต่เก็บไฟล์ config ไว้</span>
+    </div>
+    {% set commands = uninstall_commands %}
+    {% include "_command_list.html" %}
+
+    <!-- Reset subgroup -->
+    <div class="px-5 pt-4 pb-1 flex items-center gap-2 border-t border-line/10">
+      <h3 class="text-[0.8rem] font-semibold text-ink">Reset</h3>
+      <span class="text-[0.7rem] text-faint">— ลบแพ็กเกจและไฟล์ config ทั้งหมด กลับสู่ค่าเริ่มต้น</span>
+    </div>
+    {% set commands = reset_only_commands %}
+    {% include "_command_list.html" %}
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       Section: Display
+       ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-display" class="bg-card border border-line/10 rounded-xl overflow-hidden scroll-mt-20">
+    <div class="flex items-start gap-3 px-5 py-4 border-b border-line/10">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface text-ink grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:monitor" width="16" height="16"></iconify-icon>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2 class="text-[0.95rem] font-bold text-ink font-display">Display</h2>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-surface border border-line/10 text-muted">{{ display_commands|length }} คำสั่ง</span>
+        </div>
+        <p class="text-[0.78rem] text-muted mt-0.5">ตรวจสอบและปรับค่าจอแสดงผล/ทัชสกรีน ทั้งแบบชั่วคราวและแบบถาวร</p>
+      </div>
     </div>
     {% set commands = display_commands %}
     {% include "_command_list.html" %}
   </div>
 
-  <div class="bg-card border border-line/10 rounded-xl">
-    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-      <h2 class="text-[0.9rem] font-semibold text-ink">VPN</h2>
+  <!-- ══════════════════════════════════════════════════════════════
+       Section: VPN (WireGuard)
+       ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-vpn" class="bg-card border border-line/10 rounded-xl overflow-hidden scroll-mt-20">
+    <div class="flex items-start gap-3 px-5 py-4 border-b border-line/10">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface text-ink grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:shield" width="16" height="16"></iconify-icon>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2 class="text-[0.95rem] font-bold text-ink font-display">VPN (WireGuard)</h2>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-surface border border-line/10 text-muted">{{ wireguard_commands|length }} คำสั่ง</span>
+        </div>
+        <p class="text-[0.78rem] text-muted mt-0.5">วงจรชีวิตของ WireGuard config: สร้าง → ตรวจสอบ → บันทึก → sync ไปยัง /etc/wireguard</p>
+      </div>
     </div>
     {% set commands = wireguard_commands %}
     {% include "_command_list.html" %}
   </div>
 
-  <div class="bg-card border border-line/10 rounded-xl md:col-span-2">
-    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-      <h2 class="text-[0.9rem] font-semibold text-ink">Server</h2>
+  <!-- ══════════════════════════════════════════════════════════════
+       Section: Server
+       ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-server" class="bg-card border border-line/10 rounded-xl overflow-hidden scroll-mt-20">
+    <div class="flex items-start gap-3 px-5 py-4 border-b border-line/10">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface text-ink grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:server" width="16" height="16"></iconify-icon>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2 class="text-[0.95rem] font-bold text-ink font-display">Server</h2>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-surface border border-line/10 text-muted">{{ server_commands|length }} คำสั่ง</span>
+        </div>
+        <p class="text-[0.78rem] text-muted mt-0.5">เริ่ม/หยุด VAS web server เอง หรือรันแบบ foreground เพื่อ debug</p>
+      </div>
     </div>
     {% set commands = server_commands %}
     {% include "_command_list.html" %}

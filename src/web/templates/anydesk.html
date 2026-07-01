@@ -1,0 +1,345 @@
+{% extends base_template %}
+{% block page_title %}AnyDesk — VAS{% endblock %}
+{% block header_title %}AnyDesk{% endblock %}
+
+{% block content %}
+<style>
+  .tab-panel { display: none; }
+  .tab-panel.is-active { display: flex; flex-direction: column; animation: tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .msg { font-size: 0.82rem; min-height: 1.2rem; }
+  .msg-ok    { color: #0f766e; }
+  .msg-error { color: #b1453a; }
+</style>
+
+<div class="flex flex-col gap-4" data-installed="{{ 'true' if remote.anydesk_installed else 'false' }}">
+
+  <!-- ── 1. PAGE HEADER ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · เครือข่าย</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">AnyDesk</h1>
+    <p class="text-[0.82rem] text-muted mt-1">จัดการ Remote Desktop และ Unattended Access</p>
+  </div>
+
+  {% if not remote.anydesk_installed %}
+  <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/8 border-caution/25 text-[#92660b]">
+    <iconify-icon icon="lucide:triangle-alert" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+    <span>ยังไม่ได้ติดตั้ง AnyDesk บนเครื่องนี้ — ไปที่
+      <a href="{{ url_for('apps_page') }}" class="nav-link text-accent underline underline-offset-2 font-semibold">โปรแกรมเพิ่มเติม</a>
+      เพื่อติดตั้งก่อนใช้งาน</span>
+  </div>
+  {% endif %}
+
+  <!-- ── 2. TAB NAV ── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    {% set ad_tabs = [
+      ("status",     "lucide:shield",              "สถานะ"),
+      ("unattended", "lucide:key-round",            "Unattended Access"),
+    ] %}
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      {% for tid, icon, label in ad_tabs %}
+      <button type="button" data-tab="{{ tid }}" onclick="adTab('{{ tid }}')"
+              class="ad-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+        <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>{{ label }}</span>
+      </button>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <!-- ── 3. CONTENT ── -->
+  <div>
+
+    <!-- ════════ TAB: สถานะ ════════ -->
+    <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
+
+      <!-- Status strip -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:wrench" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Tool:</span>
+          <span class="text-[0.78rem] font-semibold {% if remote.anydesk_installed %}text-safe{% else %}text-danger{% endif %}" id="ad-installed-label">
+            {{ 'ติดตั้งแล้ว' if remote.anydesk_installed else 'ไม่มี' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Enabled:</span>
+          <span class="text-[0.78rem] font-semibold {% if remote.service_enabled == 'enabled' %}text-safe{% else %}text-caution{% endif %}" id="ad-enabled-label">
+            {{ remote.service_enabled or 'unknown' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:activity" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Active:</span>
+          <span class="text-[0.78rem] font-semibold {% if remote.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}" id="ad-active-label">
+            {{ remote.service_active or 'unknown' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:radio" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Online Status:</span>
+          <span class="text-[0.78rem] font-semibold {% if remote.anydesk_status|lower == 'online' %}text-safe{% else %}text-muted{% endif %}" id="ad-online-label">
+            {{ remote.anydesk_status }}
+          </span>
+        </div>
+      </div>
+
+      <!-- System info card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:info" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ข้อมูลระบบ</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Tool</span>
+            <span class="flex-1 flex items-center gap-1.5 flex-wrap min-w-0">
+              <span class="zone {% if remote.anydesk_installed %}zone-safe{% else %}zone-danger{% endif %}" id="ad-tool-zone">
+                {{ 'OK' if remote.anydesk_installed else 'MISSING' }}
+              </span>
+              <span class="break-all text-faint text-[0.78rem]" id="ad-version">{{ remote.anydesk_version or 'not installed' }}</span>
+            </span>
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Service</span>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="zone {% if remote.service_enabled == 'enabled' %}zone-safe{% else %}zone-mute{% endif %}" id="ad-service-enabled-zone">
+                {{ remote.service_enabled or 'unknown' }}
+              </span>
+              <span class="text-faint text-[0.72rem]">/</span>
+              <span class="zone {% if remote.service_active == 'active' %}zone-safe{% else %}zone-mute{% endif %}" id="ad-service-active-zone">
+                {{ remote.service_active or 'unknown' }}
+              </span>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">AnyDesk ID</span>
+            {% if remote.anydesk_id %}
+            <code class="flex-1 text-[0.82rem] text-ink font-mono break-all min-w-0" id="ad-id">{{ remote.anydesk_id }}</code>
+            <button type="button" onclick="copyAnydeskId()" title="คัดลอก"
+                    class="text-faint hover:text-ink transition-colors flex-shrink-0">
+              <iconify-icon icon="lucide:copy" width="13" height="13"></iconify-icon>
+            </button>
+            {% else %}
+            <span class="text-[0.78rem] text-faint" id="ad-id">ไม่พบ (service ยังไม่ทำงาน)</span>
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Service control -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ควบคุม Service</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-3">
+          <div class="flex flex-wrap gap-2">
+            <button data-ad-action="start" type="button" {{ 'disabled' if not remote.anydesk_installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent">
+              <iconify-icon icon="lucide:play" width="13" height="13"></iconify-icon>Start
+            </button>
+            <button data-ad-action="stop" type="button" {{ 'disabled' if not remote.anydesk_installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:square" width="13" height="13"></iconify-icon>Stop
+            </button>
+            <button data-ad-action="restart" type="button" {{ 'disabled' if not remote.anydesk_installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Restart
+            </button>
+            <button data-ad-action="enable" type="button" {{ 'disabled' if not remote.anydesk_installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:toggle-right" width="13" height="13"></iconify-icon>Enable
+            </button>
+            <button data-ad-action="disable" type="button" {{ 'disabled' if not remote.anydesk_installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:toggle-left" width="13" height="13"></iconify-icon>Disable
+            </button>
+          </div>
+          <div class="msg" id="ad-service-msg" aria-live="polite"></div>
+        </div>
+      </div>
+
+    </div><!-- /tab-status -->
+
+
+    <!-- ════════ TAB: Unattended Access ════════ -->
+    <div id="tab-unattended" class="tab-panel flex flex-col gap-4">
+
+      <!-- Info banner -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+        <div class="text-[0.82rem] flex flex-col gap-1">
+          <span class="font-semibold text-ink">Unattended Access คืออะไร</span>
+          <span class="text-muted leading-relaxed">
+            ตั้งรหัสผ่านสำหรับเชื่อมต่อ AnyDesk เข้าเครื่องนี้โดยไม่ต้องมีคนกดยืนยันหน้าจอ —
+            เหมาะสำหรับเครื่องที่ไม่มีคนดูแลตลอดเวลา รหัสผ่านจะถูกส่งตรงไปยัง AnyDesk ผ่าน stdin
+            และไม่ถูกบันทึกไว้ในระบบ VAS
+          </span>
+        </div>
+      </div>
+
+      <!-- Set password card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:key-round" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ตั้งรหัสผ่าน Unattended Access</h2>
+        </div>
+        <form id="ad-password-form" class="p-4 flex flex-col gap-3.5" onsubmit="return submitAnydeskPassword(event)">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">รหัสผ่านใหม่</label>
+            <input type="password" id="ad-pw-new" placeholder="อย่างน้อย 8 ตัวอักษร" required minlength="8"
+                   {{ 'disabled' if not remote.anydesk_installed }}
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition disabled:bg-surface disabled:text-faint">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">ยืนยันรหัสผ่าน</label>
+            <input type="password" id="ad-pw-confirm" placeholder="กรอกอีกครั้ง" required
+                   {{ 'disabled' if not remote.anydesk_installed }}
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition disabled:bg-surface disabled:text-faint">
+          </div>
+          <div>
+            <button type="submit" {{ 'disabled' if not remote.anydesk_installed }}
+                    class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent">
+              <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>ตั้งรหัสผ่าน
+            </button>
+          </div>
+          <div class="msg" id="ad-password-msg" aria-live="polite"></div>
+        </form>
+      </div>
+
+    </div><!-- /tab-unattended -->
+
+  </div><!-- /content -->
+
+</div><!-- /root -->
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var installed = document.querySelector("[data-installed]").dataset.installed === "true";
+  var serviceMsgEl  = document.getElementById("ad-service-msg");
+  var passwordMsgEl = document.getElementById("ad-password-msg");
+
+  /* ── Tab switching ── */
+  window.adTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
+    document.querySelectorAll(".ad-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent\/8", on);
+      btn.classList.toggle("text-accent", on);
+      btn.classList.toggle("font-semibold", on);
+      btn.classList.toggle("text-muted", !on);
+    });
+  };
+
+  function setMsg(el, text, type) {
+    if (!el) return;
+    el.className = "msg" + (type === "ok" ? " msg-ok" : type === "error" ? " msg-error" : "");
+    el.textContent = text;
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d.errors || ["Request failed"]).join(" "));
+        return d;
+      });
+    });
+  }
+
+  /* ── Refresh status fields without full page reload ── */
+  function refreshStatus() {
+    fetch("{{ url_for('anydesk_status_api') }}")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status !== "ok") return;
+        setText("ad-enabled-label", d.service_enabled || "unknown");
+        setText("ad-active-label", d.service_active || "unknown");
+        setText("ad-online-label", d.online_status || "unknown");
+        setText("ad-version", d.version || "not installed");
+        setText("ad-id", d.id || "ไม่พบ (service ยังไม่ทำงาน)");
+        setZoneText("ad-service-enabled-zone", d.service_enabled || "unknown", d.service_enabled === "enabled");
+        setZoneText("ad-service-active-zone", d.service_active || "unknown", d.service_active === "active");
+      })
+      .catch(function () {});
+  }
+
+  function setText(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  function setZoneText(id, text, ok) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("zone-safe", ok);
+    el.classList.toggle("zone-mute", !ok);
+  }
+
+  /* ── Service actions ── */
+  document.querySelectorAll("[data-ad-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      var action = btn.dataset.adAction;
+      setMsg(serviceMsgEl, action + " กำลังดำเนินการ...");
+      postJson("{{ url_for('anydesk_action_api') }}", { action: action })
+        .then(function () {
+          setMsg(serviceMsgEl, action + " เสร็จสิ้น", "ok");
+          refreshStatus();
+        })
+        .catch(function (e) { setMsg(serviceMsgEl, e.message, "error"); });
+    });
+  });
+
+  /* ── Unattended password ── */
+  window.submitAnydeskPassword = function (e) {
+    e.preventDefault();
+    if (!installed) return false;
+    var pw = document.getElementById("ad-pw-new").value;
+    var confirm = document.getElementById("ad-pw-confirm").value;
+    if (pw !== confirm) { setMsg(passwordMsgEl, "รหัสผ่านไม่ตรงกัน", "error"); return false; }
+    postJson("{{ url_for('anydesk_password_api') }}", { password: pw })
+      .then(function (d) {
+        setMsg(passwordMsgEl, d.message || "ตั้งรหัสผ่านเรียบร้อย", "ok");
+        document.getElementById("ad-pw-new").value = "";
+        document.getElementById("ad-pw-confirm").value = "";
+      })
+      .catch(function (e) { setMsg(passwordMsgEl, e.message, "error"); });
+    return false;
+  };
+
+  /* ── Copy AnyDesk ID ── */
+  window.copyAnydeskId = function () {
+    var el = document.getElementById("ad-id");
+    if (!el || !navigator.clipboard) return;
+    navigator.clipboard.writeText(el.textContent.trim())
+      .then(function () { if (window.showToast) window.showToast("คัดลอก AnyDesk ID แล้ว", "ok"); })
+      .catch(function () {});
+  };
+
+  /* ── SPA cleanup ── */
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () { /* no intervals/SSE */ });
+
+})();
+</script>
+{% endblock %}

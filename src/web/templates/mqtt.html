@@ -2,14 +2,6 @@
 {% block page_title %}MQTT — VAS{% endblock %}
 {% block header_title %}MQTT{% endblock %}
 
-{% block header_actions %}
-<a href="/mqtt/broker/add"
-   class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
-  <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>
-  เพิ่ม Broker
-</a>
-{% endblock %}
-
 {% block content %}
 <style>
   .tab-panel { display: none; }
@@ -73,7 +65,7 @@
 
       <!-- Broker list card -->
       <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+        <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-line/10 flex-wrap">
           <div class="flex items-center gap-3">
             <span class="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-faint">Brokers</span>
             <!-- stat 1: total count -->
@@ -89,7 +81,14 @@
               <span>เชื่อมต่อ</span>
             </div>
           </div>
-          <span class="text-[0.78rem] text-faint" id="list-msg"></span>
+          <div class="flex items-center gap-3 flex-shrink-0">
+            <span class="text-[0.78rem] text-faint" id="list-msg"></span>
+            <a href="/mqtt/broker/add"
+               class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">
+              <iconify-icon icon="lucide:plus" width="12" height="12"></iconify-icon>
+              เพิ่ม Broker
+            </a>
+          </div>
         </div>
         {% if brokers %}
         <div id="broker-list">

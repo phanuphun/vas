@@ -224,9 +224,15 @@ Wraps all tab panels. Only the active panel is visible.
 | Sidebar width | `w-60` (240 px) | Fixed; `sticky lg:h-screen` |
 | **Brand header** | `h-[52px]` exact | Must match nav bar height — use `flex items-center` not padding |
 | Brand icon | `w-7 h-7 rounded-lg bg-accent` | Smaller than `-9` to fit 52px |
-| Nav section label | `text-[0.56rem] uppercase tracking-[0.1em] text-faint` | `pt-3 pb-1` between sections |
-| Nav link | `px-2.5 py-1.5 rounded-lg text-[0.8rem]` | Compact; `py-1.5` not `py-2` |
+| Nav section label | `text-[0.72rem] font-bold text-accent` | Not uppercase; `pt-4 pb-1.5` between sections |
+| Nav link | `flex items-center gap-3 px-2.5 py-2 rounded-xl` | Icon box + title/subtitle stack (see below); links in a section wrap in `flex flex-col gap-0.5` |
+| Nav link icon box | `w-9 h-9 rounded-lg bg-card border border-line/10` | Icon inside: `text-muted`, `width="15" height="15"` |
+| Nav link title | `text-[0.82rem] font-semibold text-ink truncate` | — |
+| Nav link subtitle | `text-[0.66rem] text-faint truncate mt-0.5` | Short one-line description per item |
+| Nav link active state | `bg-line/6` row + `bg-accent` left bar (`.nav-active-bar`, `w-[3px] rounded-full`) + accent icon/title | Bar + icon box border + icon color + title color all flip together; toggled by `updateNavActive()` in the SPA router via `.nav-active-bar` / `.nav-icon-box` / `.nav-title` hook classes |
 | **Footer** | version strip only | `VAS v0.1 · online` with green dot; no user info |
+
+`nav_link()` macro signature: `nav_link(endpoint, icon, label, subtitle, extra_attrs='')` — every call site must pass a short Thai subtitle. The macro renders a `.nav-active-bar` / `.nav-icon-box` / `.nav-title` hook on every link so `updateNavActive()` can flip active styling client-side during SPA navigation without a full re-render.
 
 ### Top Nav Bar (`base.html`)
 

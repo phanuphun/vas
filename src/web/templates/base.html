@@ -154,46 +154,62 @@
         <!-- Nav -->
         <nav class="sidebar-nav flex-1 overflow-y-auto py-1.5">
 
-          {# Jinja macro: nav link #}
-          {%- macro nav_link(endpoint, icon, label, extra_attrs='') -%}
+          {# Jinja macro: nav link — icon box + title + subtitle + active bar #}
+          {%- macro nav_link(endpoint, icon, label, subtitle, extra_attrs='') -%}
+          {%- set is_active = (request.endpoint == endpoint) -%}
           <a href="{{ url_for(endpoint) }}" {{ extra_attrs | safe }}
-             class="nav-link flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[0.8rem] font-medium w-full transition-colors
-                    {{ 'bg-accent/8 text-accent font-semibold' if request.endpoint == endpoint else 'text-muted hover:bg-line/6 hover:text-ink' }}">
-            <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
-            <span class="flex-1">{{ label }}</span>
+             class="nav-link relative flex items-center gap-3 pl-3.5 pr-2.5 py-2 rounded-xl w-full transition-colors
+                    {{ 'bg-line/6' if is_active else 'hover:bg-line/6' }}">
+            <span class="nav-active-bar absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-accent transition-opacity
+                         {{ 'opacity-100' if is_active else 'opacity-0' }}"></span>
+            <span class="nav-icon-box w-9 h-9 rounded-lg bg-card border flex items-center justify-center flex-shrink-0
+                         {{ 'border-accent/25' if is_active else 'border-line/10' }}">
+              <iconify-icon icon="{{ icon }}" width="15" height="15" class="{{ 'text-accent' if is_active else 'text-muted' }}"></iconify-icon>
+            </span>
+            <span class="flex-1 min-w-0">
+              <span class="nav-title block text-[0.82rem] font-semibold leading-tight truncate {{ 'text-accent' if is_active else 'text-ink' }}">{{ label }}</span>
+              <span class="block text-[0.66rem] text-faint leading-tight mt-0.5 truncate">{{ subtitle }}</span>
+            </span>
           </a>
           {%- endmacro -%}
 
           {# ── หลัก ──────────────────────────────────── #}
           <div class="nav-section px-2 pt-2 pb-1">
-            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">หลัก</span>
-            {{ nav_link('dashboard',         'lucide:layout-dashboard', 'แดชบอร์ด') }}
-            {{ nav_link('monitor_page',      'lucide:activity',         'Monitor') }}
-            {{ nav_link('display_settings',  'lucide:monitor',          'จอแสดงผล') }}
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">หลัก</span>
+            <div class="flex flex-col gap-0.5">
+              {{ nav_link('monitor_page',      'lucide:activity',         'Monitor',  'CPU, RAM, Disk แบบเรียลไทม์') }}
+              {{ nav_link('display_settings',  'lucide:monitor',          'จอแสดงผล', 'ตั้งค่าหน้าจอและความละเอียด') }}
+            </div>
           </div>
 
           {# ── อุปกรณ์เพิ่มเติม (conditional — แสดงเมื่อมีอุปกรณ์ติดตั้ง) ── #}
-          <div class="nav-section nav-section-devices px-2 pt-3 pb-1" id="nav-sec-devices" style="display:none;">
-            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">อุปกรณ์เพิ่มเติม</span>
-            {{ nav_link('qr_device_zkteco_qr500_page','lucide:scan-barcode','QR500','data-nav-device="zkteco-qr500" style="display:none;"') }}
+          <div class="nav-section nav-section-devices px-2 pt-4 pb-1" id="nav-sec-devices" style="display:none;">
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">อุปกรณ์เพิ่มเติม</span>
+            <div class="flex flex-col gap-0.5">
+              {{ nav_link('qr_device_zkteco_qr500_page','lucide:scan-barcode','QR500','อ่าน QR code ผ่าน USB HID','data-nav-device="zkteco-qr500" style="display:none;"') }}
+            </div>
           </div>
 
           {# ── เครือข่าย ──────────────────────────────── #}
-          <div class="nav-section px-2 pt-3 pb-1" id="nav-sec-network">
-            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">เครือข่าย</span>
-            {{ nav_link('mqtt_page',  'simple-icons:mqtt',      'MQTT') }}
-            {{ nav_link('wireguard','simple-icons:wireguard','Wireguard','data-nav-pkg="wireguard" style="display:none;"') }}
+          <div class="nav-section px-2 pt-4 pb-1" id="nav-sec-network">
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">เครือข่าย</span>
+            <div class="flex flex-col gap-0.5">
+              {{ nav_link('mqtt_page',  'simple-icons:mqtt',      'MQTT',       'Broker และข้อความ MQTT') }}
+              {{ nav_link('wireguard','simple-icons:wireguard','Wireguard','จัดการ VPN Wireguard','data-nav-pkg="wireguard" style="display:none;"') }}
+              {{ nav_link('anydesk_page','lucide:monitor-smartphone','AnyDesk','จัดการ Remote Desktop','data-nav-pkg="anydesk" style="display:none;"') }}
+            </div>
           </div>
 
           {# ── ระบบ ───────────────────────────────────── #}
-          <div class="nav-section px-2 pt-3 pb-1">
-            <span class="nav-label text-[0.56rem] font-bold uppercase tracking-[0.1em] text-faint block px-2 pb-1">ระบบ</span>
-            {{ nav_link('logs',          'lucide:scroll-text', 'บันทึกระบบ') }}
-            {{ nav_link('commands',      'lucide:terminal',    'คำสั่ง CLI') }}
-            {{ nav_link('database_page', 'lucide:database',    'Database') }}
-            {%- if current_user and current_user.role in ('root', 'admin') %}
-            {{ nav_link('users_page',    'lucide:users',       'ผู้ใช้งาน') }}
-            {%- endif %}
+          <div class="nav-section px-2 pt-4 pb-1">
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">ระบบ</span>
+            <div class="flex flex-col gap-0.5">
+              {{ nav_link('logs',          'lucide:scroll-text', 'บันทึกระบบ', 'Log และ audit เหตุการณ์') }}
+              {{ nav_link('database_page', 'lucide:database',    'Database',   'ดูและจัดการฐานข้อมูล') }}
+              {%- if current_user and current_user.role in ('root', 'admin') %}
+              {{ nav_link('users_page',    'lucide:users',       'ผู้ใช้งาน',   'จัดการผู้ใช้และสิทธิ์') }}
+              {%- endif %}
+            </div>
           </div>
 
           {# ── divider ────────────────────────────────── #}
@@ -201,8 +217,10 @@
 
           {# ── โปรแกรมเพิ่มเติม + อุปกรณ์ ──────────────────────── #}
           <div class="px-2 pb-1">
-            {{ nav_link('apps_page',      'lucide:package-plus', 'โปรแกรมเพิ่มเติม') }}
-            {{ nav_link('qr_devices_page','lucide:cpu',          'อุปกรณ์') }}
+            <div class="flex flex-col gap-0.5">
+              {{ nav_link('apps_page',      'lucide:package-plus', 'โปรแกรมเพิ่มเติม', 'ติดตั้ง/ถอนแพ็กเกจเสริม') }}
+              {{ nav_link('qr_devices_page','lucide:cpu',          'อุปกรณ์',           'จัดการอุปกรณ์ QR/Hardware') }}
+            </div>
           </div>
 
         </nav>
@@ -278,6 +296,12 @@
             <span id="spa-header-title" class="font-display text-[0.95rem] font-bold text-ink whitespace-nowrap">{% block header_title %}VAS{% endblock %}</span>
             <div class="flex-1"></div>
             {% block header_actions %}{% endblock %}
+
+            <!-- ── CLI command shortcut ──────────────────────── -->
+            <a href="{{ url_for('commands') }}" title="คำสั่ง CLI" aria-label="คำสั่ง CLI"
+               class="nav-link w-8 h-8 border border-line/10 rounded-lg bg-card text-ink flex items-center justify-center hover:bg-surface transition-colors flex-shrink-0">
+              <iconify-icon icon="lucide:circle-alert" width="15" height="15"></iconify-icon>
+            </a>
 
             <!-- ── User dropdown ─────────────────────────────── -->
             <div class="relative" id="user-dropdown-wrap">
@@ -596,12 +620,32 @@
           var href = a.getAttribute('href');
           if (!href) return;
           var aPath = href.replace(/\/$/, '') || '/';
-          if (aPath === norm) {
-            a.classList.add('bg-accent/8', 'text-accent', 'font-semibold');
-            a.classList.remove('text-muted', 'hover:bg-line/6', 'hover:text-ink');
-          } else {
-            a.classList.remove('bg-accent/8', 'text-accent', 'font-semibold');
-            a.classList.add('text-muted', 'hover:bg-line/6', 'hover:text-ink');
+          var isActive = (aPath === norm);
+
+          a.classList.toggle('bg-line/6', isActive);
+
+          var bar = a.querySelector('.nav-active-bar');
+          if (bar) {
+            bar.classList.toggle('opacity-100', isActive);
+            bar.classList.toggle('opacity-0', !isActive);
+          }
+
+          var iconBox = a.querySelector('.nav-icon-box');
+          if (iconBox) {
+            iconBox.classList.toggle('border-accent/25', isActive);
+            iconBox.classList.toggle('border-line/10', !isActive);
+          }
+
+          var icon = a.querySelector('iconify-icon');
+          if (icon) {
+            icon.classList.toggle('text-accent', isActive);
+            icon.classList.toggle('text-muted', !isActive);
+          }
+
+          var title = a.querySelector('.nav-title');
+          if (title) {
+            title.classList.toggle('text-accent', isActive);
+            title.classList.toggle('text-ink', !isActive);
           }
         });
       }

@@ -72,6 +72,15 @@ def read_system_snapshot(snapshot_id: str, log_dir: Path | None = None) -> dict[
     }
 
 
+def delete_system_snapshot(snapshot_id: str, log_dir: Path | None = None) -> dict[str, object]:
+    safe_id = sanitize_snapshot_id(snapshot_id)
+    path = system_snapshot_dir(log_dir) / f"{safe_id}.log"
+    if not path.exists():
+        raise FileNotFoundError(f"System log snapshot not found: {safe_id}")
+    path.unlink()
+    return {"id": safe_id, "path": path.as_posix()}
+
+
 def sanitize_snapshot_id(snapshot_id: str) -> str:
     safe = "".join(char for char in snapshot_id if char.isalnum() or char in {"-", "_", "T", "Z"})
     if not safe:

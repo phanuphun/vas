@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 from services.server_service import ENV_PATH, SERVICE_UNIT, ServerConfig, default_server_config
 from features.wireguard.manager import WIREGUARD_CONFIG_DIR, default_store_dir, service_name
+from system.utils import dev_fake_installed
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,17 @@ class GdmWaylandStatus:
 
 
 @dataclass(frozen=True)
+class VpnPeerStatus:
+    public_key: str
+    endpoint: str | None
+    allowed_ips: str | None
+    latest_handshake: str | None
+    transfer_rx: str | None
+    transfer_tx: str | None
+    persistent_keepalive: str | None
+
+
+@dataclass(frozen=True)
 class VpnStatus:
     interface_name: str
     wg_installed: bool
@@ -73,6 +86,9 @@ class VpnStatus:
     service_active: str
     interface_exists: bool
     handshake_peers: int | None
+    public_key: str | None = None
+    listen_port: str | None = None
+    peers: tuple[VpnPeerStatus, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -152,6 +168,15 @@ def collect_status() -> tuple[ToolStatus, ...]:
 
 
 def collect_remote_access_status() -> RemoteAccessStatus:
+    if dev_fake_installed():
+        return RemoteAccessStatus(
+            anydesk_installed=True,
+            anydesk_version="anydesk 6.5.0 (dev-mode)",
+            anydesk_id="123 456 789",
+            anydesk_status="Online",
+            service_enabled="enabled",
+            service_active="active",
+        )
     anydesk_path = shutil.which("anydesk")
     return RemoteAccessStatus(
         anydesk_installed=anydesk_path is not None,
@@ -164,6 +189,9 @@ def collect_remote_access_status() -> RemoteAccessStatus:
 
 
 def collect_openssh_status() -> OpenSshStatus:
+    if dev_fake_installed():
+        return OpenSshStatus(installed=True, version="OpenSSH_9.6 (dev-mode)", service_enabled="enabled", service_active="active")
+
     # ใช้ sshd (server binary) ไม่ใช่ ssh (client) — openssh-client ติดตั้งมาเป็น default
     # บน Ubuntu 22.04 โดยไม่ต้อง install openssh-server
     sshd_path = shutil.which("sshd")
@@ -181,23 +209,33 @@ def collect_vpn_status(interface_name: str = "wg0") -> VpnStatus:
     app_config_path = store_dir / "configs" / f"{interface_name}.conf"
     active_config_path = WIREGUARD_CONFIG_DIR / f"{interface_name}.conf"
     history_dir = store_dir / "history" / interface_name
-    wg_path = shutil.which("wg")
+    fake = dev_fake_installed()
+    wg_path = "/usr/bin/wg" if fake else shutil.which("wg")
     service = service_name(interface_name)
+
+    public_key: str | None = None
+    listen_port: str | None = None
+    peers: tuple[VpnPeerStatus, ...] = ()
+    if wg_path is not None and not fake:
+        public_key, listen_port, peers = _collect_wg_dump(wg_path, interface_name)
 
     return VpnStatus(
         interface_name=interface_name,
         wg_installed=wg_path is not None,
-        wg_version=_read_version((wg_path, "--version")) if wg_path is not None else None,
+        wg_version="wireguard-tools v1.0.0 (dev-mode)" if fake else (_read_version((wg_path, "--version")) if wg_path is not None else None),
         app_config_path=app_config_path,
         app_config_exists=_path_exists(app_config_path),
         active_config_path=active_config_path,
         active_config_exists=_path_exists(active_config_path),
         history_dir=history_dir,
         history_exists=_path_exists(history_dir),
-        service_enabled=_read_command_first_line(("systemctl", "is-enabled", service)),
-        service_active=_read_command_first_line(("systemctl", "is-active", service)),
-        interface_exists=_command_succeeds(("wg", "show", interface_name)),
-        handshake_peers=_count_handshake_peers(interface_name) if wg_path is not None else None,
+        service_enabled="enabled" if fake else _read_command_first_line(("systemctl", "is-enabled", service)),
+        service_active="active" if fake else _read_command_first_line(("systemctl", "is-active", service)),
+        interface_exists=True if fake else _command_succeeds(("wg", "show", interface_name)),
+        handshake_peers=(0 if fake else (_count_handshake_peers(interface_name) if wg_path is not None else None)),
+        public_key=public_key,
+        listen_port=listen_port,
+        peers=peers,
     )
 
 
@@ -372,6 +410,9 @@ def main() -> int:
 
 
 def _check_tool(name: str, command: str, version_args: Sequence[str]) -> ToolStatus:
+    if dev_fake_installed():
+        return ToolStatus(name=name, command=command, installed=True, version="dev-mode", path=f"/usr/bin/{command}")
+
     path = shutil.which(command)
     if path is None:
         return ToolStatus(name=name, command=command, installed=False, version=None, path=None)
@@ -419,6 +460,79 @@ def _count_handshake_peers(interface_name: str) -> int | None:
         if len(parts) >= 2 and parts[1].isdigit() and int(parts[1]) > 0:
             peer_count += 1
     return peer_count
+
+
+def _collect_wg_dump(wg_path: str, interface_name: str) -> tuple[str | None, str | None, tuple["VpnPeerStatus", ...]]:
+    """Parse `wg show <interface> dump` เพื่อดึงข้อมูล public key, listen port, peers.
+
+    Dump format (tab-separated):
+      interface line: private-key public-key listen-port fwmark
+      peer line:       public-key preshared-key endpoint allowed-ips latest-handshake transfer-rx transfer-tx persistent-keepalive
+    """
+    completed = _run_command((wg_path, "show", interface_name, "dump"))
+    if completed is None or completed.returncode != 0:
+        return None, None, ()
+
+    lines = [line for line in completed.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None, None, ()
+
+    iface_fields = lines[0].split("\t")
+    public_key = iface_fields[1] if len(iface_fields) > 1 and iface_fields[1] != "(none)" else None
+    listen_port = iface_fields[2] if len(iface_fields) > 2 and iface_fields[2] != "(none)" else None
+
+    peers: list[VpnPeerStatus] = []
+    for line in lines[1:]:
+        fields = line.split("\t")
+        if len(fields) < 8:
+            continue
+        peer_public_key, _preshared_key, endpoint, allowed_ips, handshake, rx, tx, keepalive = fields[:8]
+        peers.append(
+            VpnPeerStatus(
+                public_key=peer_public_key,
+                endpoint=endpoint if endpoint != "(none)" else None,
+                allowed_ips=allowed_ips if allowed_ips != "(none)" else None,
+                latest_handshake=_format_handshake_age(handshake),
+                transfer_rx=_format_bytes(rx),
+                transfer_tx=_format_bytes(tx),
+                persistent_keepalive=None if keepalive in ("0", "off", "(none)") else f"{keepalive}s",
+            )
+        )
+    return public_key, listen_port, tuple(peers)
+
+
+def _format_handshake_age(raw: str) -> str | None:
+    try:
+        handshake_ts = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if handshake_ts <= 0:
+        return None
+
+    delta = max(0, int(time.time()) - handshake_ts)
+    if delta < 60:
+        return f"{delta} วินาทีที่แล้ว"
+    if delta < 3600:
+        return f"{delta // 60} นาทีที่แล้ว"
+    if delta < 86400:
+        return f"{delta // 3600} ชั่วโมงที่แล้ว"
+    return f"{delta // 86400} วันที่แล้ว"
+
+
+def _format_bytes(raw: str) -> str | None:
+    try:
+        size = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if size == 0:
+        return "0 B"
+
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size} B"
 
 
 def _run_command(args: Sequence[str]) -> subprocess.CompletedProcess[str] | None:

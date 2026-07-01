@@ -37,3 +37,15 @@ def detect_ubuntu_codename() -> str:
 def command_exists(runner: CommandRunner, command: str) -> bool:
     result = runner.run(["bash", "-lc", f"command -v {command}"], check=False)
     return result.returncode == 0
+
+
+def dev_fake_installed() -> bool:
+    """
+    Dev-only toggle — เมื่อตั้ง env var `VAS_DEV_FAKE_INSTALLED=1` ระบบจะรายงานว่าทุก
+    package/service "ติดตั้งแล้วและทำงานอยู่" โดยไม่ต้องมี binary/systemd จริงในเครื่อง
+
+    ใช้สำหรับทดสอบหน้าเว็บ/sidebar บนเครื่อง dev (เช่น Windows ผ่าน `dev.bat`) ที่ไม่มี
+    apt package หรือ systemd จริง — ห้ามตั้งค่านี้บน production (systemd service ที่รันจริง
+    ไม่ได้ set env var นี้อยู่แล้ว)
+    """
+    return os.environ.get("VAS_DEV_FAKE_INSTALLED", "").strip().lower() in ("1", "true", "yes")
