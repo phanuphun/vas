@@ -568,7 +568,7 @@ def create_app() -> Flask:
             device = reader.device_path if running else None
             yield f"event: status\ndata: {_json_dumps({'running': running, 'device': device})}\n\n"
 
-            last_seen: str | None = None
+            last_seen_seq: int = -1
             last_heartbeat = time.monotonic()
             last_restart_try = 0.0  # ลอง restart ทันทีรอบแรกถ้า reader ตาย
             HEARTBEAT_INTERVAL = 5.0
@@ -603,8 +603,10 @@ def create_app() -> Flask:
 
                     if reader is not None and reader.is_alive():
                         scan = reader.last_scan
-                        if scan is not None and scan != last_seen:
-                            last_seen = scan
+                        seq = getattr(reader, "scan_seq", 0)
+                        # เทียบ seq (ไม่ใช่ค่า scan) เพื่อให้สแกนค่าเดิมซ้ำก็ trigger event/publish ได้
+                        if scan is not None and seq != last_seen_seq:
+                            last_seen_seq = seq
                             ts = datetime.now(timezone.utc).isoformat()
                             yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts})}\n\n"
                             # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่

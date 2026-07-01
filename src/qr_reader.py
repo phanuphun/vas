@@ -348,6 +348,7 @@ class QrReaderThread(threading.Thread):
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
         self._last_scan_raw: list[int] | None = None  # raw HID keycodes ก่อน decode
+        self._scan_seq: int = 0  # เพิ่มทุกครั้งที่จบสแกน (แม้ค่าจะซ้ำเดิม) ใช้แทนการเทียบค่า string
         self._lock = threading.Lock()
 
     @property
@@ -361,6 +362,15 @@ class QrReaderThread(threading.Thread):
         """Raw HID keycode sequence ของ scan ล่าสุด หรือ None"""
         with self._lock:
             return self._last_scan_raw
+
+    @property
+    def scan_seq(self) -> int:
+        """
+        ลำดับสแกน — เพิ่มขึ้นทุกครั้งที่จบสแกนใหม่ (กด Enter) ไม่ว่าค่าจะซ้ำของเดิมหรือไม่
+        ใช้แยกแยะ "สแกนรอบใหม่" ออกจาก "ค่าที่ค้างจากรอบก่อน" แทนการเทียบ string เท่ากัน
+        """
+        with self._lock:
+            return self._scan_seq
 
     def stop(self) -> None:
         """Signal ให้ thread หยุด"""
@@ -393,6 +403,7 @@ class QrReaderThread(threading.Thread):
                         with self._lock:
                             self._last_scan = buffer.strip()
                             self._last_scan_raw = list(raw_buf)
+                            self._scan_seq += 1
                         buffer = ""
                         raw_buf = []
         except (OSError, IOError):
@@ -422,6 +433,7 @@ class EvdevQrReaderThread(threading.Thread):
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
         self._last_scan_raw: list[int] | None = None  # raw evdev scancodes ก่อน decode
+        self._scan_seq: int = 0  # เพิ่มทุกครั้งที่จบสแกน (แม้ค่าจะซ้ำเดิม) ใช้แทนการเทียบค่า string
         self._lock = threading.Lock()
 
     @property
@@ -434,6 +446,12 @@ class EvdevQrReaderThread(threading.Thread):
         """Raw evdev scancode sequence ของ scan ล่าสุด หรือ None"""
         with self._lock:
             return self._last_scan_raw
+
+    @property
+    def scan_seq(self) -> int:
+        """ลำดับสแกน — เพิ่มขึ้นทุกครั้งที่จบสแกนใหม่ (Enter) ไม่ว่าค่าจะซ้ำของเดิมหรือไม่"""
+        with self._lock:
+            return self._scan_seq
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -466,6 +484,7 @@ class EvdevQrReaderThread(threading.Thread):
                         with self._lock:
                             self._last_scan = "".join(buffer).strip()
                             self._last_scan_raw = list(raw_buf)
+                            self._scan_seq += 1
                         buffer.clear()
                         raw_buf = []
                 elif key.scancode in EVDEV_KEYMAP:
