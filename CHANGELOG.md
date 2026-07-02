@@ -2,11 +2,12 @@
 
 ## [2026-07-02]
 
-### เพิ่ม SPA route-loading bar — แถบสีฟ้าด้านบนตอนเปลี่ยนหน้า
-- ปัญหาเดิม: กด nav link (เช่น AnyDesk) แล้วหน้าดูเหมือนค้าง ไม่มี indicator ว่ากำลังโหลดข้อมูลอยู่ ต้องรอเฉยๆ จนกว่าเนื้อหาจะมา
-- เพิ่ม `#vas-loading-bar` ใน `base.html` — แถบบาง 3px สีฟ้า (`--c-accent`) fixed ที่ขอบบนสุดของหน้าจอ เคลื่อนที่แบบ infinite/indeterminate (ไม่ผูกกับ % จริง) ด้วย CSS `@keyframes vas-loading-slide`
-- ผูกเข้ากับ SPA router ที่มีอยู่แล้วใน `base.html`: เรียก `showLoadingBar()` ทันทีตอน `navigate()` เริ่ม fetch, เรียก `hideLoadingBar()` เมื่อ content swap เสร็จ หรือเมื่อ fetch error จริง (ไม่ hide ตอน `AbortError` เพราะเป็น request เก่าที่ถูกแทนที่ด้วย navigate ใหม่ที่กำลังโชว์ bar ของตัวเองอยู่แล้ว)
-- ขอบเขต: แก้เฉพาะ `src/web/templates/base.html` (CSS + 1 HTML element + 2 ฟังก์ชัน JS ผูกเข้า `navigate()` เดิม) ไม่กระทบ `base_partial.html`, route อื่น, หรือ SPA router logic ส่วนอื่น
+### SPA route-loading indicator — เปลี่ยนจาก progress bar เป็น icon หมุนข้าง info button
+- เวอร์ชันแรกเพิ่มแถบสีฟ้า (`#vas-loading-bar`) fixed ขอบบนสุดของหน้าจอ ภายหลังปรับตามที่ผู้ใช้ขอ: เอาแถบออก เปลี่ยนเป็น icon `lucide:refresh-cw` ในกล่องเดียวกับปุ่ม header (ข้างปุ่ม info/circle-alert)
+- Idle state: icon จาง (`text-faint opacity-40`), `pointer-events-none` — ไม่ใช่ปุ่ม ไม่ทำอะไร
+- Loading state (SPA navigate กำลังทำงาน): เพิ่ม class `.is-loading` ที่ container ทำให้ icon หมุน (`@keyframes vas-icon-spin`, 0.7s linear infinite) พร้อมเปลี่ยนสีเป็นฟ้า (`--c-accent`) เหมือนสี active ของ sidebar icon
+- ผูกเข้ากับ SPA router เดิมใน `base.html`: `showLoadingIcon()` ตอน `navigate()` เริ่ม fetch, `hideLoadingIcon()` เมื่อ content swap เสร็จ หรือ fetch error จริง (ไม่ hide ตอน `AbortError` เพราะเป็น request เก่าที่ถูกแทนที่ด้วย navigate ใหม่ที่กำลัง show ของตัวเองอยู่แล้ว)
+- ขอบเขต: แก้เฉพาะ `src/web/templates/base.html` (CSS + 1 HTML element ใน header + 2 ฟังก์ชัน JS ผูกเข้า `navigate()` เดิม) ไม่กระทบ `base_partial.html`, route อื่น, หรือ SPA router logic ส่วนอื่น
 
 ### ZKTeco QR500 — ซ่อมปุ่ม Copy, สแกนวันนี้จาก DB, ประวัติการสแกน/publish MQTT query จาก DB พร้อม pagination
 - แก้บั๊กปุ่ม Copy ที่ "ค่าล่าสุด" ไม่ทำงาน: root cause คือ `qr_device_zkteco_qr500.html` เรียก `copyValue()` ที่ไม่เคยถูก define ในไฟล์นี้ (มีอยู่แค่ใน `qr.html`) ทำให้เกิด `ReferenceError` ทุกครั้งที่กด — เพิ่ม `copyValue()`/`fallbackCopy()` ในไฟล์นี้ตรงๆ, เพิ่ม `cursor-pointer` (และ `disabled:cursor-not-allowed`) บนปุ่ม, เปลี่ยนข้อความหลัง copy สำเร็จเป็น "Copied !!" แล้วกลับเป็น "Copy" อัตโนมัติ, และ init `lastScanVal` จากค่า `qr_reader.last_scan` ที่ server render มาแทนที่จะรอ SSE event แรกก่อนถึงจะใช้ปุ่มได้
