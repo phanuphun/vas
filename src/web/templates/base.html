@@ -211,16 +211,15 @@
           </div>
 
           {# ── ระบบ ───────────────────────────────────── #}
+          {# 'บันทึกระบบ' (logs) และ 'Database' ถูกปิดไว้ชั่วคราว — รอแก้ไข feature ทีหลัง #}
+          {%- if current_user and current_user.role in ('root', 'admin') %}
           <div class="nav-section px-2 pt-4 pb-1">
             <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">ระบบ</span>
             <div class="flex flex-col gap-0.5">
-              {{ nav_link('logs',          'lucide:scroll-text', 'บันทึกระบบ', 'Log และ audit เหตุการณ์') }}
-              {{ nav_link('database_page', 'lucide:database',    'Database',   'ดูและจัดการฐานข้อมูล') }}
-              {%- if current_user and current_user.role in ('root', 'admin') %}
               {{ nav_link('users_page',    'lucide:users',       'ผู้ใช้งาน',   'จัดการผู้ใช้และสิทธิ์') }}
-              {%- endif %}
             </div>
           </div>
+          {%- endif %}
 
           {# ── divider ────────────────────────────────── #}
           <div class="mx-3 my-2 border-t border-line/8"></div>

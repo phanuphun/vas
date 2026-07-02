@@ -305,6 +305,8 @@ def create_app() -> Flask:
 
     @app.get("/logs")
     def logs() -> str:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         return render_template(
             "logs.html",
             system_snapshots=list_system_snapshots(),
@@ -313,10 +315,14 @@ def create_app() -> Flask:
 
     @app.get("/api/logs/system")
     def logs_system_api() -> dict[str, object]:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         return {"status": "ok", "snapshots": list(list_system_snapshots())}
 
     @app.post("/api/logs/system/snapshot")
     def logs_system_snapshot_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         try:
             snapshot = create_system_log_snapshot()
         except OSError as error:
@@ -330,6 +336,8 @@ def create_app() -> Flask:
 
     @app.get("/api/logs/system/<snapshot_id>")
     def logs_system_show_api(snapshot_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         try:
             snapshot = read_system_snapshot(snapshot_id)
         except (FileNotFoundError, OSError, ValueError) as error:
@@ -338,6 +346,8 @@ def create_app() -> Flask:
 
     @app.delete("/api/logs/system/<snapshot_id>")
     def logs_system_delete_api(snapshot_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         try:
             deleted = delete_system_snapshot(snapshot_id)
         except (FileNotFoundError, OSError, ValueError) as error:
@@ -1461,39 +1471,22 @@ def create_app() -> Flask:
     @app.get("/api/settings/install/<pkg_id>/stream")
     def settings_install_stream_api(pkg_id: str):  # type: ignore[return]
         """SSE stream ของ install output"""
-        from flask import stream_with_context, Response
-        from features.packages.settings import get_install_queue, is_installing
-        import time as _time
+        from features.packages.settings import get_install_queue
+        return _stream_pkg_action_queue(get_install_queue, pkg_id, "Install queue not found")
 
-        def generate():
-            # รอให้ queue พร้อม (อาจยังไม่ start)
-            deadline = _time.monotonic() + 5.0
-            while _time.monotonic() < deadline:
-                q = get_install_queue(pkg_id)
-                if q is not None:
-                    break
-                _time.sleep(0.1)
-                yield "event: heartbeat\ndata: {}\n\n"
-            else:
-                yield f"event: error\ndata: {_json_dumps({'msg': 'Install queue not found'})}\n\n"
-                return
+    @app.post("/api/settings/uninstall/<pkg_id>")
+    def settings_uninstall_api(pkg_id: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from features.packages.settings import start_uninstall
+        ok, err = start_uninstall(pkg_id)
+        if not ok:
+            return {"status": "error", "errors": [err]}, 400
+        return {"status": "ok", "pkg_id": pkg_id}
 
-            while True:
-                try:
-                    line = q.get(timeout=30)
-                except Exception:
-                    yield "event: heartbeat\ndata: {}\n\n"
-                    continue
-                if line is None:  # sentinel — done
-                    yield f"event: done\ndata: {_json_dumps({'pkg_id': pkg_id})}\n\n"
-                    return
-                yield f"event: line\ndata: {_json_dumps({'text': line})}\n\n"
-
-        return Response(
-            stream_with_context(generate()),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+    @app.get("/api/settings/uninstall/<pkg_id>/stream")
+    def settings_uninstall_stream_api(pkg_id: str):  # type: ignore[return]
+        """SSE stream ของ uninstall output"""
+        from features.packages.settings import get_uninstall_queue
+        return _stream_pkg_action_queue(get_uninstall_queue, pkg_id, "Uninstall queue not found")
 
     # ── System Monitor routes ────────────────────────────────────
     # Monitor is now the home page (see "/" route above); keep the old
@@ -1516,11 +1509,15 @@ def create_app() -> Flask:
 
     @app.get("/database")
     def database_page() -> str:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         from core.database import get_stats
         return render_template("database.html", stats=get_stats())
 
     @app.get("/api/database/<table>")
     def database_table_api(table: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         from core.database import get_rows
         limit  = int(request.args.get("limit",  50))
         offset = int(request.args.get("offset",  0))
@@ -1532,6 +1529,8 @@ def create_app() -> Flask:
 
     @app.post("/api/database/<table>/clear")
     def database_clear_api(table: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         from core.database import clear_table, log_audit
         result = clear_table(table)
         if result.get("status") == "ok":
@@ -1545,6 +1544,8 @@ def create_app() -> Flask:
 
     @app.get("/api/database/stats")
     def database_stats_api() -> dict[str, object]:
+        from flask import abort
+        abort(404)  # ปิดหน้าไว้ก่อน — รอแก้ไข feature
         from core.database import get_stats
         return {"status": "ok", "stats": get_stats()}
 
@@ -1857,6 +1858,51 @@ import json as _json
 
 def _json_dumps(obj: dict[str, object]) -> str:
     return _json.dumps(obj, ensure_ascii=False)
+
+
+def _stream_pkg_action_queue(get_queue_fn, pkg_id: str, not_found_msg: str):  # type: ignore[no-untyped-def]
+    """
+    SSE stream ทั่วไปสำหรับ install/uninstall queue (ใช้ queue item shape เดียวกัน
+    จาก features.packages.settings._run_commands):
+        {"type": "progress", "step": int, "total": int, "cmd": str}
+        {"type": "line", "text": str}
+        None → จบ (sentinel)
+    """
+    from flask import stream_with_context, Response
+    import time as _time
+
+    def generate():
+        # รอให้ queue พร้อม (อาจยังไม่ start)
+        deadline = _time.monotonic() + 5.0
+        while _time.monotonic() < deadline:
+            q = get_queue_fn(pkg_id)
+            if q is not None:
+                break
+            _time.sleep(0.1)
+            yield "event: heartbeat\ndata: {}\n\n"
+        else:
+            yield f"event: error\ndata: {_json_dumps({'msg': not_found_msg})}\n\n"
+            return
+
+        while True:
+            try:
+                item = q.get(timeout=30)
+            except Exception:
+                yield "event: heartbeat\ndata: {}\n\n"
+                continue
+            if item is None:  # sentinel — done
+                yield f"event: done\ndata: {_json_dumps({'pkg_id': pkg_id})}\n\n"
+                return
+            if item.get("type") == "progress":
+                yield f"event: progress\ndata: {_json_dumps(item)}\n\n"
+            else:
+                yield f"event: line\ndata: {_json_dumps({'text': item.get('text', '')})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def run_server(host: str, port: int, debug: bool) -> None:

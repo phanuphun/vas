@@ -42,6 +42,27 @@
   .terminal-box::-webkit-scrollbar { width: 4px; }
   .terminal-box::-webkit-scrollbar-track { background: transparent; }
   .terminal-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+  /* ── Install/uninstall progress bar ────────────────────────────── */
+  .pkg-progress-track {
+    height: 6px; border-radius: 999px;
+    background: rgb(var(--c-line) / 0.1);
+    overflow: hidden;
+  }
+  .pkg-progress-fill {
+    height: 100%; border-radius: 999px;
+    background: rgb(var(--c-accent));
+    transition: width 0.3s ease;
+  }
+  .pkg-progress-fill.is-done  { background: rgb(var(--c-safe)); }
+  .pkg-progress-fill.is-error { background: rgb(var(--c-danger)); }
+  .pkg-progress-fill.is-uninstall { background: rgb(var(--c-danger)); }
+
+  /* ── Confirm Modal (VAS convention) ─────────────────────────────── */
+  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open { display:flex; }
+  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
 </style>
 
 <div class="flex flex-col gap-4">
@@ -290,13 +311,19 @@
     <div class="flex items-center gap-3 min-w-0">
       <img id="modal-logo" src="" alt="" class="w-8 h-8 object-contain rounded flex-shrink-0">
       <div class="min-w-0">
-        <div class="modal-dialog-title" id="modal-title">Installing…</div>
+        <div class="flex items-center gap-2">
+          <div class="modal-dialog-title" id="modal-title">Installing…</div>
+          <span id="modal-progress-pct" class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.65rem] font-semibold bg-accent/10 border border-accent/20 text-accent font-display tabular-nums">0%</span>
+        </div>
         <div class="text-[0.72rem] text-faint" id="modal-status-text">กำลังเริ่มต้น...</div>
       </div>
     </div>
     <button onclick="closeInstallModal()" class="text-faint hover:text-ink p-1 flex-shrink-0">
       <iconify-icon icon="lucide:x" width="14" height="14"></iconify-icon>
     </button>
+  </div>
+  <div class="pkg-progress-track mb-3">
+    <div id="modal-progress-fill" class="pkg-progress-fill" style="width:0%"></div>
   </div>
   <div class="terminal-box" id="modal-terminal"></div>
   <div class="flex justify-end gap-2 mt-3">
@@ -326,6 +353,34 @@
       <iconify-icon icon="lucide:download" width="13" height="13"></iconify-icon>
       ติดตั้งเดี๋ยวนี้
     </button>
+  </div>
+</div>
+
+<!-- ── Confirm Modal (ใช้สำหรับยืนยันก่อนถอนการติดตั้ง) ───────── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">
+        ยกเลิก
+      </button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        <span>ถอนการติดตั้ง</span>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -399,6 +454,40 @@
 
 
 
+  // ── Action button (install / uninstall / blocked states) ──────
+  function actionButtonHtml(p, opts) {
+    opts = opts || {};
+
+    if (p.installed) {
+      if (p.can_uninstall) {
+        return '<button onclick="uninstallPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+               'class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/8 transition-colors">' +
+               '<iconify-icon icon="lucide:trash-2" width="12" height="12"></iconify-icon>ถอน</button>';
+      }
+      var blockers = (p.uninstall_blockers || []).join(', ');
+      return '<button disabled title="ต้องถอนการติดตั้ง ' + esc(blockers) + ' ก่อน" ' +
+             'class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
+             '<iconify-icon icon="lucide:lock" width="12" height="12"></iconify-icon>Installed</button>';
+    }
+
+    if (opts.hasChildren) {
+      // Parent not installed → open sub-select modal so user can pick what to install
+      return '<button onclick="openSubSelectModal(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+             'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
+             '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>ติดตั้ง</button>';
+    }
+
+    if (opts.depsBlocked) {
+      return '<button disabled title="ติดตั้ง dependency ก่อน" ' +
+             'class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
+             '<iconify-icon icon="lucide:lock" width="12" height="12"></iconify-icon>รอ dependency</button>';
+    }
+
+    return '<button onclick="installPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+           'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
+           '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>Install</button>';
+  }
+
   function rowHtml(p) {
     var hasChildren = (p.children && p.children.length > 0);
     var logoSrc = p.logo ? "/public/images/logo/" + encodeURIComponent(p.logo) : FALLBACK_LOGO;
@@ -424,20 +513,7 @@
           }).join(', ') + '</span></div>'
       : '';
 
-    var btn;
-    if (installed) {
-      btn = '<button disabled class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
-            '<iconify-icon icon="lucide:check" width="12" height="12"></iconify-icon>Installed</button>';
-    } else if (hasChildren) {
-      // Parent not installed → open sub-select modal so user can pick what to install
-      btn = '<button onclick="openSubSelectModal(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
-            'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
-            '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>ติดตั้ง</button>';
-    } else {
-      btn = '<button onclick="installPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
-            'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
-            '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>Install</button>';
-    }
+    var btn = actionButtonHtml(p, { hasChildren: hasChildren });
 
     var parentRow = '<div class="pkg-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" id="card-' + p.id + '">' +
       '<img src="' + logoSrc + '" alt="' + esc(p.name) + '" ' +
@@ -499,19 +575,7 @@
           }).join(', ') + '</span></div>'
       : '';
 
-    var btn;
-    if (installed) {
-      btn = '<button disabled class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
-            '<iconify-icon icon="lucide:check" width="12" height="12"></iconify-icon>Installed</button>';
-    } else if (!depsOk) {
-      btn = '<button disabled title="ติดตั้ง dependency ก่อน" ' +
-            'class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-faint text-[0.75rem] font-medium cursor-not-allowed">' +
-            '<iconify-icon icon="lucide:lock" width="12" height="12"></iconify-icon>รอ dependency</button>';
-    } else {
-      btn = '<button onclick="installPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
-            'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
-            '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>Install</button>';
-    }
+    var btn = actionButtonHtml(p, { depsBlocked: !depsOk });
 
     return '<div class="sub-row flex items-center gap-3 pr-4 py-3 border-b border-line/6" id="card-' + p.id + '">' +
       '<div class="sub-connector"></div>' +
@@ -551,39 +615,78 @@
       }
     }
 
-    openInstallModal(pkg);
+    openInstallModal(pkg, "install");
     fetch("/api/settings/install/" + encodeURIComponent(pkgId), { method: "POST" })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d.status !== "ok") {
           appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
           setModalStatus("เกิดข้อผิดพลาด", "danger");
+          markModalError();
           return;
         }
-        streamInstall(pkgId);
+        streamAction(pkgId, "install");
       })
       .catch(function (e) { appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m"); });
   };
 
-  // ── Stream install (single package) ──────────────────────────
-  function streamInstall(pkgId, onComplete) {
-    var evtSrc = new EventSource("/api/settings/install/" + encodeURIComponent(pkgId) + "/stream");
+  // ── Uninstall ─────────────────────────────────────────────────
+  window.uninstallPkg = function (pkgId) {
+    var pkg = allPackages.find(function (p) { return p.id === pkgId; });
+    if (!pkg) return;
+
+    if (!pkg.can_uninstall) {
+      showToast("ต้องถอนการติดตั้ง " + (pkg.uninstall_blockers || []).join(", ") + " ก่อน", "error");
+      return;
+    }
+
+    showConfirm({
+      title:   "ถอนการติดตั้ง " + pkg.name + "?",
+      body:    pkg.uninstall_warning || "โปรแกรมนี้จะถูกถอนออกจากเครื่อง — ไฟล์ตั้งค่าที่เกี่ยวข้องจะยังคงอยู่",
+      okLabel: "ถอนการติดตั้ง",
+      onOk: function () {
+        openInstallModal(pkg, "uninstall");
+        fetch("/api/settings/uninstall/" + encodeURIComponent(pkgId), { method: "POST" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.status !== "ok") {
+              appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
+              setModalStatus("เกิดข้อผิดพลาด", "danger");
+              markModalError();
+              return;
+            }
+            streamAction(pkgId, "uninstall");
+          })
+          .catch(function (e) { appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m"); });
+      }
+    });
+  };
+
+  // ── Stream install/uninstall (single package) ─────────────────
+  function streamAction(pkgId, action, onComplete) {
+    var evtSrc = new EventSource("/api/settings/" + action + "/" + encodeURIComponent(pkgId) + "/stream");
+    evtSrc.addEventListener("progress", function (e) {
+      var d = JSON.parse(e.data);
+      setModalProgress(d.step, d.total);
+    });
     evtSrc.addEventListener("line", function (e) {
       appendTerminal(ansiToHtml(JSON.parse(e.data).text));
     });
     evtSrc.addEventListener("done", function () {
       evtSrc.close();
+      markModalDone();
       if (onComplete) {
         setModalStatus("เสร็จแล้ว ✓", "ok");
         setTimeout(onComplete, 600);
       } else {
-        setModalStatus("เสร็จแล้ว", "ok");
+        setModalStatus(action === "uninstall" ? "ถอนการติดตั้งเสร็จแล้ว" : "เสร็จแล้ว", "ok");
         setTimeout(loadPackages, 800);
       }
     });
     evtSrc.addEventListener("error", function (e) {
       try { appendTerminal("\x1b[31mError: " + JSON.parse(e.data).msg + "\x1b[0m"); } catch (_) {}
       evtSrc.close();
+      markModalError();
       setModalStatus("Error", "danger");
     });
     evtSrc.onerror = function () { evtSrc.close(); };
@@ -652,10 +755,11 @@
 
     var firstPkg = allPackages.find(function (p) { return p.id === queue[0]; });
     if (!firstPkg) return;
-    openInstallModal(firstPkg);
+    openInstallModal(firstPkg, "install");
 
     function next() {
       if (!queue.length) {
+        markModalDone();
         setModalStatus("ติดตั้งครบทุกรายการ ✓", "ok");
         setTimeout(loadPackages, 800);
         return;
@@ -670,6 +774,7 @@
         sep.style.marginTop = "0.5rem";
         document.getElementById("modal-terminal").appendChild(sep);
       }
+      setModalProgress(0, 1);
       setModalStatus("กำลังติดตั้ง " + pkg.name + "...", "pending");
 
       fetch("/api/settings/install/" + encodeURIComponent(pkgId), { method: "POST" })
@@ -678,9 +783,10 @@
           if (d.status !== "ok") {
             appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
             setModalStatus("เกิดข้อผิดพลาด", "danger");
+            markModalError();
             return;
           }
-          streamInstall(pkgId, next);
+          streamAction(pkgId, "install", next);
         })
         .catch(function (e) { appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m"); });
     }
@@ -688,13 +794,18 @@
     next();
   }
 
-  // ── Install modal ─────────────────────────────────────────────
-  function openInstallModal(pkg) {
+  // ── Install / uninstall modal ──────────────────────────────────
+  function openInstallModal(pkg, action) {
     document.getElementById("modal-logo").src = pkg.logo
       ? "/public/images/logo/" + encodeURIComponent(pkg.logo)
       : FALLBACK_LOGO;
-    document.getElementById("modal-title").textContent = "กำลังติดตั้ง " + pkg.name;
+    document.getElementById("modal-title").textContent =
+      (action === "uninstall" ? "กำลังถอนการติดตั้ง " : "กำลังติดตั้ง ") + pkg.name;
     setModalStatus("กำลังเริ่มต้น...", "pending");
+    setModalProgress(0, 1);
+    var fill = document.getElementById("modal-progress-fill");
+    fill.classList.remove("is-done", "is-error", "is-uninstall");
+    if (action === "uninstall") fill.classList.add("is-uninstall");
     document.getElementById("modal-terminal").innerHTML = "";
     document.getElementById("install-modal-backdrop").classList.add("is-visible");
     document.getElementById("install-modal").classList.add("is-visible");
@@ -709,6 +820,23 @@
     var el = document.getElementById("modal-status-text");
     el.textContent = text;
     el.className = "text-[0.72rem] " + (type === "ok" ? "text-safe" : type === "danger" ? "text-danger" : "text-faint");
+  }
+  function setModalProgress(step, total) {
+    var pct = total > 0 ? Math.round((step / total) * 100) : 0;
+    pct = Math.max(0, Math.min(100, pct));
+    var fill = document.getElementById("modal-progress-fill");
+    var pctEl = document.getElementById("modal-progress-pct");
+    if (fill) fill.style.width = pct + "%";
+    if (pctEl) pctEl.textContent = pct + "%";
+  }
+  function markModalDone() {
+    setModalProgress(1, 1);
+    var fill = document.getElementById("modal-progress-fill");
+    if (fill) { fill.classList.remove("is-error"); fill.classList.add("is-done"); }
+  }
+  function markModalError() {
+    var fill = document.getElementById("modal-progress-fill");
+    if (fill) fill.classList.add("is-error");
   }
   function appendTerminal(html) {
     var box = document.getElementById("modal-terminal");
@@ -740,12 +868,43 @@
       .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
       .replace(/\x1b\[32m(.*?)\x1b\[0m/g,'<span style="color:#34d399">$1</span>')
       .replace(/\x1b\[31m(.*?)\x1b\[0m/g,'<span style="color:#f87171">$1</span>')
+      .replace(/\x1b\[33m(.*?)\x1b\[0m/g,'<span style="color:#fbbf24">$1</span>')
       .replace(/\x1b\[36m(.*?)\x1b\[0m/g,'<span style="color:#67e8f9">$1</span>')
       .replace(/\x1b\[\d+m/g,"");
   }
   function esc(s) {
     return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
+
+  // ── Confirm modal (VAS convention — ห้ามใช้ window.confirm()) ──
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = clone;
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) {
+      var labelEl = btnOk.querySelector("span");
+      if (labelEl) labelEl.textContent = opts.okLabel;
+    }
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
 
   // ── Search / filter ───────────────────────────────────────────
   window.filterPackages = function (query) {

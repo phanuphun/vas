@@ -94,6 +94,9 @@ PACKAGES: list[dict[str, Any]] = [
             ["apt-get", "update"],
             ["apt-get", "install", "-y", "git"],
         ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "git"],
+        ],
     },
     # ── Node.js + ecosystem ───────────────────────────────────────
     {
@@ -122,6 +125,9 @@ PACKAGES: list[dict[str, Any]] = [
             ["apt-get", "update"],
             ["apt-get", "install", "-y", "nodejs"],
         ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "nodejs", "npm"],
+        ],
     },
     {
         "id":          "pm2",
@@ -134,6 +140,9 @@ PACKAGES: list[dict[str, Any]] = [
         "check":       _which_check("pm2", ("pm2", "--version")),
         "install_cmds": [
             ["npm", "install", "-g", "pm2"],
+        ],
+        "uninstall_cmds": [
+            ["npm", "uninstall", "-g", "pm2"],
         ],
     },
     # ── Docker ────────────────────────────────────────────────────
@@ -167,6 +176,16 @@ PACKAGES: list[dict[str, Any]] = [
              "docker-ce", "docker-ce-cli", "containerd.io",
              "docker-buildx-plugin", "docker-compose-plugin"],
         ],
+        "uninstall_cmds": [
+            ["systemctl", "disable", "--now", "docker"],
+            ["systemctl", "disable", "--now", "containerd"],
+            ["apt-get", "remove", "-y",
+             "docker-ce", "docker-ce-cli", "containerd.io",
+             "docker-buildx-plugin", "docker-compose-plugin",
+             "docker-ce-rootless-extras", "docker.io", "docker-doc",
+             "docker-compose", "docker-compose-v2", "podman-docker",
+             "containerd", "runc"],
+        ],
     },
     # ── Network ───────────────────────────────────────────────────
     {
@@ -181,6 +200,9 @@ PACKAGES: list[dict[str, Any]] = [
         "install_cmds": [
             ["apt-get", "update"],
             ["apt-get", "install", "-y", "wireguard", "wireguard-tools"],
+        ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "wireguard", "wireguard-tools"],
         ],
     },
     {
@@ -197,6 +219,11 @@ PACKAGES: list[dict[str, Any]] = [
             ["apt-get", "install", "-y", "openssh-server"],
             ["systemctl", "enable", "--now", "ssh"],
         ],
+        "uninstall_cmds": [
+            ["systemctl", "disable", "--now", "ssh"],
+            ["apt-get", "purge", "-y", "openssh-server"],
+        ],
+        "uninstall_warning": "การถอน OpenSSH อาจทำให้การเชื่อมต่อระยะไกลผ่าน SSH ใช้งานไม่ได้",
     },
     # ── Remote ────────────────────────────────────────────────────
     {
@@ -225,6 +252,11 @@ PACKAGES: list[dict[str, Any]] = [
             ["apt-get", "update"],
             ["apt-get", "install", "-y", "anydesk"],
         ],
+        "uninstall_cmds": [
+            ["systemctl", "disable", "--now", "anydesk"],
+            ["apt-get", "purge", "-y", "anydesk"],
+        ],
+        "uninstall_warning": "การถอน AnyDesk จะปิดการเข้าถึง remote desktop จากระยะไกล",
     },
     # ── Hardware ──────────────────────────────────────────────────
     {
@@ -247,8 +279,20 @@ PACKAGES: list[dict[str, Any]] = [
             ["udevadm", "control", "--reload-rules"],
             ["udevadm", "trigger"],
         ],
+        "uninstall_cmds": [
+            ["rm", "-f", "/etc/udev/rules.d/99-qr500-bm.rules"],
+            ["udevadm", "control", "--reload-rules"],
+            ["udevadm", "trigger"],
+        ],
     },
 ]
+
+def _safe_check(p: dict[str, Any]) -> tuple[bool, str | None]:
+    try:
+        return p["check"]()
+    except Exception:
+        return False, None
+
 
 # id → package dict lookup
 _PKG_MAP: dict[str, dict[str, Any]] = {p["id"]: p for p in PACKAGES}
@@ -287,6 +331,15 @@ def get_package_status(pkg_id: str | None = None) -> list[dict[str, Any]]:
             if dep in _PKG_MAP
         )
 
+        # ถอนได้ไหม — ถ้ามี package อื่นที่ติดตั้งแล้วและ depends ตัวนี้อยู่ ต้องถอนตัวนั้นก่อน
+        blocking_dependents = [
+            other["name"]
+            for other in PACKAGES
+            if other["id"] != p["id"]
+            and p["id"] in other.get("depends", [])
+            and _safe_check(other)[0]
+        ]
+
         result.append({
             "id":          p["id"],
             "name":        p["name"],
@@ -298,15 +351,25 @@ def get_package_status(pkg_id: str | None = None) -> list[dict[str, Any]]:
             "installed":   installed,
             "version":     version,
             "deps_ok":     deps_ok,
+            "can_uninstall":       len(blocking_dependents) == 0,
+            "uninstall_blockers":  blocking_dependents,
+            "uninstall_warning":   p.get("uninstall_warning"),
         })
     return result
 
 
 # ---------------------------------------------------------------------------
-# Streaming installer
+# Streaming installer / uninstaller
 # ---------------------------------------------------------------------------
+#
+# Queue item shapes (None = sentinel แปลว่า action จบแล้ว):
+#   {"type": "progress", "step": int, "total": int, "cmd": str}
+#   {"type": "line", "text": str}
 
-_active_installs: dict[str, queue.Queue[str | None]] = {}
+_QueueItem = dict[str, Any] | None
+
+_active_installs: dict[str, "queue.Queue[_QueueItem]"] = {}
+_active_uninstalls: dict[str, "queue.Queue[_QueueItem]"] = {}
 _install_lock = threading.Lock()
 
 
@@ -319,8 +382,8 @@ def start_install(pkg_id: str) -> tuple[bool, str]:
         return False, f"Unknown package: {pkg_id}"
 
     with _install_lock:
-        if pkg_id in _active_installs:
-            return False, "Installation already in progress"
+        if pkg_id in _active_installs or pkg_id in _active_uninstalls:
+            return False, "มีการติดตั้ง/ถอนการติดตั้งรายการนี้อยู่แล้ว"
 
     pkg = _PKG_MAP[pkg_id]
 
@@ -333,39 +396,13 @@ def start_install(pkg_id: str) -> tuple[bool, str]:
                 dep_name = dep["name"]
                 return False, f"ต้องติดตั้ง {dep_name} ก่อน"
 
-    q: queue.Queue[str | None] = queue.Queue()
+    q: "queue.Queue[_QueueItem]" = queue.Queue()
     with _install_lock:
         _active_installs[pkg_id] = q
 
     def _run() -> None:
-        cmds = pkg.get("install_cmds", [])
         try:
-            for cmd in cmds:
-                q.put(f"\n\x1b[36m$ {' '.join(cmd)}\x1b[0m")
-                try:
-                    proc = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1,
-                        env=_clean_env(),
-                    )
-                    for line in proc.stdout:  # type: ignore[union-attr]
-                        q.put(line.rstrip())
-                    proc.wait()
-                    if proc.returncode != 0:
-                        q.put(f"\x1b[31m✗ Exit code {proc.returncode}\x1b[0m")
-                        q.put(None)  # sentinel
-                        return
-                except Exception as exc:
-                    q.put(f"\x1b[31m[error] {exc}\x1b[0m")
-                    q.put(None)
-                    return
-            q.put(None)  # all done — sentinel ส่งสัญญาณว่าติดตั้งครบ
-        except Exception as exc:
-            q.put(f"\x1b[31m[fatal] {exc}\x1b[0m")
-            q.put(None)
+            _run_commands(pkg.get("install_cmds", []), q, stop_on_error=True)
         finally:
             with _install_lock:
                 _active_installs.pop(pkg_id, None)
@@ -375,14 +412,109 @@ def start_install(pkg_id: str) -> tuple[bool, str]:
     return True, ""
 
 
-def get_install_queue(pkg_id: str) -> "queue.Queue[str | None] | None":
+def start_uninstall(pkg_id: str) -> tuple[bool, str]:
+    """
+    เริ่ม uninstall ใน background thread.
+    Returns (ok, error_msg)
+    """
+    if pkg_id not in _PKG_MAP:
+        return False, f"Unknown package: {pkg_id}"
+
+    with _install_lock:
+        if pkg_id in _active_installs or pkg_id in _active_uninstalls:
+            return False, "มีการติดตั้ง/ถอนการติดตั้งรายการนี้อยู่แล้ว"
+
+    pkg = _PKG_MAP[pkg_id]
+
+    # ห้ามถอนถ้ามี package อื่นที่ติดตั้งแล้วและต้องพึ่งพาตัวนี้อยู่
+    dependents = [
+        other["name"]
+        for other in PACKAGES
+        if other["id"] != pkg_id
+        and pkg_id in other.get("depends", [])
+        and _safe_check(other)[0]
+    ]
+    if dependents:
+        return False, f"ต้องถอนการติดตั้ง {', '.join(dependents)} ก่อน"
+
+    q: "queue.Queue[_QueueItem]" = queue.Queue()
+    with _install_lock:
+        _active_uninstalls[pkg_id] = q
+
+    def _run() -> None:
+        try:
+            _run_commands(pkg.get("uninstall_cmds", []), q, stop_on_error=False)
+        finally:
+            with _install_lock:
+                _active_uninstalls.pop(pkg_id, None)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return True, ""
+
+
+def _run_commands(cmds: list[list[str]], q: "queue.Queue[_QueueItem]", stop_on_error: bool) -> None:
+    """
+    รันคำสั่งทีละตัว พร้อมส่ง progress + output เข้า queue
+
+    stop_on_error=True  → คำสั่งใดล้มเหลว หยุดทันที (install — ต้องสำเร็จทุกขั้นตอน)
+    stop_on_error=False → คำสั่งใดล้มเหลว ข้ามไปขั้นถัดไป (uninstall — best-effort เหมือน `apt purge` ที่
+                           ไม่ควรพังทั้ง flow แค่เพราะ package ไม่ได้ติดตั้งอยู่แล้ว)
+    """
+    total = len(cmds)
+    try:
+        for i, cmd in enumerate(cmds):
+            q.put({"type": "progress", "step": i, "total": total, "cmd": " ".join(cmd)})
+            q.put({"type": "line", "text": f"\n\x1b[36m$ {' '.join(cmd)}\x1b[0m"})
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=_clean_env(),
+                )
+                for line in proc.stdout:  # type: ignore[union-attr]
+                    q.put({"type": "line", "text": line.rstrip()})
+                proc.wait()
+                if proc.returncode != 0:
+                    if stop_on_error:
+                        q.put({"type": "line", "text": f"\x1b[31m✗ Exit code {proc.returncode}\x1b[0m"})
+                        q.put(None)  # sentinel
+                        return
+                    q.put({"type": "line", "text": f"\x1b[33m⚠ Exit code {proc.returncode} (ข้ามไปขั้นถัดไป)\x1b[0m"})
+            except Exception as exc:
+                if stop_on_error:
+                    q.put({"type": "line", "text": f"\x1b[31m[error] {exc}\x1b[0m"})
+                    q.put(None)
+                    return
+                q.put({"type": "line", "text": f"\x1b[33m[warn] {exc}\x1b[0m"})
+        q.put({"type": "progress", "step": total, "total": total, "cmd": ""})
+        q.put(None)  # all done — sentinel
+    except Exception as exc:
+        q.put({"type": "line", "text": f"\x1b[31m[fatal] {exc}\x1b[0m"})
+        q.put(None)
+
+
+def get_install_queue(pkg_id: str) -> "queue.Queue[_QueueItem] | None":
     with _install_lock:
         return _active_installs.get(pkg_id)
+
+
+def get_uninstall_queue(pkg_id: str) -> "queue.Queue[_QueueItem] | None":
+    with _install_lock:
+        return _active_uninstalls.get(pkg_id)
 
 
 def is_installing(pkg_id: str) -> bool:
     with _install_lock:
         return pkg_id in _active_installs
+
+
+def is_uninstalling(pkg_id: str) -> bool:
+    with _install_lock:
+        return pkg_id in _active_uninstalls
 
 
 def _clean_env() -> dict[str, str]:
