@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docker — VAS (Mock Preview)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;500;600;700&family=Anuphan:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink:     'rgb(var(--c-ink)     / <alpha-value>)',
+          muted:   'rgb(var(--c-muted)   / <alpha-value>)',
+          faint:   'rgb(var(--c-faint)   / <alpha-value>)',
+          accent:  'rgb(var(--c-accent)  / <alpha-value>)',
+          card:    'rgb(var(--c-card)    / <alpha-value>)',
+          surface: 'rgb(var(--c-surface) / <alpha-value>)',
+          page:    'rgb(var(--c-page)    / <alpha-value>)',
+          safe:    'rgb(var(--c-safe)    / <alpha-value>)',
+          caution: 'rgb(var(--c-caution) / <alpha-value>)',
+          danger:  'rgb(var(--c-danger)  / <alpha-value>)',
+          line:    'rgb(var(--c-line)    / <alpha-value>)',
+        },
+        fontFamily: {
+          display: ['Bai Jamjuree', 'sans-serif'],
+          body: ['Anuphan', 'system-ui', 'sans-serif'],
+        },
+      }
+    }
+  }
+</script>
+<style>
+  :root {
+    --c-ink:     26 32 50;
+    --c-muted:   74 80 99;
+    --c-faint:  140 146 165;
+    --c-line:    26 32 50;
+    --c-accent:  37 99 235;
+    --c-card:   255 255 255;
+    --c-surface: 248 249 251;
+    --c-page:   246 247 250;
+    --c-safe:    16 185 129;
+    --c-caution: 234 179 8;
+    --c-danger:  239 68 68;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Anuphan', system-ui, sans-serif; font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+
+  .zone { display:inline-flex; align-items:center; padding:0.1rem 0.5rem; border-radius:9999px; font-size:0.7rem; font-weight:600; border-width:1px; border-style:solid; white-space:nowrap; }
+  .zone-safe    { background:rgb(var(--c-safe)/0.08);    border-color:rgb(var(--c-safe)/0.22);    color:#0f766e; }
+  .zone-caution { background:rgb(var(--c-caution)/0.10); border-color:rgb(var(--c-caution)/0.25); color:#92660b; }
+  .zone-danger  { background:rgb(var(--c-danger)/0.08);  border-color:rgb(var(--c-danger)/0.22);  color:#b1453a; }
+  .zone-mute    { background:rgb(var(--c-surface));      border-color:rgb(var(--c-line)/0.12);    color:rgb(var(--c-muted)); }
+  .zone-info    { background:rgb(var(--c-accent)/0.08);  border-color:rgb(var(--c-accent)/0.20);  color:rgb(var(--c-accent)); }
+
+  .tab-panel { display: none; }
+  .tab-panel.is-active { display: flex; flex-direction: column; animation: tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .bar-track { height: 6px; border-radius: 9999px; background: rgb(var(--c-line)/0.08); overflow: hidden; }
+  .bar-fill  { height: 100%; border-radius: 9999px; }
+
+  .mono { font-family: 'Menlo','Monaco','Consolas',monospace; }
+</style>
+</head>
+<body class="bg-page text-ink">
+
+<div class="min-h-screen flex flex-col lg:flex-row">
+
+  <!-- ── Sidebar (static, ตัดมาจาก base.html เพื่อบริบทการดูตำแหน่งเมนู) ── -->
+  <aside class="hidden lg:flex w-60 bg-card border-r border-line/10 flex-col flex-shrink-0">
+    <div class="h-[52px] flex items-center px-3 border-b border-line/10">
+      <div class="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
+        <iconify-icon icon="lucide:monitor" width="14" height="14" style="color:white;"></iconify-icon>
+      </div>
+      <span class="font-display text-[0.92rem] font-bold text-ink ml-2.5">VAS</span>
+      <span class="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.55rem] font-bold bg-accent/10 text-accent">v0.1</span>
+    </div>
+    <nav class="flex-1 overflow-y-auto py-1.5 px-2">
+      <span class="text-[0.72rem] font-bold text-accent block px-2.5 pt-2 pb-1.5">โปรแกรมเพิ่มเติม</span>
+      <div class="flex items-center gap-3 pl-3.5 pr-2.5 py-2 rounded-xl bg-line/6 relative">
+        <span class="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-accent"></span>
+        <span class="w-9 h-9 rounded-lg bg-card border border-accent/25 flex items-center justify-center flex-shrink-0">
+          <iconify-icon icon="simple-icons:docker" width="15" height="15" class="text-accent"></iconify-icon>
+        </span>
+        <span class="flex-1 min-w-0">
+          <span class="block text-[0.82rem] font-semibold text-accent truncate">Docker</span>
+          <span class="block text-[0.66rem] text-faint truncate mt-0.5">Containers, Images, Swarm</span>
+        </span>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- ── Main ── -->
+  <div class="flex-1 min-w-0 flex flex-col min-h-screen">
+
+    <header class="sticky top-0 z-[100] bg-white border-b border-line/10">
+      <div class="flex items-center gap-3 px-4 h-[52px]">
+        <span class="font-display text-[0.95rem] font-bold text-ink">Docker</span>
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-bold bg-caution/10 text-[#92660b] border border-caution/25">
+          <iconify-icon icon="lucide:pencil-ruler" width="10" height="10"></iconify-icon>
+          MOCK PREVIEW — ยังไม่ต่อ backend จริง
+        </span>
+        <div class="flex-1"></div>
+        <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-line/10">
+          <div class="w-5 h-5 rounded-full bg-accent/10 text-accent text-[0.58rem] font-bold flex items-center justify-center">VM</div>
+          <span class="text-[0.78rem] font-semibold text-ink hidden sm:block">vas-node-01</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex-1 px-3 py-3.5 md:px-5 md:py-[1.125rem] lg:px-6 lg:py-5 overflow-x-hidden">
+      <div class="max-w-[1200px] mx-auto flex flex-col gap-4">
+
+        <!-- ── 1. PAGE HEADER ── -->
+        <div class="border-b border-line/10 pb-4">
+          <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · โปรแกรมเพิ่มเติม</p>
+          <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">Docker</h1>
+          <p class="text-[0.82rem] text-muted mt-1">จัดการ Docker Engine, Containers, Images, Networks, Volumes, Compose และ Swarm Cluster</p>
+        </div>
+
+        <!-- ── 2. TAB NAV ── -->
+        <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+          <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+            <button type="button" data-tab="status" onclick="dkTab('status')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 bg-accent/8 text-accent font-semibold">
+              <iconify-icon icon="lucide:layout-dashboard" width="14" height="14"></iconify-icon><span>สถานะ</span>
+            </button>
+            <button type="button" data-tab="containers" onclick="dkTab('containers')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+              <iconify-icon icon="lucide:box" width="14" height="14"></iconify-icon><span>Containers</span>
+            </button>
+            <button type="button" data-tab="images" onclick="dkTab('images')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+              <iconify-icon icon="lucide:layers" width="14" height="14"></iconify-icon><span>Images</span>
+            </button>
+            <button type="button" data-tab="networks" onclick="dkTab('networks')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+              <iconify-icon icon="lucide:network" width="14" height="14"></iconify-icon><span>Networks</span>
+            </button>
+            <button type="button" data-tab="volumes" onclick="dkTab('volumes')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+              <iconify-icon icon="lucide:database" width="14" height="14"></iconify-icon><span>Volumes</span>
+            </button>
+            <button type="button" data-tab="compose" onclick="dkTab('compose')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+              <iconify-icon icon="lucide:file-code" width="14" height="14"></iconify-icon><span>Compose</span>
+            </button>
+            <button type="button" data-tab="swarm" onclick="dkTab('swarm')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+              <iconify-icon icon="lucide:share-2" width="14" height="14"></iconify-icon><span>Swarm</span>
+            </button>
+            <button type="button" data-tab="settings" onclick="dkTab('settings')"
+                    class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+              <iconify-icon icon="lucide:settings" width="14" height="14"></iconify-icon><span>ตั้งค่า</span>
+            </button>
+          </div>
+        </nav>
+
+        <!-- ══════════════════════════════ 3. CONTENT ══════════════════════════════ -->
+        <div>
+
+          <!-- ════════ TAB: สถานะ ════════ -->
+          <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
+
+            <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">Daemon:</span>
+                <span class="text-[0.78rem] font-semibold text-safe">running</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:tag" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">Version:</span>
+                <span class="text-[0.78rem] font-semibold text-ink">27.3.1</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:share-2" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">Swarm:</span>
+                <span class="text-[0.78rem] font-semibold text-safe">active (manager)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:box" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">Containers:</span>
+                <span class="text-[0.78rem] font-semibold text-ink">5 running / 7 total</span>
+              </div>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+                <iconify-icon icon="lucide:info" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-ink">ข้อมูล Docker Engine</h2>
+              </div>
+              <div class="divide-y divide-line/7">
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Server Version</span>
+                  <span class="text-[0.82rem] text-ink font-mono">27.3.1</span>
+                </div>
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">API Version</span>
+                  <span class="text-[0.82rem] text-ink font-mono">1.47</span>
+                </div>
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">OS / Arch</span>
+                  <span class="text-[0.82rem] text-ink font-mono">linux/amd64 · Ubuntu 22.04</span>
+                </div>
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Kernel</span>
+                  <span class="text-[0.82rem] text-ink font-mono">5.15.0-107-generic</span>
+                </div>
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Storage Driver</span>
+                  <span class="text-[0.82rem] text-ink font-mono">overlay2</span>
+                </div>
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Logging Driver</span>
+                  <span class="text-[0.82rem] text-ink font-mono">json-file</span>
+                </div>
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Cgroup Driver</span>
+                  <span class="text-[0.82rem] text-ink font-mono">systemd (v2)</span>
+                </div>
+                <div class="flex items-start gap-3 px-4 py-3">
+                  <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Root Dir</span>
+                  <span class="text-[0.82rem] text-ink font-mono">/var/lib/docker</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+                <iconify-icon icon="lucide:gauge" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-ink">การใช้ทรัพยากร (Docker Root)</h2>
+              </div>
+              <div class="p-4 flex flex-col gap-4">
+                <div>
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-[0.75rem] font-medium text-muted">Images (23 รายการ)</span>
+                    <span class="text-[0.75rem] font-semibold text-ink">6.4 GB</span>
+                  </div>
+                  <div class="bar-track"><div class="bar-fill bg-accent" style="width:42%"></div></div>
+                </div>
+                <div>
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-[0.75rem] font-medium text-muted">Containers (7 รายการ)</span>
+                    <span class="text-[0.75rem] font-semibold text-ink">1.2 GB</span>
+                  </div>
+                  <div class="bar-track"><div class="bar-fill bg-safe" style="width:12%"></div></div>
+                </div>
+                <div>
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-[0.75rem] font-medium text-muted">Volumes (9 รายการ)</span>
+                    <span class="text-[0.75rem] font-semibold text-ink">3.1 GB</span>
+                  </div>
+                  <div class="bar-track"><div class="bar-fill bg-caution" style="width:22%"></div></div>
+                </div>
+                <div>
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-[0.75rem] font-medium text-muted">Build Cache</span>
+                    <span class="text-[0.75rem] font-semibold text-ink">890 MB</span>
+                  </div>
+                  <div class="bar-track"><div class="bar-fill bg-muted" style="width:8%; background: rgb(var(--c-muted)/0.4);"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+                <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-ink">การดำเนินการด่วน</h2>
+              </div>
+              <div class="p-4 flex flex-wrap gap-2">
+                <button type="button" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+                  <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Restart Daemon
+                </button>
+                <button type="button" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+                  <iconify-icon icon="lucide:file-text" width="13" height="13"></iconify-icon>ดู Daemon Logs
+                </button>
+                <button type="button" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+                  <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>System Prune (ลบของไม่ใช้ทั้งหมด)
+                </button>
+              </div>
+            </div>
+
+          </div><!-- /tab-status -->
+
+
+          <!-- ════════ TAB: Containers ════════ -->
+          <div id="tab-containers" class="tab-panel flex flex-col gap-4">
+
+            <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex flex-wrap items-center gap-2">
+              <div class="relative flex-1 min-w-[180px]">
+                <iconify-icon icon="lucide:search" width="14" height="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-faint"></iconify-icon>
+                <input type="text" placeholder="ค้นหาชื่อ container / image..."
+                       class="w-full pl-9 pr-3 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition placeholder:text-faint">
+              </div>
+              <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+                <iconify-icon icon="lucide:list-filter" width="12" height="12"></iconify-icon>ทั้งหมด
+              </button>
+              <button type="button" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+                <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>New Container
+              </button>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+
+              <!-- container row: running -->
+              <div class="border-b border-line/7">
+                <button type="button" onclick="toggleRow('c1')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+                  <div class="w-9 h-9 rounded-lg bg-safe/8 border border-safe/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <iconify-icon icon="lucide:box" width="16" height="16" class="text-safe"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.88rem] text-ink font-display">vas-mqtt-broker</span>
+                      <span class="zone zone-safe">RUNNING</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">eclipse-mosquitto:2.0 · 8h uptime</code>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[0.72rem] text-muted">
+                      <span><iconify-icon icon="lucide:cpu" width="10" height="10" class="inline mr-0.5"></iconify-icon>CPU 1.2%</span>
+                      <span><iconify-icon icon="lucide:memory-stick" width="10" height="10" class="inline mr-0.5"></iconify-icon>Mem 34 MB / 512 MB</span>
+                      <span><iconify-icon icon="lucide:ethernet-port" width="10" height="10" class="inline mr-0.5"></iconify-icon>1883:1883, 9001:9001</span>
+                    </div>
+                  </div>
+                  <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-c1"></iconify-icon>
+                </button>
+                <div id="row-c1" class="hidden border-t border-line/10 p-4 flex flex-col gap-3 bg-surface/30">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[0.75rem]">
+                    <div><span class="text-muted">Container ID:</span> <span class="font-mono text-ink">a1b2c3d4e5f6</span></div>
+                    <div><span class="text-muted">Restart Policy:</span> <span class="text-ink">unless-stopped (0 restarts)</span></div>
+                    <div><span class="text-muted">Network:</span> <span class="text-ink">vas_backend (bridge)</span></div>
+                    <div><span class="text-muted">Volumes:</span> <span class="text-ink">mqtt-data:/mosquitto/data</span></div>
+                  </div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:square" width="11" height="11"></iconify-icon>Stop</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Restart</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:terminal" width="11" height="11"></iconify-icon>Exec Shell</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:file-text" width="11" height="11"></iconify-icon>Logs</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- container row: running 2 -->
+              <div class="border-b border-line/7">
+                <button type="button" onclick="toggleRow('c2')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+                  <div class="w-9 h-9 rounded-lg bg-safe/8 border border-safe/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <iconify-icon icon="lucide:box" width="16" height="16" class="text-safe"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.88rem] text-ink font-display">vas-portainer</span>
+                      <span class="zone zone-safe">RUNNING</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">portainer/portainer-ce:latest · 3d uptime</code>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[0.72rem] text-muted">
+                      <span><iconify-icon icon="lucide:cpu" width="10" height="10" class="inline mr-0.5"></iconify-icon>CPU 0.4%</span>
+                      <span><iconify-icon icon="lucide:memory-stick" width="10" height="10" class="inline mr-0.5"></iconify-icon>Mem 58 MB / 512 MB</span>
+                      <span><iconify-icon icon="lucide:ethernet-port" width="10" height="10" class="inline mr-0.5"></iconify-icon>9443:9443</span>
+                    </div>
+                  </div>
+                  <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-c2"></iconify-icon>
+                </button>
+                <div id="row-c2" class="hidden border-t border-line/10 p-4 flex flex-col gap-3 bg-surface/30">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[0.75rem]">
+                    <div><span class="text-muted">Container ID:</span> <span class="font-mono text-ink">7f8e9d0c1b2a</span></div>
+                    <div><span class="text-muted">Restart Policy:</span> <span class="text-ink">always (0 restarts)</span></div>
+                    <div><span class="text-muted">Network:</span> <span class="text-ink">bridge</span></div>
+                    <div><span class="text-muted">Volumes:</span> <span class="text-ink">portainer-data:/data</span></div>
+                  </div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:square" width="11" height="11"></iconify-icon>Stop</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Restart</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:terminal" width="11" height="11"></iconify-icon>Exec Shell</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:file-text" width="11" height="11"></iconify-icon>Logs</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- container row: restarting -->
+              <div class="border-b border-line/7">
+                <button type="button" onclick="toggleRow('c3')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+                  <div class="w-9 h-9 rounded-lg bg-caution/10 border border-caution/25 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <iconify-icon icon="lucide:rotate-cw" width="16" height="16" class="text-[#92660b]"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.88rem] text-ink font-display">vas-api-worker</span>
+                      <span class="zone zone-caution">RESTARTING</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">vas-api-worker:latest · restart #4</code>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[0.72rem] text-muted">
+                      <span><iconify-icon icon="lucide:alert-triangle" width="10" height="10" class="inline mr-0.5 text-caution"></iconify-icon>Exited (1) 30 วินาทีที่แล้ว</span>
+                    </div>
+                  </div>
+                  <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-c3"></iconify-icon>
+                </button>
+                <div id="row-c3" class="hidden border-t border-line/10 p-4 flex flex-col gap-3 bg-surface/30">
+                  <div class="val-panel px-3 py-2.5 rounded-lg text-[0.78rem] bg-caution/8 border border-caution/25 text-[#92660b]">
+                    Container กำลัง restart loop — ตรวจสอบ logs เพื่อดูสาเหตุ (exit code 1)
+                  </div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:square" width="11" height="11"></iconify-icon>Stop</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:file-text" width="11" height="11"></iconify-icon>Logs</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- container row: stopped -->
+              <div>
+                <button type="button" onclick="toggleRow('c4')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+                  <div class="w-9 h-9 rounded-lg bg-surface border border-line/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <iconify-icon icon="lucide:box" width="16" height="16" class="text-faint"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.88rem] text-ink font-display">nginx-staging</span>
+                      <span class="zone zone-mute">EXITED (0)</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">nginx:1.27-alpine · หยุดเมื่อ 2 วันที่แล้ว</code>
+                  </div>
+                  <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-c4"></iconify-icon>
+                </button>
+                <div id="row-c4" class="hidden border-t border-line/10 p-4 flex flex-col gap-3 bg-surface/30">
+                  <div class="flex flex-wrap gap-1.5">
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:play" width="11" height="11"></iconify-icon>Start</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:file-text" width="11" height="11"></iconify-icon>Logs</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div><!-- /tab-containers -->
+
+
+          <!-- ════════ TAB: Images ════════ -->
+          <div id="tab-images" class="tab-panel flex flex-col gap-4">
+
+            <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col sm:flex-row gap-2">
+              <input type="text" placeholder="เช่น nginx:latest หรือ registry.internal/app:1.2.0"
+                     class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition placeholder:text-faint font-mono">
+              <button type="button" class="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+                <iconify-icon icon="lucide:download" width="13" height="13"></iconify-icon>Pull Image
+              </button>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+              <div class="px-4 py-3 border-b border-line/10 flex items-center justify-between">
+                <h2 class="text-[0.88rem] font-semibold text-ink">Images ในเครื่อง (23)</h2>
+                <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+                  <iconify-icon icon="lucide:sparkles" width="11" height="11"></iconify-icon>Prune Dangling (4)
+                </button>
+              </div>
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-mono text-[0.82rem] text-ink">eclipse-mosquitto</span>
+                      <span class="text-[0.72rem] text-faint">:2.0</span>
+                      <span class="zone zone-safe">USED</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">sha256:9f2a1c · 18.4 MB · pulled 12 วันที่แล้ว</code>
+                  </div>
+                  <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-mono text-[0.82rem] text-ink">portainer/portainer-ce</span>
+                      <span class="text-[0.72rem] text-faint">:latest</span>
+                      <span class="zone zone-safe">USED</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">sha256:7b3d0e · 292 MB · pulled 3 วันที่แล้ว</code>
+                  </div>
+                  <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-mono text-[0.82rem] text-ink">postgres</span>
+                      <span class="text-[0.72rem] text-faint">:16-alpine</span>
+                      <span class="zone zone-mute">UNUSED</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">sha256:88af31 · 243 MB · pulled 40 วันที่แล้ว</code>
+                  </div>
+                  <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-mono text-[0.82rem] text-faint">&lt;none&gt;</span>
+                      <span class="zone zone-caution">DANGLING</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">sha256:00de77 · 89.2 MB</code>
+                  </div>
+                  <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+                </div>
+              </div>
+            </div>
+          </div><!-- /tab-images -->
+
+
+          <!-- ════════ TAB: Networks ════════ -->
+          <div id="tab-networks" class="tab-panel flex flex-col gap-4">
+            <div class="flex justify-end">
+              <button type="button" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+                <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>Create Network
+              </button>
+            </div>
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:network" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">vas_backend</span>
+                      <span class="zone zone-info">bridge</span>
+                    </div>
+                    <span class="text-[0.72rem] text-muted">Subnet 172.20.0.0/16 · 4 containers เชื่อมต่อ</span>
+                  </div>
+                  <span class="text-[0.72rem] text-faint">local</span>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:network" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">vas_swarm_overlay</span>
+                      <span class="zone zone-safe">overlay</span>
+                      <span class="zone zone-mute">attachable</span>
+                    </div>
+                    <span class="text-[0.72rem] text-muted">Subnet 10.0.5.0/24 · ใช้โดย Swarm services · 3 nodes</span>
+                  </div>
+                  <span class="text-[0.72rem] text-faint">swarm</span>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:network" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">bridge</span>
+                      <span class="zone zone-mute">bridge</span>
+                    </div>
+                    <span class="text-[0.72rem] text-muted">Subnet 172.17.0.0/16 · default network</span>
+                  </div>
+                  <span class="text-[0.72rem] text-faint">local</span>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:network" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">host</span>
+                      <span class="zone zone-mute">host</span>
+                    </div>
+                    <span class="text-[0.72rem] text-muted">ใช้ network stack ของ host โดยตรง</span>
+                  </div>
+                  <span class="text-[0.72rem] text-faint">local</span>
+                </div>
+              </div>
+            </div>
+          </div><!-- /tab-networks -->
+
+
+          <!-- ════════ TAB: Volumes ════════ -->
+          <div id="tab-volumes" class="tab-panel flex flex-col gap-4">
+            <div class="flex flex-wrap justify-end gap-2">
+              <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+                <iconify-icon icon="lucide:sparkles" width="12" height="12"></iconify-icon>Prune Unused
+              </button>
+              <button type="button" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+                <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>Create Volume
+              </button>
+            </div>
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:database" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <span class="font-semibold text-[0.85rem] text-ink font-mono">mqtt-data</span>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">/var/lib/docker/volumes/mqtt-data/_data</code>
+                  </div>
+                  <span class="zone zone-safe">USED · 1 container</span>
+                  <span class="text-[0.72rem] text-muted flex-shrink-0">120 MB</span>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:database" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <span class="font-semibold text-[0.85rem] text-ink font-mono">portainer-data</span>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">/var/lib/docker/volumes/portainer-data/_data</code>
+                  </div>
+                  <span class="zone zone-safe">USED · 1 container</span>
+                  <span class="text-[0.72rem] text-muted flex-shrink-0">45 MB</span>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:database" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <span class="font-semibold text-[0.85rem] text-ink font-mono">pgdata-old</span>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">/var/lib/docker/volumes/pgdata-old/_data</code>
+                  </div>
+                  <span class="zone zone-mute">UNUSED</span>
+                  <span class="text-[0.72rem] text-muted flex-shrink-0">2.8 GB</span>
+                </div>
+              </div>
+            </div>
+          </div><!-- /tab-volumes -->
+
+
+          <!-- ════════ TAB: Compose ════════ -->
+          <div id="tab-compose" class="tab-panel flex flex-col gap-4">
+
+            <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+              <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+              <p class="text-[0.82rem] text-muted leading-relaxed">
+                จัดการ project ที่ deploy ด้วย <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">docker compose</code> —
+                แก้ไขไฟล์ <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">compose.yaml</code> แล้วสั่ง up/down ได้จากหน้านี้
+              </p>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-compose1">
+              <button type="button" onclick="toggleCfg('compose1')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+                <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <iconify-icon icon="lucide:file-code" width="16" height="16" class="text-muted"></iconify-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold text-[0.88rem] text-ink font-display">iot-stack</span>
+                    <span class="zone zone-safe">UP · 3/3 services</span>
+                  </div>
+                  <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">/srv/vas/compose/iot-stack/compose.yaml</code>
+                </div>
+                <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-compose1"></iconify-icon>
+              </button>
+              <div id="cfg-viewer-compose1" class="hidden border-t border-line/10">
+                <div class="flex items-center justify-between px-4 py-3 bg-surface/40 flex-wrap gap-2">
+                  <span class="text-[0.72rem] font-semibold text-muted">compose.yaml</span>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:arrow-up-circle" width="11" height="11"></iconify-icon>Up</button>
+                    <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Restart</button>
+                    <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:arrow-down-circle" width="11" height="11"></iconify-icon>Down</button>
+                    <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:save" width="11" height="11"></iconify-icon>Save</button>
+                  </div>
+                </div>
+                <div class="p-4">
+                  <textarea readonly spellcheck="false" class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[220px] outline-none resize-y">services:
+  broker:
+    image: eclipse-mosquitto:2.0
+    ports: ["1883:1883", "9001:9001"]
+    volumes: ["mqtt-data:/mosquitto/data"]
+    restart: unless-stopped
+
+  api:
+    image: vas-api-worker:latest
+    depends_on: [broker]
+    restart: unless-stopped
+
+  admin:
+    image: portainer/portainer-ce:latest
+    ports: ["9443:9443"]
+    volumes: ["portainer-data:/data"]
+
+volumes:
+  mqtt-data:
+  portainer-data:</textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-compose2">
+              <button type="button" onclick="toggleCfg('compose2')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+                <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <iconify-icon icon="lucide:file-code" width="16" height="16" class="text-muted"></iconify-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold text-[0.88rem] text-ink font-display">staging-web</span>
+                    <span class="zone zone-mute">DOWN</span>
+                  </div>
+                  <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">/srv/vas/compose/staging-web/compose.yaml</code>
+                </div>
+                <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-compose2"></iconify-icon>
+              </button>
+              <div id="cfg-viewer-compose2" class="hidden border-t border-line/10 p-4">
+                <button type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-accent/40 rounded-md bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:arrow-up-circle" width="12" height="12"></iconify-icon>Up Project</button>
+              </div>
+            </div>
+
+          </div><!-- /tab-compose -->
+
+
+          <!-- ════════ TAB: Swarm ════════ -->
+          <div id="tab-swarm" class="tab-panel flex flex-col gap-4">
+
+            <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:share-2" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">Swarm:</span>
+                <span class="text-[0.78rem] font-semibold text-safe">active</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:crown" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">บทบาทเครื่องนี้:</span>
+                <span class="text-[0.78rem] font-semibold text-ink">Manager (Leader)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:server" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">Nodes:</span>
+                <span class="text-[0.78rem] font-semibold text-ink">3 (1 manager / 2 workers)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="lucide:hash" width="14" height="14" class="text-faint"></iconify-icon>
+                <span class="text-[0.78rem] text-muted font-medium">Cluster ID:</span>
+                <code class="text-[0.75rem] font-mono text-ink">o3x9k2...w7q1</code>
+              </div>
+            </div>
+
+            <!-- Join tokens -->
+            <div class="bg-card border border-line/10 rounded-xl">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+                <iconify-icon icon="lucide:key-round" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-ink">Join Tokens</h2>
+              </div>
+              <div class="p-4 flex flex-col gap-3">
+                <div class="flex flex-col gap-1.5">
+                  <span class="text-[0.75rem] font-semibold text-muted">Worker Token</span>
+                  <div class="flex items-center gap-2">
+                    <code class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-[0.72rem] font-mono text-ink truncate">docker swarm join --token SWMTKN-1-5abc...worker9f2 10.0.5.1:2377</code>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-2 border border-line/15 rounded-lg bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors flex-shrink-0"><iconify-icon icon="lucide:copy" width="12" height="12"></iconify-icon>Copy</button>
+                  </div>
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <span class="text-[0.75rem] font-semibold text-muted">Manager Token</span>
+                  <div class="flex items-center gap-2">
+                    <code class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-[0.72rem] font-mono text-ink truncate">docker swarm join --token SWMTKN-1-5abc...manager3e1 10.0.5.1:2377</code>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-2 border border-line/15 rounded-lg bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors flex-shrink-0"><iconify-icon icon="lucide:copy" width="12" height="12"></iconify-icon>Copy</button>
+                  </div>
+                </div>
+                <div class="flex justify-end">
+                  <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="12" height="12"></iconify-icon>Rotate Tokens</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Nodes -->
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+                <iconify-icon icon="lucide:server-cog" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-ink">Cluster Nodes</h2>
+              </div>
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:crown" width="14" height="14" class="text-caution flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">vas-node-01</span>
+                      <span class="zone zone-info">Manager · Leader</span>
+                      <span class="zone zone-safe">Ready</span>
+                      <span class="zone zone-safe">Active</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">10.0.5.1 · Engine 27.3.1 · Ubuntu 22.04</code>
+                  </div>
+                  <span class="text-[0.72rem] text-faint flex-shrink-0">เครื่องนี้</span>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:server" width="14" height="14" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">vas-node-02</span>
+                      <span class="zone zone-mute">Worker</span>
+                      <span class="zone zone-safe">Ready</span>
+                      <span class="zone zone-safe">Active</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">10.0.5.2 · Engine 27.3.1 · Ubuntu 22.04</code>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Promote</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Drain</button>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <iconify-icon icon="lucide:server" width="14" height="14" class="text-muted flex-shrink-0"></iconify-icon>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">vas-node-03</span>
+                      <span class="zone zone-mute">Worker</span>
+                      <span class="zone zone-caution">Down</span>
+                      <span class="zone zone-mute">Drain</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">10.0.5.3 · Engine 27.2.0 · ขาดการเชื่อมต่อ 14 นาทีที่แล้ว</code>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.7rem] font-semibold hover:bg-danger/5 transition-colors">Remove</button>
+                  </div>
+                </div>
+              </div>
+              <div class="px-4 py-3 border-t border-line/10">
+                <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:plus" width="12" height="12"></iconify-icon>ดูคำสั่ง Join Node ใหม่</button>
+              </div>
+            </div>
+
+            <!-- Services -->
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-2 flex-wrap">
+                <div class="flex items-center gap-2">
+                  <iconify-icon icon="lucide:layers-3" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                  <h2 class="text-[0.88rem] font-semibold text-ink">Services</h2>
+                </div>
+                <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-accent/40 rounded-md bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:plus" width="12" height="12"></iconify-icon>Create Service</button>
+              </div>
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">iot-stack_api</span>
+                      <span class="zone zone-safe">replicated · 3/3</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">vas-api-worker:latest · ไม่เปิด port</code>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Scale</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Update</button>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">iot-stack_broker</span>
+                      <span class="zone zone-safe">replicated · 1/1</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">eclipse-mosquitto:2.0 · *:1883-&gt;1883</code>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Scale</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Update</button>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-[0.85rem] text-ink font-display">monitoring_agent</span>
+                      <span class="zone zone-info">global · 3/3</span>
+                    </div>
+                    <code class="text-[0.68rem] text-faint font-mono block mt-0.5">node-exporter:latest · รันบนทุก node</code>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <button type="button" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Update</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stacks -->
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+                <iconify-icon icon="lucide:layers" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-ink">Stacks (deployed via docker stack)</h2>
+              </div>
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <div class="flex-1 min-w-0">
+                    <span class="font-semibold text-[0.85rem] text-ink font-display">iot-stack</span>
+                    <span class="text-[0.72rem] text-muted ml-2">2 services · deploy จาก /srv/vas/stacks/iot-stack.yaml</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Redeploy</button>
+                    <button type="button" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:x-circle" width="11" height="11"></iconify-icon>Remove Stack</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Danger zone -->
+            <div class="bg-card border border-danger/20 rounded-xl">
+              <div class="px-4 py-4 border-b border-danger/15 flex items-center gap-2">
+                <iconify-icon icon="lucide:triangle-alert" width="15" height="15" class="text-danger flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-danger">Danger Zone</h2>
+              </div>
+              <div class="p-4 flex items-center justify-between gap-3 flex-wrap">
+                <p class="text-[0.78rem] text-muted">ให้เครื่องนี้ออกจาก Swarm cluster — services ที่รันอยู่บนเครื่องนี้จะถูกย้ายออก</p>
+                <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:log-out" width="13" height="13"></iconify-icon>Leave Swarm</button>
+              </div>
+            </div>
+
+          </div><!-- /tab-swarm -->
+
+
+          <!-- ════════ TAB: ตั้งค่า ════════ -->
+          <div id="tab-settings" class="tab-panel flex flex-col gap-4">
+
+            <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-daemon">
+              <button type="button" onclick="toggleCfg('daemon')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+                <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <iconify-icon icon="lucide:file-json" width="16" height="16" class="text-muted"></iconify-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold text-[0.88rem] text-ink font-display">daemon.json</span>
+                    <span class="zone zone-safe">OK</span>
+                  </div>
+                  <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">/etc/docker/daemon.json</code>
+                  <p class="text-[0.73rem] text-muted mt-1 leading-snug">ตั้งค่า storage driver, log rotation, registry mirrors, insecure registries</p>
+                </div>
+                <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-daemon"></iconify-icon>
+              </button>
+              <div id="cfg-viewer-daemon" class="hidden border-t border-line/10">
+                <div class="flex items-center justify-between px-4 py-3 bg-surface/40 flex-wrap gap-2">
+                  <span class="text-[0.72rem] font-semibold text-muted">แก้ไข Config</span>
+                  <button type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:save" width="11" height="11"></iconify-icon>Save &amp; Restart Daemon</button>
+                </div>
+                <div class="p-4">
+                  <textarea spellcheck="false" class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[200px] outline-none resize-y">{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "storage-driver": "overlay2",
+  "insecure-registries": [],
+  "registry-mirrors": [],
+  "default-address-pools": [
+    { "base": "10.0.5.0/24", "size": 24 }
+  ]
+}</textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-card border border-line/10 rounded-xl">
+              <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+                <iconify-icon icon="lucide:sliders-horizontal" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-ink">ค่าเริ่มต้นของระบบ</h2>
+              </div>
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+                  <div>
+                    <span class="text-[0.82rem] text-ink font-medium">Docker daemon service</span>
+                    <p class="text-[0.72rem] text-muted mt-0.5">systemd unit: docker.service — เปิดใช้ตอนบูตเครื่อง</p>
+                  </div>
+                  <span class="zone zone-safe">enabled · active</span>
+                </div>
+                <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+                  <div>
+                    <span class="text-[0.82rem] text-ink font-medium">Rootless mode</span>
+                    <p class="text-[0.72rem] text-muted mt-0.5">รัน Docker daemon โดยไม่ใช้สิทธิ์ root</p>
+                  </div>
+                  <span class="zone zone-mute">disabled</span>
+                </div>
+                <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+                  <div>
+                    <span class="text-[0.82rem] text-ink font-medium">BuildKit</span>
+                    <p class="text-[0.72rem] text-muted mt-0.5">ใช้ BuildKit engine สำหรับ docker build</p>
+                  </div>
+                  <span class="zone zone-safe">enabled</span>
+                </div>
+                <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+                  <div>
+                    <span class="text-[0.82rem] text-ink font-medium">Live restore</span>
+                    <p class="text-[0.72rem] text-muted mt-0.5">Container ยังรันต่อได้แม้ daemon restart</p>
+                  </div>
+                  <span class="zone zone-caution">disabled</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-card border border-danger/20 rounded-xl">
+              <div class="px-4 py-4 border-b border-danger/15 flex items-center gap-2">
+                <iconify-icon icon="lucide:triangle-alert" width="15" height="15" class="text-danger flex-shrink-0"></iconify-icon>
+                <h2 class="text-[0.88rem] font-semibold text-danger">Danger Zone</h2>
+              </div>
+              <div class="divide-y divide-line/7">
+                <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+                  <p class="text-[0.78rem] text-muted">ลบ container, image, network, build cache ที่ไม่ได้ใช้งานทั้งหมด</p>
+                  <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>System Prune (All)</button>
+                </div>
+                <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+                  <p class="text-[0.78rem] text-muted">ถอนการติดตั้ง Docker Engine ออกจากเครื่องนี้ทั้งหมด</p>
+                  <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:power-off" width="13" height="13"></iconify-icon>Uninstall Docker</button>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /tab-settings -->
+
+        </div><!-- /content -->
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  window.dkTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
+    document.querySelectorAll(".dk-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent/8", on);
+      btn.classList.toggle("text-accent", on);
+      btn.classList.toggle("font-semibold", on);
+      btn.classList.toggle("text-muted", !on);
+    });
+  };
+
+  window.toggleRow = function (key) {
+    var row  = document.getElementById("row-" + key);
+    var chev = document.getElementById("chevron-" + key);
+    if (!row) return;
+    var nowHidden = row.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+  };
+
+  window.toggleCfg = function (key) {
+    var viewer = document.getElementById("cfg-viewer-" + key);
+    var chev   = document.getElementById("chevron-" + key);
+    if (!viewer) return;
+    var nowHidden = viewer.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+  };
+
+})();
+</script>
+
+</body>
+</html>

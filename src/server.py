@@ -48,6 +48,7 @@ from system.status import (
     collect_display_session_config_status,
     collect_display_session_script_status,
     collect_display_session_status,
+    collect_openssh_status,
     collect_qr_reader_status,
     collect_remote_access_status,
     collect_vpn_status,
@@ -57,6 +58,11 @@ from features.remote.anydesk import (
     VALID_SERVICE_ACTIONS as ANYDESK_SERVICE_ACTIONS,
     service_action as anydesk_service_action,
     set_unattended_password as anydesk_set_unattended_password,
+)
+from features.remote import openssh as openssh_manager
+from features.remote.openssh import (
+    VALID_SERVICE_ACTIONS as OPENSSH_SERVICE_ACTIONS,
+    SshdConfigValues as OpenSshConfigValues,
 )
 from features.wireguard.manager import (
     WireGuardValidationResult,
@@ -68,6 +74,25 @@ from features.wireguard.manager import (
     sanitize_interface_name,
     validate_config_content,
 )
+from features.docker import manager as docker_manager
+
+
+def _current_session_user() -> dict[str, Any] | None:
+    from flask import session as _sess
+    from core.auth import get_user_by_id
+    user_id = _sess.get("vas_user_id")
+    return get_user_by_id(int(user_id)) if user_id else None
+
+
+def _require_admin_user() -> dict[str, Any] | None:
+    """คืน current_user ถ้า role เป็น root/admin — คืน None ถ้าไม่ login หรือสิทธิ์ไม่พอ
+
+    ใช้กับ endpoint ที่กระทบระบบจริง (เช่น เขียน sshd_config, จัดการ SSH key)
+    """
+    user = _current_session_user()
+    if user is None or user["role"] not in ("root", "admin"):
+        return None
+    return user
 
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -302,6 +327,404 @@ def create_app() -> Flask:
     @app.get("/anydesk")
     def anydesk_page() -> str:
         return render_template("anydesk.html", remote=collect_remote_access_status())
+
+    @app.get("/openssh")
+    def openssh_page() -> str:
+        runner = CommandRunner()
+        return render_template(
+            "openssh.html",
+            ssh=collect_openssh_status(),
+            config=openssh_manager.collect_config(runner),
+            host_keys=openssh_manager.collect_host_keys(runner),
+            authorized_keys=openssh_manager.collect_authorized_keys(runner),
+            manageable_users=openssh_manager.list_manageable_usernames(),
+            fail2ban=openssh_manager.collect_fail2ban_status(runner),
+            recent_attempts=openssh_manager.collect_recent_login_attempts(runner),
+        )
+
+    @app.get("/docker")
+    def docker_page() -> str:
+        ctx = docker_manager.collect_docker_status()
+        return render_template("docker.html", **ctx)
+
+    # ── Docker: Containers ──────────────────────────────────────
+    @app.post("/api/docker/containers/<name>/action")
+    def docker_container_action_api(name: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action", "")).strip()
+        try:
+            result = docker_manager.container_action(CommandRunner(), name, action)
+        except ValueError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "คำสั่งล้มเหลว").strip()]}, 500
+        return {"status": "ok", "action": action, "name": name}
+
+    @app.post("/api/docker/containers/<name>/remove")
+    def docker_container_remove_api(name: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        force = bool(payload.get("force", False))
+        result = docker_manager.remove_container(CommandRunner(), name, force=force)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "ลบไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "name": name}
+
+    @app.get("/api/docker/containers/<name>/logs")
+    def docker_container_logs_api(name: str) -> dict[str, object]:
+        try:
+            tail = int(request.args.get("tail", 200))
+        except (TypeError, ValueError):
+            tail = 200
+        return {"status": "ok", "name": name, "logs": docker_manager.get_container_logs(name, tail=tail)}
+
+    # ── Docker: Images ───────────────────────────────────────────
+    @app.post("/api/docker/images/pull")
+    def docker_image_pull_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        ref = str(payload.get("ref", "")).strip()
+        if not ref:
+            return {"status": "error", "errors": ["กรุณาระบุ image (เช่น nginx:latest)"]}, 400
+        result = docker_manager.pull_image(CommandRunner(), ref)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "pull ล้มเหลว").strip()]}, 500
+        return {"status": "ok", "ref": ref}
+
+    @app.post("/api/docker/images/remove")
+    def docker_image_remove_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        ref = str(payload.get("ref", "")).strip()
+        if not ref:
+            return {"status": "error", "errors": ["ไม่พบ image reference"]}, 400
+        result = docker_manager.remove_image(CommandRunner(), ref, force=bool(payload.get("force", False)))
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "ลบไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "ref": ref}
+
+    @app.post("/api/docker/images/prune")
+    def docker_image_prune_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        result = docker_manager.prune_images(CommandRunner())
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "prune ล้มเหลว").strip()]}, 500
+        return {"status": "ok", "output": result.stdout.strip()}
+
+    # ── Docker: Networks ─────────────────────────────────────────
+    @app.post("/api/docker/networks")
+    def docker_network_create_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        name = str(payload.get("name", "")).strip()
+        driver = str(payload.get("driver", "bridge")).strip() or "bridge"
+        try:
+            result = docker_manager.create_network(CommandRunner(), name, driver=driver)
+        except ValueError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "สร้าง network ไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "name": name}
+
+    # ── Docker: Volumes ──────────────────────────────────────────
+    @app.post("/api/docker/volumes")
+    def docker_volume_create_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        name = str(payload.get("name", "")).strip()
+        try:
+            result = docker_manager.create_volume(CommandRunner(), name)
+        except ValueError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "สร้าง volume ไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "name": name}
+
+    @app.post("/api/docker/volumes/prune")
+    def docker_volume_prune_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        result = docker_manager.prune_volumes(CommandRunner())
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "prune ล้มเหลว").strip()]}, 500
+        return {"status": "ok", "output": result.stdout.strip()}
+
+    # ── Docker: Compose ──────────────────────────────────────────
+    @app.post("/api/docker/compose/<name>/save")
+    def docker_compose_save_api(name: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        content = str(payload.get("content", ""))
+        try:
+            path = docker_manager.save_compose_file(name, content)
+        except (OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        return {"status": "ok", "name": name, "path": path.as_posix()}
+
+    @app.post("/api/docker/compose/<name>/action")
+    def docker_compose_action_api(name: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action", "")).strip()
+        try:
+            result = docker_manager.compose_action(CommandRunner(), name, action)
+        except (FileNotFoundError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "คำสั่งล้มเหลว").strip()]}, 500
+        return {"status": "ok", "name": name, "action": action}
+
+    # ── Docker: Swarm ────────────────────────────────────────────
+    @app.post("/api/docker/swarm/init")
+    def docker_swarm_init_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        advertise_addr = str(payload.get("advertise_addr", "")).strip() or None
+        result = docker_manager.swarm_init(CommandRunner(), advertise_addr=advertise_addr)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "swarm init ล้มเหลว").strip()]}, 500
+        return {"status": "ok", "output": result.stdout.strip()}
+
+    @app.post("/api/docker/swarm/join")
+    def docker_swarm_join_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        token = str(payload.get("token", "")).strip()
+        remote_addr = str(payload.get("remote_addr", "")).strip()
+        if not token or not remote_addr:
+            return {"status": "error", "errors": ["กรุณาระบุ token และ remote address"]}, 400
+        result = docker_manager.swarm_join(CommandRunner(), token, remote_addr)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "swarm join ล้มเหลว").strip()]}, 500
+        return {"status": "ok"}
+
+    @app.post("/api/docker/swarm/leave")
+    def docker_swarm_leave_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        result = docker_manager.swarm_leave(CommandRunner())
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "swarm leave ล้มเหลว").strip()]}, 500
+        return {"status": "ok"}
+
+    @app.post("/api/docker/swarm/rotate-tokens")
+    def docker_swarm_rotate_tokens_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        result = docker_manager.rotate_join_tokens(CommandRunner())
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "rotate token ล้มเหลว").strip()]}, 500
+        return {"status": "ok"}
+
+    @app.post("/api/docker/swarm/nodes/<node>/promote")
+    def docker_swarm_promote_node_api(node: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        result = docker_manager.promote_node(CommandRunner(), node)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "promote ล้มเหลว").strip()]}, 500
+        return {"status": "ok", "node": node}
+
+    @app.post("/api/docker/swarm/nodes/<node>/availability")
+    def docker_swarm_node_availability_api(node: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        availability = str(payload.get("availability", "")).strip()
+        try:
+            result = docker_manager.set_node_availability(CommandRunner(), node, availability)
+        except ValueError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "อัปเดตไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "node": node, "availability": availability}
+
+    @app.delete("/api/docker/swarm/nodes/<node>")
+    def docker_swarm_remove_node_api(node: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        result = docker_manager.remove_node(CommandRunner(), node)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "ลบ node ไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "node": node}
+
+    @app.post("/api/docker/swarm/services/<service>/scale")
+    def docker_swarm_scale_service_api(service: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        try:
+            replicas = int(payload.get("replicas", 0))
+        except (TypeError, ValueError):
+            return {"status": "error", "errors": ["จำนวน replicas ไม่ถูกต้อง"]}, 400
+        if replicas < 0:
+            return {"status": "error", "errors": ["จำนวน replicas ต้องไม่ติดลบ"]}, 400
+        result = docker_manager.scale_service(CommandRunner(), service, replicas)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "scale ไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "service": service, "replicas": replicas}
+
+    @app.delete("/api/docker/swarm/stacks/<stack>")
+    def docker_swarm_remove_stack_api(stack: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        result = docker_manager.remove_stack(CommandRunner(), stack)
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "ลบ stack ไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "stack": stack}
+
+    @app.post("/api/docker/swarm/stacks/<stack>/redeploy")
+    def docker_swarm_redeploy_stack_api(stack: str) -> tuple[dict[str, object], int] | dict[str, object]:
+        try:
+            result = docker_manager.redeploy_stack(CommandRunner(), stack)
+        except FileNotFoundError as error:
+            return {"status": "error", "errors": [str(error)]}, 400
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "redeploy ไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok", "stack": stack}
+
+    # ── Docker: Settings ─────────────────────────────────────────
+    @app.post("/api/docker/daemon-json")
+    def docker_daemon_json_save_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        content = str(payload.get("content", ""))
+        ok, message = docker_manager.save_daemon_json(content)
+        if not ok:
+            return {"status": "error", "errors": [message]}, 400
+        restart_result = docker_manager.restart_daemon(CommandRunner())
+        if restart_result.returncode != 0:
+            return {"status": "error", "errors": [message + " — แต่ restart daemon ไม่สำเร็จ: " + (restart_result.stderr or restart_result.stdout or "").strip()]}, 500
+        return {"status": "ok", "message": message}
+
+    @app.post("/api/docker/daemon/restart")
+    def docker_daemon_restart_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        result = docker_manager.restart_daemon(CommandRunner())
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "restart ไม่สำเร็จ").strip()]}, 500
+        return {"status": "ok"}
+
+    @app.post("/api/docker/system-prune")
+    def docker_system_prune_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        result = docker_manager.system_prune(CommandRunner())
+        if result.returncode != 0:
+            return {"status": "error", "errors": [(result.stderr or result.stdout or "prune ล้มเหลว").strip()]}, 500
+        return {"status": "ok", "output": result.stdout.strip()}
+
+    @app.post("/api/docker/uninstall")
+    def docker_uninstall_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        try:
+            docker_manager.uninstall_docker(CommandRunner())
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        try:
+            from core.database import log_audit as _db_audit
+
+            _db_audit("docker_uninstalled", {})
+        except Exception:
+            pass
+        return {"status": "ok"}
+
+    @app.get("/pm2")
+    def pm2_page() -> str:
+        # TODO(pm2-real-impl): แทนที่ _collect_pm2_status_mock() ด้วยการอ่านค่าจริง
+        # ผ่าน `pm2` CLI (แนะนำสร้าง src/mcp/tools/pm2.py ตามตัวอย่าง subprocess pattern
+        # ของ src/mcp/tools/docker.py) — ใช้ `pm2 jlist` (JSON) สำหรับ process list,
+        # `pm2 describe <id>` สำหรับ detail, `pm2 logs <name> --lines N --nostream`
+        # สำหรับ logs, และอ่านไฟล์ ecosystem.config.js ตรงๆ ด้วย pathlib
+        # เมื่อพร้อม — เก็บ shape ของ context variables ให้เหมือนเดิมเพื่อไม่ต้องแก้ pm2.html
+        ctx = _collect_pm2_status_mock()
+        return render_template("pm2.html", **ctx)
+
+    @app.get("/api/openssh/status")
+    def openssh_status_api() -> dict[str, object]:
+        ssh = collect_openssh_status()
+        fail2ban = openssh_manager.collect_fail2ban_status(CommandRunner())
+        return {
+            "status": "ok",
+            "installed": ssh.installed,
+            "version": ssh.version,
+            "service_enabled": ssh.service_enabled,
+            "service_active": ssh.service_active,
+            "fail2ban_service_active": fail2ban.service_active,
+            "fail2ban_banned_count": fail2ban.banned_count,
+        }
+
+    @app.post("/api/openssh/config")
+    def openssh_config_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        try:
+            values = _openssh_values_from_payload(payload)
+        except (TypeError, ValueError) as error:
+            return {"status": "error", "errors": [f"ข้อมูลไม่ถูกต้อง: {error}"]}, 400
+        ok, message = openssh_manager.save_config(CommandRunner(), values)
+        if not ok:
+            return {"status": "error", "errors": [message]}, 400
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("openssh_config_save", {"port": values.port, "permit_root_login": values.permit_root_login})
+        except Exception:
+            pass
+        return {"status": "ok", "message": message}
+
+    @app.post("/api/openssh/action")
+    def openssh_action_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action", "")).strip()
+        if action not in OPENSSH_SERVICE_ACTIONS:
+            return {"status": "error", "errors": [f"Unknown OpenSSH action: {action}"]}, 400
+        try:
+            result = openssh_manager.service_action(CommandRunner(), action)
+        except (CommandExecutionError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip() or f"systemctl {action} ssh ล้มเหลว"
+            return {"status": "error", "errors": [detail]}, 500
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("openssh_service_action", {"action": action})
+        except Exception:
+            pass
+        return {"status": "ok", "action": action}
+
+    @app.post("/api/openssh/keys")
+    def openssh_keys_add_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        user = str(payload.get("user", "")).strip()
+        key_line = str(payload.get("key", "")).strip()
+        if not user:
+            return {"status": "error", "errors": ["กรุณาเลือก user"]}, 400
+        ok, message = openssh_manager.add_authorized_key(user, key_line)
+        if not ok:
+            return {"status": "error", "errors": [message]}, 400
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("openssh_key_add", {"user": user})
+        except Exception:
+            pass
+        return {"status": "ok", "message": message}
+
+    @app.post("/api/openssh/keys/revoke")
+    def openssh_keys_revoke_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        user = str(payload.get("user", "")).strip()
+        fingerprint = str(payload.get("fingerprint", "")).strip()
+        if not user or not fingerprint:
+            return {"status": "error", "errors": ["ข้อมูลไม่ครบ"]}, 400
+        ok, message = openssh_manager.revoke_authorized_key(user, fingerprint)
+        if not ok:
+            return {"status": "error", "errors": [message]}, 400
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("openssh_key_revoke", {"user": user, "fingerprint": fingerprint})
+        except Exception:
+            pass
+        return {"status": "ok", "message": message}
 
     @app.get("/logs")
     def logs() -> str:
@@ -1421,6 +1844,8 @@ def create_app() -> Flask:
                 "wireguard": fake or _shutil.which("wg") is not None,
                 "anydesk":   fake or _shutil.which("anydesk") is not None,
                 "openssh":   fake or _shutil.which("sshd") is not None,
+                "docker":    fake or _shutil.which("docker") is not None,
+                "pm2":       fake or _shutil.which("pm2") is not None,
             },
             "devices": installed_devices,
         }  # type: ignore[return-value]
@@ -2009,6 +2434,285 @@ def collect_wireguard_history(name: str = "wg0") -> tuple[WireGuardHistoryEntry,
             )
         )
     return tuple(entries)
+
+
+def _openssh_values_from_payload(payload: dict[str, Any]) -> OpenSshConfigValues:
+    """แปลง JSON payload จากฟอร์มหน้า OpenSSH เป็น SshdConfigValues พร้อม type coercion
+
+    หมายเหตุ: ฝั่ง JS ส่งค่าจาก "ทุก field ในทุกแท็บ" มาพร้อมกันเสมอไม่ว่าจะกดปุ่ม
+    บันทึกจากแท็บไหน (เพราะ render_dropin เขียนไฟล์ config ใหม่ทั้งไฟล์ทุกครั้ง —
+    ส่งมาไม่ครบ field ที่เหลือจะถูกรีเซ็ตเป็นค่า default แทนค่าที่ใช้งานอยู่จริง)
+    """
+
+    def _str(key: str, default: str = "") -> str:
+        value = payload.get(key, default)
+        return str(value) if value is not None else default
+
+    def _int(key: str, default: int) -> int:
+        try:
+            return int(payload.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _flag(key: str, default: bool) -> bool:
+        value = payload.get(key, default)
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+    return OpenSshConfigValues(
+        port=_int("port", 22),
+        listen_address=_str("listen_address", "0.0.0.0"),
+        permit_root_login=_str("permit_root_login", "prohibit-password"),
+        password_authentication=_flag("password_authentication", False),
+        pubkey_authentication=_flag("pubkey_authentication", True),
+        permit_empty_passwords=_flag("permit_empty_passwords", False),
+        kbd_interactive_authentication=_flag("kbd_interactive_authentication", False),
+        max_auth_tries=_int("max_auth_tries", 3),
+        login_grace_time=_int("login_grace_time", 30),
+        authorized_keys_file=_str("authorized_keys_file", ".ssh/authorized_keys"),
+        allow_users=_str("allow_users"),
+        allow_groups=_str("allow_groups"),
+        deny_users=_str("deny_users"),
+        deny_groups=_str("deny_groups"),
+        allow_tcp_forwarding=_flag("allow_tcp_forwarding", False),
+        x11_forwarding=_flag("x11_forwarding", False),
+        gateway_ports=_flag("gateway_ports", False),
+        client_alive_interval=_int("client_alive_interval", 300),
+        client_alive_count_max=_int("client_alive_count_max", 2),
+        max_sessions=_int("max_sessions", 10),
+        max_startups=_str("max_startups", "10:30:60"),
+        strict_modes=_flag("strict_modes", True),
+        use_pam=_flag("use_pam", True),
+        log_level=_str("log_level", "VERBOSE").upper(),
+        banner=_str("banner"),
+    )
+
+
+def _collect_pm2_status_mock() -> dict[str, Any]:
+    """ข้อมูล mock สำหรับหน้า PM2 — ใช้ render UI ก่อนต่อ backend จริง
+
+    TODO(pm2-real-impl): แทนที่ด้วยการอ่านค่าจริงผ่าน `pm2` CLI (CommandRunner)
+    รูปแบบเดียวกับ `_collect_docker_status_mock()` — คง shape ของ dict นี้ไว้เหมือนเดิม
+    เพื่อให้ pm2.html ใช้งานต่อได้โดยไม่ต้องแก้ template:
+      - pm2.*        → `pm2 --version` / `pm2 ping` / จำนวน process จาก `pm2 jlist`
+      - processes[]  → `pm2 jlist` (JSON array ต่อ process — cpu, memory, restart_time, pm2_env)
+      - logs[]       → `pm2 logs <name> --lines N --nostream --raw` (แยก out/err ตาม pm2_env.pm_out_log_path)
+      - ecosystem.*  → อ่านไฟล์ ecosystem.config.js ตรงๆ ด้วย pathlib (ตำแหน่งจาก settings/DB)
+      - modules[]    → `pm2 ls` ส่วน Module / `pm2 describe <module>` สำหรับ config
+      - startup.*    → output ของ `pm2 startup` ที่ save ไว้ + mtime ของ dump.pm2
+    """
+    return {
+        "is_mock": True,
+        "pm2": {
+            "daemon_running": True,
+            "version": "5.4.3",
+            "node_version": "v22.11.0",
+            "pm2_home": "/root/.pm2",
+            "daemon_uptime": "5 วัน 14 ชม.",
+            "processes_total": 6,
+            "processes_online": 4,
+            "processes_stopped": 1,
+            "processes_errored": 1,
+            "cpu_total_pct": 14.8,
+            "mem_total": "418 MB",
+        },
+        "processes": [
+            {
+                "id": 0, "name": "vas-api", "namespace": "default", "mode": "cluster", "instances": 2,
+                "exec_mode_label": "cluster_mode", "status": "online", "status_label": "ONLINE",
+                "pid": "18422, 18423", "uptime": "5d", "restarts": 3, "unstable_restarts": 0,
+                "cpu_pct": "6.2", "mem": "142 MB", "mem_limit": "300M", "watch": False,
+                "script": "dist/api/server.js", "cwd": "/srv/vas/api",
+                "interpreter": "node", "node_args": "--max-old-space-size=512",
+                "out_log_path": "/root/.pm2/logs/vas-api-out.log",
+                "err_log_path": "/root/.pm2/logs/vas-api-error.log",
+                "created_at": "27 มิ.ย. 2569 09:14", "autorestart": True, "user": "root",
+            },
+            {
+                "id": 1, "name": "mqtt-bridge", "namespace": "default", "mode": "fork", "instances": 1,
+                "exec_mode_label": "fork_mode", "status": "online", "status_label": "ONLINE",
+                "pid": "18430", "uptime": "5d", "restarts": 0, "unstable_restarts": 0,
+                "cpu_pct": "0.8", "mem": "54 MB", "mem_limit": None, "watch": True,
+                "script": "dist/mqtt/bridge.js", "cwd": "/srv/vas/mqtt",
+                "interpreter": "node", "node_args": "",
+                "out_log_path": "/root/.pm2/logs/mqtt-bridge-out.log",
+                "err_log_path": "/root/.pm2/logs/mqtt-bridge-error.log",
+                "created_at": "27 มิ.ย. 2569 09:14", "autorestart": True, "user": "root",
+            },
+            {
+                "id": 2, "name": "qr-listener", "namespace": "default", "mode": "fork", "instances": 1,
+                "exec_mode_label": "fork_mode", "status": "online", "status_label": "ONLINE",
+                "pid": "18441", "uptime": "5d", "restarts": 1, "unstable_restarts": 0,
+                "cpu_pct": "1.1", "mem": "38 MB", "mem_limit": "150M", "watch": True,
+                "script": "dist/qr/listener.js", "cwd": "/srv/vas/qr",
+                "interpreter": "node", "node_args": "",
+                "out_log_path": "/root/.pm2/logs/qr-listener-out.log",
+                "err_log_path": "/root/.pm2/logs/qr-listener-error.log",
+                "created_at": "27 มิ.ย. 2569 09:15", "autorestart": True, "user": "root",
+            },
+            {
+                "id": 3, "name": "webhook-relay", "namespace": "default", "mode": "fork", "instances": 1,
+                "exec_mode_label": "fork_mode", "status": "errored", "status_label": "ERRORED",
+                "pid": "—", "uptime": "0s", "restarts": 18, "unstable_restarts": 5,
+                "cpu_pct": "0", "mem": "0 MB", "mem_limit": "200M", "watch": False,
+                "script": "dist/webhook/relay.js", "cwd": "/srv/vas/webhook",
+                "interpreter": "node", "node_args": "",
+                "out_log_path": "/root/.pm2/logs/webhook-relay-out.log",
+                "err_log_path": "/root/.pm2/logs/webhook-relay-error.log",
+                "created_at": "30 มิ.ย. 2569 11:02", "autorestart": True, "user": "root",
+            },
+            {
+                "id": 4, "name": "cron-jobs", "namespace": "default", "mode": "fork", "instances": 1,
+                "exec_mode_label": "fork_mode", "status": "stopped", "status_label": "STOPPED",
+                "pid": "—", "uptime": "หยุดเมื่อ 2 ชม. ที่แล้ว", "restarts": 2, "unstable_restarts": 0,
+                "cpu_pct": "0", "mem": "0 MB", "mem_limit": None, "watch": False,
+                "script": "dist/cron/index.js", "cwd": "/srv/vas/cron",
+                "interpreter": "node", "node_args": "",
+                "out_log_path": "/root/.pm2/logs/cron-jobs-out.log",
+                "err_log_path": "/root/.pm2/logs/cron-jobs-error.log",
+                "created_at": "20 มิ.ย. 2569 08:40", "autorestart": False, "user": "root",
+            },
+            {
+                "id": 5, "name": "log-shipper", "namespace": "default", "mode": "fork", "instances": 1,
+                "exec_mode_label": "fork_mode", "status": "online", "status_label": "ONLINE",
+                "pid": "18455", "uptime": "3d", "restarts": 0, "unstable_restarts": 0,
+                "cpu_pct": "0.3", "mem": "31 MB", "mem_limit": None, "watch": False,
+                "script": "dist/log-shipper/index.js", "cwd": "/srv/vas/log-shipper",
+                "interpreter": "node", "node_args": "",
+                "out_log_path": "/root/.pm2/logs/log-shipper-out.log",
+                "err_log_path": "/root/.pm2/logs/log-shipper-error.log",
+                "created_at": "29 มิ.ย. 2569 14:20", "autorestart": True, "user": "root",
+            },
+        ],
+        "logs": [
+            {
+                "process": "vas-api",
+                "lines": [
+                    {"ts": "12:04:01", "stream": "out", "text": "[cluster #0] listening on :8080"},
+                    {"ts": "12:04:01", "stream": "out", "text": "[cluster #1] listening on :8080"},
+                    {"ts": "12:06:22", "stream": "out", "text": "GET /api/status 200 12ms"},
+                    {"ts": "12:07:03", "stream": "err", "text": "DeprecationWarning: Buffer() is deprecated"},
+                    {"ts": "12:09:44", "stream": "out", "text": "POST /api/devices 201 34ms"},
+                ],
+            },
+            {
+                "process": "mqtt-bridge",
+                "lines": [
+                    {"ts": "12:01:10", "stream": "out", "text": "connected to broker mqtt://127.0.0.1:1883"},
+                    {"ts": "12:03:55", "stream": "out", "text": "published vas/status/heartbeat"},
+                    {"ts": "12:08:12", "stream": "out", "text": "subscribed vas/qr/scan"},
+                ],
+            },
+            {
+                "process": "qr-listener",
+                "lines": [
+                    {"ts": "11:58:02", "stream": "out", "text": "watching /dev/hidraw0"},
+                    {"ts": "12:02:31", "stream": "out", "text": "scan received: 8850123456789"},
+                ],
+            },
+            {
+                "process": "webhook-relay",
+                "lines": [
+                    {"ts": "12:10:01", "stream": "err", "text": "Error: connect ECONNREFUSED 10.0.5.9:443"},
+                    {"ts": "12:10:01", "stream": "err", "text": "    at TCPConnectWrap.afterConnect [as oncomplete]"},
+                    {"ts": "12:10:01", "stream": "out", "text": "[PM2] App [webhook-relay] exited with code 1"},
+                    {"ts": "12:10:02", "stream": "out", "text": "[PM2] App [webhook-relay] restarting (restart #18)"},
+                    {"ts": "12:10:02", "stream": "err", "text": "Error: connect ECONNREFUSED 10.0.5.9:443"},
+                ],
+            },
+            {
+                "process": "cron-jobs",
+                "lines": [
+                    {"ts": "09:58:40", "stream": "out", "text": "[PM2] App [cron-jobs] stopped by user"},
+                ],
+            },
+            {
+                "process": "log-shipper",
+                "lines": [
+                    {"ts": "12:00:00", "stream": "out", "text": "shipped 214 records to loki"},
+                    {"ts": "12:05:00", "stream": "out", "text": "shipped 198 records to loki"},
+                ],
+            },
+        ],
+        "ecosystem": {
+            "exists": True,
+            "path": "/srv/vas/ecosystem.config.js",
+            "content": (
+                "module.exports = {\n"
+                "  apps: [\n"
+                "    {\n"
+                "      name: \"vas-api\",\n"
+                "      script: \"dist/api/server.js\",\n"
+                "      cwd: \"/srv/vas/api\",\n"
+                "      instances: 2,\n"
+                "      exec_mode: \"cluster\",\n"
+                "      max_memory_restart: \"300M\",\n"
+                "      env: { NODE_ENV: \"production\", PORT: 8080 },\n"
+                "    },\n"
+                "    {\n"
+                "      name: \"mqtt-bridge\",\n"
+                "      script: \"dist/mqtt/bridge.js\",\n"
+                "      cwd: \"/srv/vas/mqtt\",\n"
+                "      watch: true,\n"
+                "      env: { NODE_ENV: \"production\" },\n"
+                "    },\n"
+                "    {\n"
+                "      name: \"qr-listener\",\n"
+                "      script: \"dist/qr/listener.js\",\n"
+                "      cwd: \"/srv/vas/qr\",\n"
+                "      watch: true,\n"
+                "      max_memory_restart: \"150M\",\n"
+                "    },\n"
+                "    {\n"
+                "      name: \"webhook-relay\",\n"
+                "      script: \"dist/webhook/relay.js\",\n"
+                "      cwd: \"/srv/vas/webhook\",\n"
+                "      max_memory_restart: \"200M\",\n"
+                "    },\n"
+                "    {\n"
+                "      name: \"cron-jobs\",\n"
+                "      script: \"dist/cron/index.js\",\n"
+                "      cwd: \"/srv/vas/cron\",\n"
+                "      autorestart: false,\n"
+                "    },\n"
+                "    {\n"
+                "      name: \"log-shipper\",\n"
+                "      script: \"dist/log-shipper/index.js\",\n"
+                "      cwd: \"/srv/vas/log-shipper\",\n"
+                "    },\n"
+                "  ],\n"
+                "};\n"
+            ),
+        },
+        "modules": [
+            {
+                "name": "pm2-logrotate", "version": "2.7.0", "status": "active",
+                "description": "หมุนไฟล์ log อัตโนมัติเมื่อขนาดเกินกำหนด — ป้องกัน disk เต็มจาก log สะสม",
+                "config": {"max_size": "10M", "retain": "7", "compress": True, "rotate_interval": "0 0 * * *"},
+            },
+            {
+                "name": "pm2-server-monit", "version": "1.0.5", "status": "inactive",
+                "description": "ส่ง metrics CPU/RAM/Disk ของเครื่องไปยัง PM2 Plus dashboard",
+                "config": None,
+            },
+            {
+                "name": "pm2-auto-pull", "version": "0.2.7", "status": "inactive",
+                "description": "Auto `git pull` + reload process เมื่อ repo มีการอัปเดตใหม่",
+                "config": None,
+            },
+        ],
+        "startup": {
+            "configured": True,
+            "platform": "systemd",
+            "user": "root",
+            "service_name": "pm2-root",
+            "command": "pm2 startup systemd -u root --hp /root",
+            "last_save": "2 ชม. ที่แล้ว",
+            "dump_path": "/root/.pm2/dump.pm2",
+            "dump_exists": True,
+        },
+    }
 
 
 def _read_wireguard_config(path: Path) -> str:

@@ -1,0 +1,858 @@
+{% extends base_template %}
+{% block page_title %}OpenSSH — VAS{% endblock %}
+{% block header_title %}OpenSSH{% endblock %}
+
+{% block content %}
+<style>
+  .tab-panel { display: none; }
+  .tab-panel.is-active { display: flex; flex-direction: column; animation: tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .msg { font-size: 0.82rem; min-height: 1.2rem; }
+  .msg-ok    { color: #0f766e; }
+  .msg-error { color: #b1453a; }
+
+  /* ── Toggle switch ── */
+  .toggle-switch { position:relative; display:inline-flex; align-items:center; gap:0.5rem; cursor:pointer; flex-shrink:0; }
+  .toggle-switch input { position:absolute; opacity:0; width:0; height:0; }
+  .toggle-track { width:36px; height:20px; border-radius:10px; background:rgb(var(--c-faint)/0.4); transition:background 0.2s; border:1px solid rgb(var(--c-line)/0.14); position:relative; }
+  .toggle-switch input:checked + .toggle-track { background:rgb(var(--c-safe)); border-color:rgb(var(--c-safe)); }
+  .toggle-thumb { position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.15); transition:left 0.2s; }
+  .toggle-switch input:checked + .toggle-track .toggle-thumb { left:18px; }
+
+  /* ── Confirm modal ── */
+  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open { display:flex; }
+  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  #ssh-add-key-panel[hidden] { display: none; }
+</style>
+
+<div class="flex flex-col gap-4" data-installed="{{ 'true' if ssh.installed else 'false' }}">
+
+  <!-- ── 1. PAGE HEADER ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · เครือข่าย</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">OpenSSH</h1>
+    <p class="text-[0.82rem] text-muted mt-1">การเชื่อมต่อ, Authentication, การเข้าถึง และความปลอดภัยของ SSH</p>
+  </div>
+
+  {% if not ssh.installed %}
+  <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/15 border-caution/30 text-[#92660b]">
+    <iconify-icon icon="lucide:triangle-alert" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+    <span>ยังไม่ได้ติดตั้ง OpenSSH Server บนเครื่องนี้ — ไปที่
+      <a href="{{ url_for('apps_page') }}" class="nav-link text-accent underline underline-offset-2 font-semibold">โปรแกรมเพิ่มเติม</a>
+      เพื่อติดตั้งก่อนใช้งาน</span>
+  </div>
+  {% endif %}
+
+  <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/15 border-caution/30 text-[#92660b]">
+    <iconify-icon icon="lucide:shield-alert" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+    <span><span class="font-semibold">ระวัง:</span> การตั้งค่าผิดพลาด (เช่น AllowUsers ไม่มี user ปัจจุบัน หรือ PermitRootLogin no
+      ทั้งที่ยังไม่มี user อื่น) อาจทำให้เข้าเครื่องผ่าน SSH ไม่ได้อีก — ระบบ validate ด้วย <code class="text-[0.76rem] bg-surface px-1 py-0.5 rounded">sshd -t</code>
+      ก่อน apply เสมอ แต่ควรเปิด session SSH สำรองไว้ก่อนแก้ไขค่าที่สำคัญ</span>
+  </div>
+
+  <!-- ── 2. TAB NAV ── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    {% set ssh_tabs = [
+      ("status",    "lucide:shield",         "สถานะ"),
+      ("auth",      "lucide:fingerprint",    "Authentication"),
+      ("access",    "lucide:route",          "Access Control"),
+      ("keys",      "lucide:key-round",      "SSH Keys"),
+      ("hardening", "lucide:shield-check",   "Hardening & Logs"),
+    ] %}
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      {% for tid, icon, label in ssh_tabs %}
+      <button type="button" data-tab="{{ tid }}" onclick="sshTab('{{ tid }}')"
+              class="ssh-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+        <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>{{ label }}</span>
+      </button>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <!-- ── 3. CONTENT ── -->
+  <div>
+
+    <!-- ════════ TAB: สถานะ ════════ -->
+    <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
+
+      <!-- Status strip -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:wrench" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Tool:</span>
+          <span class="text-[0.78rem] font-semibold {% if ssh.installed %}text-safe{% else %}text-danger{% endif %}" id="ssh-installed-label">
+            {{ 'ติดตั้งแล้ว' if ssh.installed else 'ไม่มี' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Enabled:</span>
+          <span class="text-[0.78rem] font-semibold {% if ssh.service_enabled == 'enabled' %}text-safe{% else %}text-caution{% endif %}" id="ssh-enabled-label">
+            {{ ssh.service_enabled or 'unknown' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:activity" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Active:</span>
+          <span class="text-[0.78rem] font-semibold {% if ssh.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}" id="ssh-active-label">
+            {{ ssh.service_active or 'unknown' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:plug" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Port:</span>
+          <span class="text-[0.78rem] font-semibold text-ink font-mono">{{ config.port }}</span>
+        </div>
+      </div>
+
+      <!-- System info card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:info" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ข้อมูลระบบ</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Tool</span>
+            <span class="flex-1 flex items-center gap-1.5 flex-wrap min-w-0">
+              <span class="zone {% if ssh.installed %}zone-safe{% else %}zone-danger{% endif %}" id="ssh-tool-zone">
+                {{ 'OK' if ssh.installed else 'MISSING' }}
+              </span>
+              <span class="break-all text-faint text-[0.78rem]" id="ssh-version">{{ ssh.version or 'not installed' }}</span>
+            </span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Service</span>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="zone {% if ssh.service_enabled == 'enabled' %}zone-safe{% else %}zone-mute{% endif %}" id="ssh-service-enabled-zone">{{ ssh.service_enabled or 'unknown' }}</span>
+              <span class="text-faint text-[0.72rem]">/</span>
+              <span class="zone {% if ssh.service_active == 'active' %}zone-safe{% else %}zone-mute{% endif %}" id="ssh-service-active-zone">{{ ssh.service_active or 'unknown' }}</span>
+            </div>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Listen</span>
+            <code class="flex-1 text-[0.82rem] text-ink font-mono break-all min-w-0">{{ config.listen_address }}:{{ config.port }}</code>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Root Login</span>
+            <span class="zone {{ 'zone-safe' if config.permit_root_login != 'yes' else 'zone-danger' }}">{{ config.permit_root_login }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Fail2ban</span>
+            <span class="zone {{ 'zone-safe' if fail2ban.service_active else 'zone-mute' }}" id="ssh-fail2ban-zone">
+              {% if fail2ban.installed %}
+                {{ 'ทำงานอยู่ · แบน ' + fail2ban.banned_count|string + ' IP' if fail2ban.service_active else 'ติดตั้งแล้วแต่ยังไม่เปิดใช้' }}
+              {% else %}
+                ไม่ได้ติดตั้ง
+              {% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Service control -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ควบคุม Service</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-3">
+          <div class="flex flex-wrap gap-2">
+            <button data-ssh-action="reload" data-ssh-confirm="0" type="button" {{ 'disabled' if not ssh.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Reload
+            </button>
+            <button data-ssh-action="restart" data-ssh-confirm="1" type="button" {{ 'disabled' if not ssh.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:power" width="13" height="13"></iconify-icon>Restart
+            </button>
+            <button data-ssh-action="enable" data-ssh-confirm="0" type="button" {{ 'disabled' if not ssh.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:toggle-right" width="13" height="13"></iconify-icon>Enable
+            </button>
+            <button data-ssh-action="disable" data-ssh-confirm="1" type="button" {{ 'disabled' if not ssh.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:toggle-left" width="13" height="13"></iconify-icon>Disable
+            </button>
+          </div>
+          <p class="text-[0.72rem] text-faint">Restart / Disable ต้องยืนยันก่อน — อาจตัดการเชื่อมต่อ SSH ที่ใช้งานอยู่ (สำหรับ Restart: session เดิมมักไม่หลุด แต่ session ใหม่ต้องรอ service ขึ้นใหม่)</p>
+          <div class="msg" id="ssh-service-msg" aria-live="polite"></div>
+        </div>
+      </div>
+
+    </div><!-- /tab-status -->
+
+
+    <!-- ════════ TAB: Authentication ════════ -->
+    <div id="tab-auth" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:fingerprint" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">วิธียืนยันตัวตน</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-4">
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">Password Authentication</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">ล็อกอินด้วยรหัสผ่านของ user</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-password-authentication" {{ 'checked' if config.password_authentication }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">Public Key Authentication</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">ล็อกอินด้วย SSH key (แนะนำ)</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-pubkey-authentication" {{ 'checked' if config.pubkey_authentication }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">Permit Empty Passwords</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">อนุญาต user ที่ไม่ตั้งรหัสผ่าน — ไม่ควรเปิด</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-permit-empty-passwords" {{ 'checked' if config.permit_empty_passwords }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">Keyboard-Interactive (MFA)</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">รองรับ 2FA เช่น Google Authenticator / PAM OTP</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-kbd-interactive-authentication" {{ 'checked' if config.kbd_interactive_authentication }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">PermitRootLogin</label>
+              <select id="ssh-permit-root-login" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+                <option value="no" {{ 'selected' if config.permit_root_login == 'no' }}>no — ปิดล็อกอิน root ทั้งหมด</option>
+                <option value="prohibit-password" {{ 'selected' if config.permit_root_login == 'prohibit-password' }}>prohibit-password — root ต้องใช้ key เท่านั้น</option>
+                <option value="forced-commands-only" {{ 'selected' if config.permit_root_login == 'forced-commands-only' }}>forced-commands-only</option>
+                <option value="yes" {{ 'selected' if config.permit_root_login == 'yes' }}>yes — อนุญาตทุกกรณี (ไม่แนะนำ)</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">AuthorizedKeysFile</label>
+              <input type="text" id="ssh-authorized-keys-file" value="{{ config.authorized_keys_file }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">MaxAuthTries</label>
+              <input type="number" min="1" max="20" id="ssh-max-auth-tries" value="{{ config.max_auth_tries }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+              <p class="text-[0.7rem] text-faint">จำนวนครั้งที่ auth ผิดได้ต่อ session ก่อนตัดการเชื่อมต่อ</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">LoginGraceTime (วินาที)</label>
+              <input type="number" min="0" max="600" id="ssh-login-grace-time" value="{{ config.login_grace_time }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+              <p class="text-[0.7rem] text-faint">เวลาที่ให้ auth เสร็จก่อน server ตัดการเชื่อมต่อ</p>
+            </div>
+          </div>
+
+        </div>
+        <div class="px-4 py-3 border-t border-line/10 flex items-center justify-end gap-2">
+          <span class="msg" id="auth-save-msg" aria-live="polite"></span>
+          <button type="button" onclick="saveSshConfig('auth-save-msg')" {{ 'disabled' if not ssh.installed }}
+                  class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>บันทึกการตั้งค่า
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /tab-auth -->
+
+
+    <!-- ════════ TAB: Access Control ════════ -->
+    <div id="tab-access" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:plug" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">การเชื่อมต่อ</h2>
+        </div>
+        <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">Port</label>
+            <input type="number" min="1" max="65535" id="ssh-port" value="{{ config.port }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            <p class="text-[0.7rem] text-faint">เปลี่ยนจากพอร์ต 22 ช่วยลด automated scan ได้บ้าง</p>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">ListenAddress</label>
+            <input type="text" id="ssh-listen-address" value="{{ config.listen_address }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">ClientAliveInterval (วินาที)</label>
+            <input type="number" min="0" id="ssh-client-alive-interval" value="{{ config.client_alive_interval }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            <p class="text-[0.7rem] text-faint">ส่ง keepalive ทุกกี่วินาที เพื่อตัด session ที่ค้าง (0 = ปิด)</p>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">ClientAliveCountMax</label>
+            <input type="number" min="0" id="ssh-client-alive-count-max" value="{{ config.client_alive_count_max }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:users" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">จำกัดสิทธิ์ผู้ใช้ / กลุ่ม</h2>
+        </div>
+        <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">AllowUsers</label>
+            <input type="text" id="ssh-allow-users" value="{{ config.allow_users }}" placeholder="เว้นว่าง = อนุญาตทุก user" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">AllowGroups</label>
+            <input type="text" id="ssh-allow-groups" value="{{ config.allow_groups }}" placeholder="เช่น sshusers" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">DenyUsers</label>
+            <input type="text" id="ssh-deny-users" value="{{ config.deny_users }}" placeholder="เว้นว่าง = ไม่บล็อกใคร" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">DenyGroups</label>
+            <input type="text" id="ssh-deny-groups" value="{{ config.deny_groups }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:route" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Forwarding & Sessions</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">AllowTcpForwarding</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">SSH tunneling / port forwarding</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-allow-tcp-forwarding" {{ 'checked' if config.allow_tcp_forwarding }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">X11Forwarding</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">รัน GUI app ผ่าน SSH</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-x11-forwarding" {{ 'checked' if config.x11_forwarding }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">GatewayPorts</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">เปิด forwarded port ให้เครื่องอื่นเข้าถึงได้</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-gateway-ports" {{ 'checked' if config.gateway_ports }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">MaxSessions</label>
+              <input type="number" min="1" id="ssh-max-sessions" value="{{ config.max_sessions }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">MaxStartups</label>
+              <input type="text" id="ssh-max-startups" value="{{ config.max_startups }}" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+              <p class="text-[0.7rem] text-faint">start:rate:full — จำกัด connection ที่ยังไม่ auth พร้อมกัน</p>
+            </div>
+          </div>
+        </div>
+        <div class="px-4 py-3 border-t border-line/10 flex items-center justify-end gap-2">
+          <span class="msg" id="access-save-msg" aria-live="polite"></span>
+          <button type="button" onclick="saveSshConfig('access-save-msg')" {{ 'disabled' if not ssh.installed }}
+                  class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>บันทึกการตั้งค่า
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /tab-access -->
+
+
+    <!-- ════════ TAB: SSH Keys ════════ -->
+    <div id="tab-keys" class="tab-panel flex flex-col gap-4">
+
+      <!-- Host keys -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:server" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Host Keys</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for hk in host_keys %}
+          <div class="flex items-start gap-3 px-4 py-3 flex-wrap">
+            <span class="zone zone-safe flex-shrink-0">{{ hk.key_type }}</span>
+            <code class="flex-1 text-[0.78rem] text-ink font-mono break-all min-w-0">{{ hk.fingerprint }}</code>
+            <span class="text-[0.72rem] text-faint flex-shrink-0">{{ hk.bits }} bit</span>
+          </div>
+          {% else %}
+          <div class="px-4 py-6 text-center text-[0.8rem] text-faint">ไม่พบ host key (ตรวจสอบว่า OpenSSH ติดตั้งและมี key แล้ว)</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Authorized keys per user -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <iconify-icon icon="lucide:key-round" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+            <h2 class="text-[0.88rem] font-semibold text-ink">Authorized Keys</h2>
+          </div>
+          <button type="button" onclick="toggleAddKeyPanel()" {{ 'disabled' if not ssh.installed }}
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>เพิ่ม Key
+          </button>
+        </div>
+
+        <!-- Add key panel (ซ่อนไว้ก่อน) -->
+        <div id="ssh-add-key-panel" hidden class="px-4 py-4 border-b border-line/10 bg-surface/40 flex flex-col gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-3">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">User</label>
+              <select id="ssh-add-key-user" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+                {% for u in manageable_users %}
+                <option value="{{ u }}">{{ u }}</option>
+                {% else %}
+                <option value="">ไม่พบ user</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">Public Key (บรรทัดเดียว)</label>
+              <input type="text" id="ssh-add-key-value" placeholder="ssh-ed25519 AAAAC3Nza... comment"
+                     class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition">
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="addSshKey()"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+              <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>เพิ่ม
+            </button>
+            <button type="button" onclick="toggleAddKeyPanel()"
+                    class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+              ยกเลิก
+            </button>
+            <span class="msg" id="add-key-msg" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse text-[0.82rem]">
+            <thead>
+              <tr>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10 whitespace-nowrap">User</th>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">Key</th>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10 whitespace-nowrap">แก้ไขล่าสุด</th>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for k in authorized_keys %}
+              <tr class="hover:bg-surface transition-colors">
+                <td class="px-3.5 py-2.5 border-b border-line/7 text-ink align-middle font-semibold whitespace-nowrap">{{ k.user }}</td>
+                <td class="px-3.5 py-2.5 border-b border-line/7 align-middle min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-surface border border-line/10 text-muted">{{ k.algo }}</span>
+                    <code class="text-[0.74rem] text-faint font-mono truncate max-w-[240px]">{{ k.fingerprint }}</code>
+                    <span class="text-[0.74rem] text-muted">{{ k.comment }}</span>
+                  </div>
+                </td>
+                <td class="px-3.5 py-2.5 border-b border-line/7 align-middle text-faint whitespace-nowrap">{{ k.added }}</td>
+                <td class="px-3.5 py-2.5 border-b border-line/7 align-middle">
+                  <button type="button" onclick="confirmRevokeKey('{{ k.user }}', '{{ k.fingerprint }}')"
+                          class="inline-flex items-center px-2.5 py-1 border border-danger/20 rounded-md bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors">
+                    เพิกถอน
+                  </button>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="px-3.5 py-6 text-center text-faint">ยังไม่มี authorized key</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /tab-keys -->
+
+
+    <!-- ════════ TAB: Hardening & Logs ════════ -->
+    <div id="tab-hardening" class="tab-panel flex flex-col gap-4">
+
+      <!-- Fail2ban -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:ban" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Fail2ban Integration</h2>
+        </div>
+        <div class="p-4 flex flex-wrap items-center gap-4">
+          {% if fail2ban.installed %}
+          <span class="zone {{ 'zone-safe' if fail2ban.service_active else 'zone-mute' }}">{{ 'ทำงานอยู่' if fail2ban.service_active else 'ติดตั้งแล้ว แต่ service ไม่ทำงาน' }}</span>
+          <span class="text-[0.82rem] text-muted">แบน IP อยู่ตอนนี้: <span class="text-ink font-semibold">{{ fail2ban.banned_count }}</span></span>
+          <span class="text-[0.82rem] text-muted">Jail: <code class="text-[0.78rem] font-mono">sshd</code> {{ '(active)' if fail2ban.jail_active else '(ไม่ active)' }}</span>
+          {% else %}
+          <span class="zone zone-mute">ไม่ได้ติดตั้ง</span>
+          <span class="text-[0.78rem] text-faint">การจัดการติดตั้ง fail2ban ยังไม่รองรับในหน้านี้ — ส่วนนี้แสดงสถานะแบบ read-only เท่านั้น</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Hardening toggles -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:shield-check" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Hardening</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">StrictModes</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">ปฏิเสธ key ถ้า permission ของไฟล์/โฟลเดอร์หละหลวม</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-strict-modes" {{ 'checked' if config.strict_modes }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 border border-line/10 rounded-lg">
+              <div class="min-w-0 pr-3">
+                <div class="text-[0.84rem] font-semibold text-ink">UsePAM</div>
+                <div class="text-[0.72rem] text-faint mt-0.5">ใช้ PAM stack สำหรับ auth/account/session</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="ssh-use-pam" {{ 'checked' if config.use_pam }}><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">LogLevel</label>
+              <select id="ssh-log-level" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+                {% for lvl in ("INFO", "VERBOSE", "DEBUG") %}
+                <option value="{{ lvl }}" {{ 'selected' if config.log_level == lvl }}>{{ lvl }}{{ ' — บันทึก key fingerprint ทุกครั้งที่ auth' if lvl == 'VERBOSE' }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">Banner (ข้อความก่อนล็อกอิน)</label>
+              <textarea id="ssh-banner" rows="2" placeholder="เว้นว่าง = ไม่แสดงข้อความก่อนล็อกอิน"
+                        class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition resize-y">{{ config.banner }}</textarea>
+            </div>
+          </div>
+        </div>
+        <div class="px-4 py-3 border-t border-line/10 flex items-center justify-end gap-2">
+          <span class="msg" id="hardening-save-msg" aria-live="polite"></span>
+          <button type="button" onclick="saveSshConfig('hardening-save-msg')" {{ 'disabled' if not ssh.installed }}
+                  class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>บันทึกการตั้งค่า
+          </button>
+        </div>
+      </div>
+
+      <!-- Recent login attempts -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:history" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ความพยายามล็อกอินล่าสุด</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse text-[0.82rem]">
+            <thead>
+              <tr>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10 whitespace-nowrap">User</th>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">IP</th>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10 whitespace-nowrap">เวลา</th>
+                <th class="text-left px-3.5 py-2.5 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-faint border-b border-line/10">ผลลัพธ์</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in recent_attempts %}
+              <tr class="hover:bg-surface transition-colors">
+                <td class="px-3.5 py-2.5 border-b border-line/7 text-ink align-middle whitespace-nowrap">{{ a.user }}</td>
+                <td class="px-3.5 py-2.5 border-b border-line/7 align-middle"><code class="text-[0.78rem] font-mono">{{ a.ip }}</code></td>
+                <td class="px-3.5 py-2.5 border-b border-line/7 align-middle text-faint whitespace-nowrap">{{ a.time }}</td>
+                <td class="px-3.5 py-2.5 border-b border-line/7 align-middle">
+                  {% if a.result == 'success' %}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-safe/8 border-safe/22 text-[#0f766e]">สำเร็จ</span>
+                  {% else %}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold border bg-danger/8 border-danger/22 text-[#b1453a]">ล้มเหลว</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="px-3.5 py-6 text-center text-faint">ไม่พบ log การล็อกอิน (journalctl อาจเข้าถึงไม่ได้)</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /tab-hardening -->
+
+  </div><!-- /content -->
+
+</div><!-- /root -->
+
+<!-- ── Confirm Modal ──────────────────────────────────────── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:triangle-alert" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">
+        ยกเลิก
+      </button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:check" width="13" height="13"></iconify-icon>
+        ยืนยัน
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var installed = document.querySelector("[data-installed]").dataset.installed === "true";
+  var serviceMsgEl = document.getElementById("ssh-service-msg");
+  var addKeyMsgEl  = document.getElementById("add-key-msg");
+
+  /* ── Tab switching ── */
+  window.sshTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
+    document.querySelectorAll(".ssh-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent\/8", on);
+      btn.classList.toggle("text-accent", on);
+      btn.classList.toggle("font-semibold", on);
+      btn.classList.toggle("text-muted", !on);
+    });
+  };
+
+  function setMsg(el, text, type) {
+    if (!el) return;
+    el.className = "msg" + (type === "ok" ? " msg-ok" : type === "error" ? " msg-error" : "");
+    el.textContent = text;
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d.errors || ["Request failed"]).join(" "));
+        return d;
+      });
+    });
+  }
+
+  function checked(id) {
+    var el = document.getElementById(id);
+    return !!(el && el.checked);
+  }
+  function val(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : "";
+  }
+  function intVal(id, fallback) {
+    var n = parseInt(val(id), 10);
+    return isNaN(n) ? fallback : n;
+  }
+
+  /* ── Collect ค่าจากทุกแท็บ (ฟอร์มอยู่ใน DOM ทั้งหมด แค่ซ่อนด้วย CSS) ── */
+  function collectSshConfig() {
+    return {
+      port: intVal("ssh-port", 22),
+      listen_address: val("ssh-listen-address"),
+      permit_root_login: val("ssh-permit-root-login"),
+      password_authentication: checked("ssh-password-authentication"),
+      pubkey_authentication: checked("ssh-pubkey-authentication"),
+      permit_empty_passwords: checked("ssh-permit-empty-passwords"),
+      kbd_interactive_authentication: checked("ssh-kbd-interactive-authentication"),
+      max_auth_tries: intVal("ssh-max-auth-tries", 3),
+      login_grace_time: intVal("ssh-login-grace-time", 30),
+      authorized_keys_file: val("ssh-authorized-keys-file"),
+      allow_users: val("ssh-allow-users"),
+      allow_groups: val("ssh-allow-groups"),
+      deny_users: val("ssh-deny-users"),
+      deny_groups: val("ssh-deny-groups"),
+      allow_tcp_forwarding: checked("ssh-allow-tcp-forwarding"),
+      x11_forwarding: checked("ssh-x11-forwarding"),
+      gateway_ports: checked("ssh-gateway-ports"),
+      client_alive_interval: intVal("ssh-client-alive-interval", 300),
+      client_alive_count_max: intVal("ssh-client-alive-count-max", 2),
+      max_sessions: intVal("ssh-max-sessions", 10),
+      max_startups: val("ssh-max-startups"),
+      strict_modes: checked("ssh-strict-modes"),
+      use_pam: checked("ssh-use-pam"),
+      log_level: val("ssh-log-level"),
+      banner: val("ssh-banner"),
+    };
+  }
+
+  /* ── Save config (ทุกปุ่ม "บันทึกการตั้งค่า" เรียกอันนี้ ส่งค่าทุกแท็บไปพร้อมกันเสมอ) ── */
+  window.saveSshConfig = function (msgElId) {
+    if (!installed) return;
+    var el = document.getElementById(msgElId);
+    setMsg(el, "กำลังบันทึกและ reload service...");
+    postJson("{{ url_for('openssh_config_api') }}", collectSshConfig())
+      .then(function (d) {
+        setMsg(el, d.message || "บันทึกเรียบร้อย", "ok");
+        if (window.showToast) window.showToast(d.message || "บันทึก OpenSSH config เรียบร้อย", "ok");
+        refreshSshStatus();
+      })
+      .catch(function (e) {
+        setMsg(el, e.message, "error");
+        if (window.showToast) window.showToast(e.message, "error");
+      });
+  };
+
+  /* ── Refresh status strip ── */
+  function refreshSshStatus() {
+    fetch("{{ url_for('openssh_status_api') }}")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status !== "ok") return;
+        setText("ssh-enabled-label", d.service_enabled || "unknown");
+        setText("ssh-active-label", d.service_active || "unknown");
+        setZoneText("ssh-service-enabled-zone", d.service_enabled || "unknown", d.service_enabled === "enabled");
+        setZoneText("ssh-service-active-zone", d.service_active || "unknown", d.service_active === "active");
+      })
+      .catch(function () {});
+  }
+  function setText(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+  function setZoneText(id, text, ok) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("zone-safe", ok);
+    el.classList.toggle("zone-mute", !ok);
+  }
+
+  /* ── Service actions — stop/disable/restart ต้องยืนยันก่อน ── */
+  document.querySelectorAll("[data-ssh-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      var action = btn.dataset.sshAction;
+      var needsConfirm = btn.dataset.sshConfirm === "1";
+      function run() {
+        setMsg(serviceMsgEl, action + " กำลังดำเนินการ...");
+        postJson("{{ url_for('openssh_action_api') }}", { action: action })
+          .then(function () {
+            setMsg(serviceMsgEl, action + " เสร็จสิ้น", "ok");
+            refreshSshStatus();
+          })
+          .catch(function (e) { setMsg(serviceMsgEl, e.message, "error"); });
+      }
+      if (needsConfirm) {
+        window.showConfirm({
+          title: action + " OpenSSH service?",
+          body: "การ " + action + " service อาจตัดการเชื่อมต่อ SSH ที่ใช้งานอยู่ ตรวจสอบให้แน่ใจก่อนดำเนินการ",
+          okLabel: "ยืนยัน " + action,
+          onOk: run,
+        });
+      } else {
+        run();
+      }
+    });
+  });
+
+  /* ── Add key panel ── */
+  window.toggleAddKeyPanel = function () {
+    var panel = document.getElementById("ssh-add-key-panel");
+    if (panel) panel.hidden = !panel.hidden;
+    setMsg(addKeyMsgEl, "");
+  };
+
+  window.addSshKey = function () {
+    var user = val("ssh-add-key-user");
+    var key = val("ssh-add-key-value").trim();
+    if (!user) { setMsg(addKeyMsgEl, "ไม่พบ user ให้เลือก", "error"); return; }
+    if (!key) { setMsg(addKeyMsgEl, "กรุณากรอก public key", "error"); return; }
+    setMsg(addKeyMsgEl, "กำลังเพิ่ม key...");
+    postJson("{{ url_for('openssh_keys_add_api') }}", { user: user, key: key })
+      .then(function (d) {
+        if (window.showToast) window.showToast(d.message || "เพิ่ม key เรียบร้อย", "ok");
+        location.reload();
+      })
+      .catch(function (e) { setMsg(addKeyMsgEl, e.message, "error"); });
+  };
+
+  /* ── Revoke key ── */
+  window.confirmRevokeKey = function (user, fingerprint) {
+    window.showConfirm({
+      title: "เพิกถอน key ของ " + user + "?",
+      body: "fingerprint " + fingerprint + " จะไม่สามารถใช้ล็อกอินได้อีก การกระทำนี้ย้อนกลับไม่ได้",
+      okLabel: "เพิกถอน",
+      onOk: function () {
+        postJson("{{ url_for('openssh_keys_revoke_api') }}", { user: user, fingerprint: fingerprint })
+          .then(function (d) {
+            if (window.showToast) window.showToast(d.message || "เพิกถอน key แล้ว", "ok");
+            location.reload();
+          })
+          .catch(function (e) { if (window.showToast) window.showToast(e.message, "error"); });
+      }
+    });
+  };
+
+  /* ── Confirm modal helper (per-page convention) ── */
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการทำรายการ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) btnOk.childNodes[1].textContent = " " + opts.okLabel;
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
+
+  /* ── SPA cleanup ── */
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () { /* no intervals/SSE */ });
+
+})();
+</script>
+{% endblock %}

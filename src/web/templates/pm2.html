@@ -1,0 +1,762 @@
+{% extends base_template %}
+{% block header_title %}PM2{% endblock %}
+
+
+{% block content %}
+<style>
+  .tab-panel { display: none; }
+  .tab-panel.is-active { display: flex; flex-direction: column; animation: tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .bar-track { height: 6px; border-radius: 9999px; background: rgb(var(--c-line)/0.08); overflow: hidden; }
+  .bar-fill  { height: 100%; border-radius: 9999px; transition: width 0.6s ease; }
+
+  .msg { font-size: 0.82rem; min-height: 1.2rem; }
+  .msg-ok    { color: #0f766e; }
+  .msg-error { color: #b1453a; }
+
+  .log-line { display: flex; gap: 0.6rem; padding: 0.15rem 0; }
+  .log-ts   { color: rgb(var(--c-faint)); flex-shrink: 0; }
+  .log-out  { color: rgb(var(--c-ink)); }
+  .log-err  { color: rgb(var(--c-danger)); }
+
+#confirm-modal { display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; }
+  #confirm-modal.is-open { display: flex; }
+  #confirm-backdrop { position: absolute; inset: 0; background: rgb(var(--c-ink) / 0.35); backdrop-filter: blur(2px); }
+  #confirm-box { position: relative; background: rgb(var(--c-card)); border: 1px solid rgb(var(--c-line) / 0.12); border-radius: 1rem; box-shadow: 0 8px 32px rgb(0 0 0 / 0.12); width: 100%; max-width: 400px; margin: 1rem; padding: 1.5rem; animation: fadeUp 0.18s ease forwards; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+
+{% set status_zone = {'online': 'zone-safe', 'stopped': 'zone-mute', 'errored': 'zone-danger', 'launching': 'zone-info'} %}
+{% set status_icon = {'online': 'lucide:play-circle', 'stopped': 'lucide:pause-circle', 'errored': 'lucide:alert-circle', 'launching': 'lucide:loader'} %}
+{% set status_box   = {'online': 'bg-safe/8 border-safe/20', 'errored': 'bg-danger/8 border-danger/20'} %}
+{% set status_icon_c = {'online': 'text-safe', 'errored': 'text-danger'} %}
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── 1. PAGE HEADER ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · โปรแกรมเพิ่มเติม</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">PM2</h1>
+    <p class="text-[0.82rem] text-muted mt-1">จัดการ Node.js process manager — Process list, Logs, Ecosystem, Modules และ Startup</p>
+    {% if is_mock %}
+    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-bold bg-caution/10 text-[#92660b] border border-caution/25 mt-2">
+      <iconify-icon icon="lucide:pencil-ruler" width="10" height="10"></iconify-icon>
+      Mock data — ยังไม่เชื่อมต่อ PM2 daemon จริง
+    </span>
+    {% endif %}
+  </div>
+
+  <!-- ── 2. TAB NAV ── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    {% set pm_tabs = [
+      ("status",     "lucide:layout-dashboard", "สถานะ"),
+      ("processes",  "lucide:list-tree",        "Processes"),
+      ("logs",       "lucide:file-text",        "Logs"),
+      ("monitoring", "lucide:activity",         "Monitoring"),
+      ("ecosystem",  "lucide:file-code",        "Ecosystem"),
+      ("modules",    "lucide:puzzle",           "Modules"),
+      ("settings",   "lucide:settings",         "ตั้งค่า"),
+    ] %}
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      {% for tid, icon, label in pm_tabs %}
+      <button type="button" data-tab="{{ tid }}" onclick="pmTab('{{ tid }}')"
+              class="pm-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+        <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>{{ label }}</span>
+      </button>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <!-- ── 3. CONTENT ── -->
+  <div>
+
+    <!-- ════════ TAB: สถานะ ════════ -->
+    <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Daemon:</span>
+          <span class="text-[0.78rem] font-semibold {{ 'text-safe' if pm2.daemon_running else 'text-danger' }}">
+            {{ 'running' if pm2.daemon_running else 'ไม่ทำงาน' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:tag" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Version:</span>
+          <span class="text-[0.78rem] font-semibold text-ink">{{ pm2.version or '—' }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:box" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Node.js:</span>
+          <span class="text-[0.78rem] font-semibold text-ink">{{ pm2.node_version or '—' }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:clock" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Daemon Uptime:</span>
+          <span class="text-[0.78rem] font-semibold text-ink">{{ pm2.daemon_uptime or '—' }}</span>
+        </div>
+      </div>
+
+      <!-- Process summary tiles -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="bg-card border border-line/10 rounded-xl px-4 py-3.5">
+          <p class="text-[0.68rem] font-semibold text-faint uppercase tracking-wide">Total</p>
+          <p class="font-display text-[1.3rem] font-bold text-ink mt-1">{{ pm2.processes_total }}</p>
+        </div>
+        <div class="bg-card border border-line/10 rounded-xl px-4 py-3.5">
+          <p class="text-[0.68rem] font-semibold text-faint uppercase tracking-wide">Online</p>
+          <p class="font-display text-[1.3rem] font-bold text-safe mt-1">{{ pm2.processes_online }}</p>
+        </div>
+        <div class="bg-card border border-line/10 rounded-xl px-4 py-3.5">
+          <p class="text-[0.68rem] font-semibold text-faint uppercase tracking-wide">Stopped</p>
+          <p class="font-display text-[1.3rem] font-bold text-muted mt-1">{{ pm2.processes_stopped }}</p>
+        </div>
+        <div class="bg-card border border-line/10 rounded-xl px-4 py-3.5">
+          <p class="text-[0.68rem] font-semibold text-faint uppercase tracking-wide">Errored</p>
+          <p class="font-display text-[1.3rem] font-bold text-danger mt-1">{{ pm2.processes_errored }}</p>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:gauge" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">การใช้ทรัพยากรรวม</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">CPU รวม</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ pm2.cpu_total_pct }}%</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Memory รวม</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ pm2.mem_total }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">PM2_HOME</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ pm2.pm2_home }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">การดำเนินการด่วน</h2>
+        </div>
+        <div class="p-4 flex flex-wrap gap-2">
+          <button type="button" data-pm2-action="reload-all"
+                  class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Reload All (0-downtime)
+          </button>
+          <button type="button" data-pm2-action="save"
+                  class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>Save Process List
+          </button>
+          <button type="button" data-pm2-action="resurrect"
+                  class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:rotate-ccw" width="13" height="13"></iconify-icon>Resurrect from Dump
+          </button>
+          <button type="button" data-pm2-action="restart-daemon" data-pm2-confirm="Restart PM2 Daemon?" data-pm2-confirm-body="Process ทั้งหมดจะถูก restart พร้อมกัน อาจมี downtime สั้นๆ"
+                  class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+            <iconify-icon icon="lucide:power" width="13" height="13"></iconify-icon>Restart Daemon
+          </button>
+        </div>
+        <div class="msg px-4 pb-4" id="statusResult" aria-live="polite"></div>
+      </div>
+
+    </div><!-- /tab-status -->
+
+
+    <!-- ════════ TAB: Processes ════════ -->
+    <div id="tab-processes" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex flex-wrap items-center gap-2">
+        <div class="relative flex-1 min-w-[180px]">
+          <iconify-icon icon="lucide:search" width="14" height="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-faint"></iconify-icon>
+          <input type="text" id="processSearch" placeholder="ค้นหาชื่อ process..."
+                 class="w-full pl-9 pr-3 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition placeholder:text-faint">
+        </div>
+        <button type="button" data-pm2-action="start-new" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+          <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>Start New Process
+        </button>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        {% for p in processes %}
+        <div class="process-row border-b border-line/7 last:border-b-0" data-name="{{ p.name | lower }}">
+          <button type="button" onclick="toggleRow('p{{ loop.index }}')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 border
+                        {{ status_box.get(p.status, 'bg-surface border-line/10') }}">
+              <iconify-icon icon="{{ status_icon.get(p.status, 'lucide:circle') }}" width="16" height="16"
+                            class="{{ status_icon_c.get(p.status, 'text-faint') }}"></iconify-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[0.88rem] text-ink font-display">{{ p.name }}</span>
+                <span class="zone {{ status_zone.get(p.status, 'zone-mute') }}">{{ p.status_label }}</span>
+                <span class="zone zone-info">{{ p.mode }}{{ ' x' ~ p.instances if p.mode == 'cluster' else '' }}</span>
+              </div>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">id {{ p.id }} · pid {{ p.pid }} · {{ p.uptime }} · {{ p.restarts }} restarts</code>
+              {% if p.status == 'online' %}
+              <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[0.72rem] text-muted">
+                <span><iconify-icon icon="lucide:cpu" width="10" height="10" class="inline mr-0.5"></iconify-icon>CPU {{ p.cpu_pct }}%</span>
+                <span><iconify-icon icon="lucide:memory-stick" width="10" height="10" class="inline mr-0.5"></iconify-icon>Mem {{ p.mem }}{{ ' / ' ~ p.mem_limit if p.mem_limit else '' }}</span>
+                {% if p.watch %}<span><iconify-icon icon="lucide:eye" width="10" height="10" class="inline mr-0.5"></iconify-icon>watch on</span>{% endif %}
+              </div>
+              {% endif %}
+            </div>
+            <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-p{{ loop.index }}"></iconify-icon>
+          </button>
+          <div id="row-p{{ loop.index }}" class="hidden border-t border-line/10 p-4 flex flex-col gap-3 bg-surface/30">
+            {% if p.status == 'errored' %}
+            <div class="px-3 py-2.5 rounded-lg text-[0.78rem] bg-danger/8 border border-danger/25 text-danger">
+              Process crash loop — {{ p.unstable_restarts }} unstable restart(s) ล่าสุด ตรวจสอบ Logs เพื่อดูสาเหตุ
+            </div>
+            {% endif %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[0.75rem]">
+              <div><span class="text-muted">Script:</span> <span class="font-mono text-ink">{{ p.script }}</span></div>
+              <div><span class="text-muted">Cwd:</span> <span class="font-mono text-ink">{{ p.cwd }}</span></div>
+              <div><span class="text-muted">Interpreter:</span> <span class="text-ink">{{ p.interpreter }}{{ ' ' ~ p.node_args if p.node_args else '' }}</span></div>
+              <div><span class="text-muted">Exec Mode:</span> <span class="text-ink">{{ p.exec_mode_label }}</span></div>
+              <div><span class="text-muted">Autorestart:</span> <span class="text-ink">{{ 'เปิด' if p.autorestart else 'ปิด' }}</span></div>
+              <div><span class="text-muted">Max Memory Restart:</span> <span class="text-ink">{{ p.mem_limit or '—' }}</span></div>
+              <div><span class="text-muted">สร้างเมื่อ:</span> <span class="text-ink">{{ p.created_at }}</span></div>
+              <div><span class="text-muted">User:</span> <span class="text-ink">{{ p.user }}</span></div>
+            </div>
+
+            {% if p.mode == 'cluster' %}
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[0.75rem] text-muted font-medium">Instances: {{ p.instances }}</span>
+              <button type="button" data-pm2-action="scale-down" data-pm2-target="{{ p.name }}" class="inline-flex items-center justify-center w-6 h-6 border border-line/15 rounded-md bg-card text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:minus" width="11" height="11"></iconify-icon></button>
+              <button type="button" data-pm2-action="scale-up" data-pm2-target="{{ p.name }}" class="inline-flex items-center justify-center w-6 h-6 border border-line/15 rounded-md bg-card text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:plus" width="11" height="11"></iconify-icon></button>
+            </div>
+            {% endif %}
+
+            <div class="flex flex-wrap gap-1.5">
+              {% if p.status == 'stopped' %}
+              <button type="button" data-pm2-action="start" data-pm2-target="{{ p.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:play" width="11" height="11"></iconify-icon>Start</button>
+              {% else %}
+              <button type="button" data-pm2-action="restart" data-pm2-target="{{ p.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Restart</button>
+              <button type="button" data-pm2-action="reload" data-pm2-target="{{ p.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:rotate-cw" width="11" height="11"></iconify-icon>Reload</button>
+              <button type="button" data-pm2-action="stop" data-pm2-target="{{ p.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:square" width="11" height="11"></iconify-icon>Stop</button>
+              {% endif %}
+              <button type="button" data-pm2-action="toggle-watch" data-pm2-target="{{ p.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:eye" width="11" height="11"></iconify-icon>{{ 'Disable Watch' if p.watch else 'Enable Watch' }}</button>
+              <button type="button" onclick="pmTab('logs'); pmSelectLog('{{ p.name }}');" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:file-text" width="11" height="11"></iconify-icon>Logs</button>
+              <button type="button" data-pm2-action="delete" data-pm2-target="{{ p.name }}" data-pm2-confirm="ลบ process {{ p.name }}?" data-pm2-confirm-body="Process จะถูกลบออกจาก PM2 process list ถาวร ต้อง start ใหม่ด้วยมือหรือ ecosystem.config.js" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Delete</button>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="flex flex-col items-center gap-2 px-4 py-8 text-center">
+          <iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>
+          <p class="text-muted text-[0.82rem]">ยังไม่มี process</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div><!-- /tab-processes -->
+
+
+    <!-- ════════ TAB: Logs ════════ -->
+    <div id="tab-logs" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex flex-wrap items-center gap-2">
+        <select id="logProcessSelect" class="px-3 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+          {% for p in processes %}
+          <option value="{{ p.name }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+        <div class="flex items-center gap-0.5 bg-surface border border-line/10 rounded-lg p-0.5">
+          <button type="button" class="log-stream-btn px-2.5 py-1.5 rounded-md text-[0.75rem] font-semibold bg-accent/8 text-accent" data-stream="all">All</button>
+          <button type="button" class="log-stream-btn px-2.5 py-1.5 rounded-md text-[0.75rem] font-semibold text-muted hover:text-ink" data-stream="out">stdout</button>
+          <button type="button" class="log-stream-btn px-2.5 py-1.5 rounded-md text-[0.75rem] font-semibold text-muted hover:text-ink" data-stream="err">stderr</button>
+        </div>
+        <select id="logTailSelect" class="px-2.5 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.78rem] outline-none">
+          <option value="50">50 บรรทัด</option>
+          <option value="100">100 บรรทัด</option>
+          <option value="200">200 บรรทัด</option>
+        </select>
+        <div class="flex-1"></div>
+        <button type="button" data-pm2-action="refresh-logs" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="12" height="12"></iconify-icon>Refresh</button>
+        <button type="button" data-pm2-action="flush-logs" data-pm2-confirm="ล้าง Logs ทั้งหมด?" data-pm2-confirm-body="ไฟล์ log ของทุก process จะถูกล้างถาวร" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-danger/25 rounded-md bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:eraser" width="12" height="12"></iconify-icon>Clear Logs</button>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/10 flex items-center justify-between flex-wrap gap-2">
+          <code class="text-[0.72rem] text-muted font-mono" id="logPathLabel">—</code>
+          <span class="text-[0.68rem] text-faint">อัปเดตอัตโนมัติเมื่อกด Refresh — ยังไม่ tail แบบ realtime ในโหมด mock</span>
+        </div>
+        <div class="p-4 bg-surface/40 font-mono text-[0.78rem] leading-relaxed overflow-x-auto min-h-[280px] max-h-[480px] overflow-y-auto" id="logViewer"></div>
+      </div>
+    </div><!-- /tab-logs -->
+
+
+    <!-- ════════ TAB: Monitoring ════════ -->
+    <div id="tab-monitoring" class="tab-panel flex flex-col gap-4">
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+        <p class="text-[0.82rem] text-muted leading-relaxed">
+          ภาพรวมการใช้ CPU/Memory รายตัว — เทียบเท่า <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">pm2 monit</code>
+          ตัวเลขจะขยับเล็กน้อยแบบจำลอง (mock) เพื่อสาธิต UI เท่านั้น
+        </p>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="divide-y divide-line/7" id="monitorList">
+          {% for p in processes %}
+          <div class="px-4 py-4 monitor-row" data-name="{{ p.name }}" data-base-cpu="{{ p.cpu_pct }}" data-base-mem-pct="{{ (loop.index * 13) % 70 + 8 }}">
+            <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <div class="flex items-center gap-2">
+                <iconify-icon icon="{{ status_icon.get(p.status, 'lucide:circle') }}" width="13" height="13" class="{{ status_icon_c.get(p.status, 'text-faint') }}"></iconify-icon>
+                <span class="text-[0.85rem] font-semibold text-ink font-display">{{ p.name }}</span>
+                <span class="zone {{ status_zone.get(p.status, 'zone-mute') }}">{{ p.status_label }}</span>
+              </div>
+              <span class="text-[0.72rem] text-faint">pid {{ p.pid }}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-[0.7rem] text-muted">CPU</span>
+                  <span class="text-[0.7rem] font-semibold text-ink cpu-val">{{ p.cpu_pct }}%</span>
+                </div>
+                <div class="bar-track"><div class="bar-fill cpu-bar bg-accent" style="width:{{ p.cpu_pct }}%"></div></div>
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-[0.7rem] text-muted">Memory ({{ p.mem }})</span>
+                  <span class="text-[0.7rem] font-semibold text-ink mem-val">{{ (loop.index * 13) % 70 + 8 }}%</span>
+                </div>
+                <div class="bar-track"><div class="bar-fill mem-bar bg-safe" style="width:{{ (loop.index * 13) % 70 + 8 }}%"></div></div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div><!-- /tab-monitoring -->
+
+
+    <!-- ════════ TAB: Ecosystem ════════ -->
+    <div id="tab-ecosystem" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+        <p class="text-[0.82rem] text-muted leading-relaxed">
+          ไฟล์ <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">ecosystem.config.js</code> กำหนด process ทั้งหมดที่ deploy ด้วย
+          <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">pm2 start ecosystem.config.js</code> — แก้ไขแล้ว Save &amp; Reload เพื่อ apply
+        </p>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 bg-surface/40 flex-wrap gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="zone {{ 'zone-safe' if ecosystem.exists else 'zone-caution' }}">{{ 'OK' if ecosystem.exists else 'MISSING' }}</span>
+            <code class="text-[0.72rem] text-muted font-mono truncate">{{ ecosystem.path }}</code>
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button type="button" data-pm2-action="validate-ecosystem" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:check-circle" width="11" height="11"></iconify-icon>Validate</button>
+            <button type="button" data-pm2-action="save-ecosystem" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:save" width="11" height="11"></iconify-icon>Save &amp; Reload All</button>
+          </div>
+        </div>
+        <div class="p-4">
+          <textarea id="ecosystemContent" spellcheck="false" class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[320px] outline-none resize-y">{{ ecosystem.content }}</textarea>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/10">
+          <h2 class="text-[0.88rem] font-semibold text-ink">Apps ที่กำหนดไว้ ({{ processes | length }})</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for p in processes %}
+          <div class="flex items-center gap-3 px-4 py-2.5 flex-wrap">
+            <span class="font-mono text-[0.8rem] text-ink flex-1 min-w-[140px]">{{ p.name }}</span>
+            <span class="text-[0.72rem] text-muted">{{ p.mode }}{{ ' x' ~ p.instances if p.mode == 'cluster' else '' }}</span>
+            <code class="text-[0.68rem] text-faint font-mono">{{ p.script }}</code>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div><!-- /tab-ecosystem -->
+
+
+    <!-- ════════ TAB: Modules ════════ -->
+    <div id="tab-modules" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col sm:flex-row gap-2">
+        <input type="text" id="installModuleInput" placeholder="เช่น pm2-slack หรือ pm2-webshell"
+               class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition placeholder:text-faint font-mono">
+        <button type="button" data-pm2-action="install-module" class="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+          <iconify-icon icon="lucide:download" width="13" height="13"></iconify-icon>Install Module
+        </button>
+      </div>
+
+      {% for m in modules %}
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-mod{{ loop.index }}">
+        <button type="button" onclick="toggleCfg('mod{{ loop.index }}')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+          <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+            <iconify-icon icon="lucide:puzzle" width="16" height="16" class="text-muted"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-[0.88rem] text-ink font-display">{{ m.name }}</span>
+              <span class="zone {{ 'zone-safe' if m.status == 'active' else 'zone-mute' }}">{{ m.status | upper }}</span>
+              <span class="text-[0.68rem] text-faint">v{{ m.version }}</span>
+            </div>
+            <p class="text-[0.73rem] text-muted mt-1 leading-snug">{{ m.description }}</p>
+          </div>
+          <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-mod{{ loop.index }}"></iconify-icon>
+        </button>
+        <div id="cfg-viewer-mod{{ loop.index }}" class="hidden border-t border-line/10">
+          <div class="p-4 flex flex-col gap-3">
+            {% if m.config %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[0.78rem]">
+              {% for key, val in m.config.items() %}
+              <div><span class="text-muted">{{ key }}:</span> <span class="font-mono text-ink">{{ val }}</span></div>
+              {% endfor %}
+            </div>
+            {% endif %}
+            <div class="flex flex-wrap gap-1.5">
+              {% if m.status == 'active' %}
+              <button type="button" data-pm2-action="disable-module" data-pm2-target="{{ m.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:power-off" width="11" height="11"></iconify-icon>Disable</button>
+              {% if m.config %}
+              <button type="button" data-pm2-action="configure-module" data-pm2-target="{{ m.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:sliders-horizontal" width="11" height="11"></iconify-icon>Configure</button>
+              {% endif %}
+              {% else %}
+              <button type="button" data-pm2-action="enable-module" data-pm2-target="{{ m.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:power" width="11" height="11"></iconify-icon>Enable</button>
+              {% endif %}
+              <button type="button" data-pm2-action="uninstall-module" data-pm2-target="{{ m.name }}" data-pm2-confirm="ถอนการติดตั้ง {{ m.name }}?" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Uninstall</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div><!-- /tab-modules -->
+
+
+    <!-- ════════ TAB: ตั้งค่า ════════ -->
+    <div id="tab-settings" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:rocket" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Startup Script (boot ตอนเปิดเครื่อง)</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="zone {{ 'zone-safe' if startup.configured else 'zone-caution' }}">{{ 'CONFIGURED' if startup.configured else 'NOT CONFIGURED' }}</span>
+            <span class="text-[0.75rem] text-muted">platform: {{ startup.platform }} · user: {{ startup.user }} · service: {{ startup.service_name }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <code class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-[0.72rem] font-mono text-ink truncate">{{ startup.command }}</code>
+            <button type="button" data-pm2-copy="{{ startup.command }}" class="inline-flex items-center gap-1 px-2.5 py-2 border border-line/15 rounded-lg bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors flex-shrink-0"><iconify-icon icon="lucide:copy" width="12" height="12"></iconify-icon>Copy</button>
+          </div>
+          <div class="flex justify-end gap-1.5">
+            <button type="button" data-pm2-action="configure-startup" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="12" height="12"></iconify-icon>Reconfigure</button>
+            <button type="button" data-pm2-action="disable-startup" data-pm2-confirm="ปิด Startup Script?" data-pm2-confirm-body="PM2 จะไม่ auto-start process ตอนเปิดเครื่องอีกต่อไป" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-danger/25 rounded-md bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:power-off" width="12" height="12"></iconify-icon>Disable Startup</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:save" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Save / Resurrect</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Dump File</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ startup.dump_path }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">บันทึกล่าสุด</span>
+            <span class="text-[0.82rem] text-ink">{{ startup.last_save }}</span>
+          </div>
+        </div>
+        <div class="p-4 pt-0 flex flex-wrap gap-2">
+          <button type="button" data-pm2-action="save" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors"><iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>Save Process List ตอนนี้</button>
+          <button type="button" data-pm2-action="resurrect" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors"><iconify-icon icon="lucide:rotate-ccw" width="13" height="13"></iconify-icon>Resurrect จาก Dump</button>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:arrow-up-circle" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">อัปเดต PM2</h2>
+        </div>
+        <div class="p-4 flex items-center justify-between gap-3 flex-wrap">
+          <p class="text-[0.78rem] text-muted">เวอร์ชันปัจจุบัน <span class="font-mono text-ink">{{ pm2.version }}</span> — อัปเดต in-memory PM2 daemon โดยไม่ต้อง restart process</p>
+          <button type="button" data-pm2-action="update-pm2" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors flex-shrink-0"><iconify-icon icon="lucide:download" width="13" height="13"></iconify-icon>Update PM2</button>
+        </div>
+      </div>
+
+      <div class="bg-card border border-danger/20 rounded-xl">
+        <div class="px-4 py-4 border-b border-danger/15 flex items-center gap-2">
+          <iconify-icon icon="lucide:triangle-alert" width="15" height="15" class="text-danger flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-danger">Danger Zone</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+            <p class="text-[0.78rem] text-muted">Reset restart counter ของทุก process กลับเป็น 0</p>
+            <button type="button" data-pm2-action="reset-counters" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:rotate-ccw" width="13" height="13"></iconify-icon>Reset Restart Counters</button>
+          </div>
+          <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+            <p class="text-[0.78rem] text-muted">ลบ process ทั้งหมดออกจาก PM2 (ไม่กระทบไฟล์ ecosystem.config.js)</p>
+            <button type="button" data-pm2-action="delete-all" data-pm2-confirm="ลบ Process ทั้งหมด?" data-pm2-confirm-body="Process ทุกตัวจะถูกลบออกจาก PM2 process list ถาวร" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>Delete All Processes</button>
+          </div>
+          <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+            <p class="text-[0.78rem] text-muted">ปิด PM2 daemon ทั้งหมด (process ทุกตัวจะหยุดทำงานทันที)</p>
+            <button type="button" data-pm2-action="kill-daemon" data-pm2-confirm="Kill PM2 Daemon?" data-pm2-confirm-body="PM2 daemon และ process ทั้งหมดจะหยุดทำงานทันที ต้องสั่ง resurrect หรือ start ใหม่ด้วยมือ" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:power-off" width="13" height="13"></iconify-icon>Kill Daemon</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tab-settings -->
+
+  </div><!-- /content -->
+
+</div><!-- /root -->
+
+<!-- ── Confirm Modal ── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">ยกเลิก</button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        ยืนยัน
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var IS_MOCK = {{ 'true' if is_mock else 'false' }};
+  var statusResultEl = document.getElementById("statusResult");
+  var LOGS_DATA = {{ logs | tojson }};
+  var LOG_PATHS = {};
+  {% for p in processes %}
+  LOG_PATHS[{{ p.name | tojson }}] = { out: {{ p.out_log_path | tojson }}, err: {{ p.err_log_path | tojson }} };
+  {% endfor %}
+
+  /* ── Tab switching ── */
+  window.pmTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
+    document.querySelectorAll(".pm-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent\/8", on);
+      btn.classList.toggle("text-accent", on);
+      btn.classList.toggle("font-semibold", on);
+      btn.classList.toggle("text-muted", !on);
+    });
+  };
+
+  /* ── Accordion toggles (process rows, module config viewers) ── */
+  window.toggleRow = function (key) {
+    var row  = document.getElementById("row-" + key);
+    var chev = document.getElementById("chevron-" + key);
+    if (!row) return;
+    var nowHidden = row.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+  };
+
+  window.toggleCfg = function (key) {
+    var viewer = document.getElementById("cfg-viewer-" + key);
+    var chev   = document.getElementById("chevron-" + key);
+    if (!viewer) return;
+    var nowHidden = viewer.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+  };
+
+  /* ── Process search filter ── */
+  var searchInput = document.getElementById("processSearch");
+  if (searchInput) {
+    searchInput.addEventListener("input", function () {
+      var q = searchInput.value.trim().toLowerCase();
+      document.querySelectorAll(".process-row").forEach(function (row) {
+        var match = !q || row.dataset.name.indexOf(q) !== -1;
+        row.style.display = match ? "" : "none";
+      });
+    });
+  }
+
+  /* ── Copy-to-clipboard ── */
+  document.querySelectorAll("[data-pm2-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = btn.dataset.pm2Copy;
+      if (navigator.clipboard) { navigator.clipboard.writeText(text).catch(function () {}); }
+      var original = btn.innerHTML;
+      btn.textContent = "Copied";
+      setTimeout(function () { btn.innerHTML = original; }, 1200);
+    });
+  });
+
+  /* ── Log viewer ── */
+  var logProcessSelect = document.getElementById("logProcessSelect");
+  var logViewer = document.getElementById("logViewer");
+  var logPathLabel = document.getElementById("logPathLabel");
+  var currentStream = "all";
+
+  function renderLogs() {
+    var name = logProcessSelect.value;
+    var entry = LOGS_DATA.filter(function (l) { return l.process === name; })[0];
+    var tail = parseInt(document.getElementById("logTailSelect").value, 10) || 100;
+    logViewer.innerHTML = "";
+    var paths = LOG_PATHS[name];
+    logPathLabel.textContent = paths ? (paths.out + "  ·  " + paths.err) : "—";
+    if (!entry || !entry.lines || !entry.lines.length) {
+      var empty = document.createElement("div");
+      empty.className = "text-faint text-[0.78rem] py-6 text-center";
+      empty.textContent = "ยังไม่มี log";
+      logViewer.appendChild(empty);
+      return;
+    }
+    var lines = entry.lines.filter(function (l) { return currentStream === "all" || l.stream === currentStream; }).slice(-tail);
+    lines.forEach(function (l) {
+      var row = document.createElement("div");
+      row.className = "log-line";
+      var ts = document.createElement("span");
+      ts.className = "log-ts";
+      ts.textContent = l.ts;
+      var txt = document.createElement("span");
+      txt.className = l.stream === "err" ? "log-err" : "log-out";
+      txt.textContent = (l.stream === "err" ? "[err] " : "[out] ") + l.text;
+      row.appendChild(ts);
+      row.appendChild(txt);
+      logViewer.appendChild(row);
+    });
+  }
+
+  window.pmSelectLog = function (name) {
+    if (logProcessSelect) { logProcessSelect.value = name; renderLogs(); }
+  };
+
+  if (logProcessSelect) {
+    logProcessSelect.addEventListener("change", renderLogs);
+    document.getElementById("logTailSelect").addEventListener("change", renderLogs);
+    document.querySelectorAll(".log-stream-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        currentStream = btn.dataset.stream;
+        document.querySelectorAll(".log-stream-btn").forEach(function (b) {
+          var on = b === btn;
+          b.classList.toggle("bg-accent\/8", on);
+          b.classList.toggle("text-accent", on);
+          b.classList.toggle("text-muted", !on);
+        });
+        renderLogs();
+      });
+    });
+    renderLogs();
+  }
+
+  /* ── Monitoring — mock live jitter ── */
+  var monitorTimer = setInterval(function () {
+    document.querySelectorAll(".monitor-row").forEach(function (row) {
+      var baseCpu = parseFloat(row.dataset.baseCpu) || 0;
+      var baseMem = parseFloat(row.dataset.baseMemPct) || 0;
+      var jitterCpu = Math.max(0, baseCpu + (Math.random() * 4 - 2));
+      var jitterMem = Math.min(100, Math.max(2, baseMem + (Math.random() * 6 - 3)));
+      var cpuBar = row.querySelector(".cpu-bar");
+      var memBar = row.querySelector(".mem-bar");
+      var cpuVal = row.querySelector(".cpu-val");
+      if (cpuBar) cpuBar.style.width = Math.min(100, jitterCpu) + "%";
+      if (memBar) memBar.style.width = jitterMem + "%";
+      if (cpuVal) cpuVal.textContent = jitterCpu.toFixed(1) + "%";
+    });
+  }, 3000);
+
+  /* ── Action buttons ──
+     หน้านี้ยังใช้ mock data — ทุก action เรียก runMockAction() แทนการยิง fetch จริง
+     เมื่อ backend (src/mcp/tools/pm2.py + API routes ใน server.py) พร้อมแล้ว
+     ให้แทนที่ runMockAction ด้วย postJson(url_for(...)) ตาม pattern ของ wireguard.html */
+  function runMockAction(label) {
+    if (statusResultEl) {
+      statusResultEl.className = "msg msg-ok";
+      statusResultEl.textContent = label + " — mock action (ยังไม่เชื่อมต่อ backend จริง)";
+    }
+    if (window.showToast) {
+      window.showToast(label + " — mock action", "ok");
+    }
+  }
+
+  document.querySelectorAll("[data-pm2-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var action = btn.dataset.pm2Action;
+      var target = btn.dataset.pm2Target;
+      var label = target ? (action + " · " + target) : action;
+
+      if (btn.dataset.pm2Confirm) {
+        window.showConfirm({
+          title: btn.dataset.pm2Confirm,
+          body: btn.dataset.pm2ConfirmBody || "",
+          okLabel: "ยืนยัน",
+          onOk: function () { runMockAction(label); }
+        });
+      } else {
+        runMockAction(label);
+      }
+    });
+  });
+
+  /* ── Confirm Modal (มาตรฐาน VAS — ห้ามใช้ window.confirm()) ── */
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) {
+      Array.from(btnOk.childNodes).reverse().forEach(function (n) {
+        if (n.nodeType === 3 && n.textContent.trim()) { n.textContent = " " + opts.okLabel; }
+      });
+    }
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
+
+  /* ── SPA cleanup ── */
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () { clearInterval(monitorTimer); });
+
+})();
+</script>
+{% endblock %}

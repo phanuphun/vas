@@ -1,0 +1,1021 @@
+{% extends base_template %}
+{% block header_title %}Docker{% endblock %}
+
+
+{% block content %}
+<style>
+  .tab-panel { display: none; }
+  .tab-panel.is-active { display: flex; flex-direction: column; animation: tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .bar-track { height: 6px; border-radius: 9999px; background: rgb(var(--c-line)/0.08); overflow: hidden; }
+  .bar-fill  { height: 100%; border-radius: 9999px; }
+
+  .msg { font-size: 0.82rem; min-height: 1.2rem; }
+  .msg-ok    { color: #0f766e; }
+  .msg-error { color: #b1453a; }
+
+#confirm-modal { display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; }
+  #confirm-modal.is-open { display: flex; }
+  #confirm-backdrop { position: absolute; inset: 0; background: rgb(var(--c-ink) / 0.35); backdrop-filter: blur(2px); }
+  #confirm-box { position: relative; background: rgb(var(--c-card)); border: 1px solid rgb(var(--c-line) / 0.12); border-radius: 1rem; box-shadow: 0 8px 32px rgb(0 0 0 / 0.12); width: 100%; max-width: 400px; margin: 1rem; padding: 1.5rem; animation: fadeUp 0.18s ease forwards; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── 1. PAGE HEADER ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · โปรแกรมเพิ่มเติม</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">Docker</h1>
+    <p class="text-[0.82rem] text-muted mt-1">จัดการ Docker Engine, Containers, Images, Networks, Volumes, Compose และ Swarm Cluster</p>
+    {% if is_mock %}
+    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-bold bg-caution/10 text-[#92660b] border border-caution/25 mt-2">
+      <iconify-icon icon="lucide:pencil-ruler" width="10" height="10"></iconify-icon>
+      Mock data — ยังไม่เชื่อมต่อ Docker Engine จริง
+    </span>
+    {% endif %}
+  </div>
+
+  <!-- ── 2. TAB NAV ── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    {% set dk_tabs = [
+      ("status",     "lucide:layout-dashboard", "สถานะ"),
+      ("containers", "lucide:box",              "Containers"),
+      ("images",     "lucide:layers",           "Images"),
+      ("networks",   "lucide:network",          "Networks"),
+      ("volumes",    "lucide:database",         "Volumes"),
+      ("compose",    "lucide:file-code",        "Compose"),
+      ("swarm",      "lucide:share-2",          "Swarm"),
+      ("settings",   "lucide:settings",         "ตั้งค่า"),
+    ] %}
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      {% for tid, icon, label in dk_tabs %}
+      <button type="button" data-tab="{{ tid }}" onclick="dkTab('{{ tid }}')"
+              class="dk-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+        <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>{{ label }}</span>
+      </button>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <!-- ── 3. CONTENT ── -->
+  <div>
+
+    <!-- ════════ TAB: สถานะ ════════ -->
+    <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Daemon:</span>
+          <span class="text-[0.78rem] font-semibold {{ 'text-safe' if docker.daemon_running else 'text-danger' }}">
+            {{ 'running' if docker.daemon_running else 'ไม่ทำงาน' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:tag" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Version:</span>
+          <span class="text-[0.78rem] font-semibold text-ink">{{ docker.version or '—' }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:share-2" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Swarm:</span>
+          <span class="text-[0.78rem] font-semibold {{ 'text-safe' if swarm.active else 'text-muted' }}">
+            {{ 'active (' + swarm.role + ')' if swarm.active else 'inactive' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:box" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Containers:</span>
+          <span class="text-[0.78rem] font-semibold text-ink">{{ docker.containers_running }} running / {{ docker.containers_total }} total</span>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:info" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ข้อมูล Docker Engine</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Server Version</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.version or '—' }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">API Version</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.api_version or '—' }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">OS / Arch</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.os_arch or '—' }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Kernel</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.kernel or '—' }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Storage Driver</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.storage_driver or '—' }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Logging Driver</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.logging_driver or '—' }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Cgroup Driver</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.cgroup_driver or '—' }}</span>
+          </div>
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-36 min-w-[9rem] pt-0.5 flex-shrink-0">Root Dir</span>
+            <span class="text-[0.82rem] text-ink font-mono">{{ docker.root_dir or '—' }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:gauge" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">การใช้ทรัพยากร (Docker Root)</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-4">
+          {% for label, stat, color in [
+            ('Images (' ~ (docker.disk.images.count or 0) ~ ' รายการ)', docker.disk.images, 'bg-accent'),
+            ('Containers (' ~ (docker.disk.containers.count or 0) ~ ' รายการ)', docker.disk.containers, 'bg-safe'),
+            ('Volumes (' ~ (docker.disk.volumes.count or 0) ~ ' รายการ)', docker.disk.volumes, 'bg-caution'),
+          ] %}
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-[0.75rem] font-medium text-muted">{{ label }}</span>
+              <span class="text-[0.75rem] font-semibold text-ink">{{ stat.size }}</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill {{ color }}" style="width:{{ stat.pct }}%"></div></div>
+          </div>
+          {% endfor %}
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-[0.75rem] font-medium text-muted">Build Cache</span>
+              <span class="text-[0.75rem] font-semibold text-ink">{{ docker.disk.build_cache.size }}</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill" style="width:{{ docker.disk.build_cache.pct }}%; background: rgb(var(--c-muted)/0.4);"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">การดำเนินการด่วน</h2>
+        </div>
+        <div class="p-4 flex flex-wrap gap-2">
+          <button type="button" data-dk-action="restart-daemon"
+                  class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Restart Daemon
+          </button>
+          <button type="button" data-dk-action="daemon-logs"
+                  class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:file-text" width="13" height="13"></iconify-icon>ดู Daemon Logs
+          </button>
+          <button type="button" data-dk-action="system-prune" data-dk-confirm="ลบของไม่ใช้ทั้งหมดใน Docker?" data-dk-confirm-body="Container, Image, Network และ Build Cache ที่ไม่ได้ใช้งานจะถูกลบถาวร"
+                  class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+            <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>System Prune (ลบของไม่ใช้ทั้งหมด)
+          </button>
+        </div>
+        <div class="msg px-4 pb-4" id="statusResult" aria-live="polite"></div>
+      </div>
+
+    </div><!-- /tab-status -->
+
+
+    <!-- ════════ TAB: Containers ════════ -->
+    <div id="tab-containers" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-3 flex flex-wrap items-center gap-2">
+        <div class="relative flex-1 min-w-[180px]">
+          <iconify-icon icon="lucide:search" width="14" height="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-faint"></iconify-icon>
+          <input type="text" id="containerSearch" placeholder="ค้นหาชื่อ container / image..."
+                 class="w-full pl-9 pr-3 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition placeholder:text-faint">
+        </div>
+        <button type="button" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+          <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>New Container
+        </button>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        {% for c in containers %}
+        <div class="container-row border-b border-line/7 last:border-b-0" data-name="{{ c.name | lower }}" data-image="{{ c.image | lower }}">
+          <button type="button" onclick="toggleRow('c{{ loop.index }}')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5
+                        {{ 'bg-safe/8 border border-safe/20' if c.state == 'running' else ('bg-caution/10 border border-caution/25' if c.state == 'restarting' else 'bg-surface border border-line/10') }}">
+              <iconify-icon icon="{{ 'lucide:rotate-cw' if c.state == 'restarting' else 'lucide:box' }}" width="16" height="16"
+                            class="{{ 'text-safe' if c.state == 'running' else ('text-[#92660b]' if c.state == 'restarting' else 'text-faint') }}"></iconify-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[0.88rem] text-ink font-display">{{ c.name }}</span>
+                <span class="zone {{ 'zone-safe' if c.state == 'running' else ('zone-caution' if c.state == 'restarting' else 'zone-mute') }}">{{ c.status_label }}</span>
+              </div>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ c.image }} · {{ c.uptime }}</code>
+              {% if c.state == 'running' %}
+              <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[0.72rem] text-muted">
+                <span><iconify-icon icon="lucide:cpu" width="10" height="10" class="inline mr-0.5"></iconify-icon>CPU {{ c.cpu_pct }}%</span>
+                <span><iconify-icon icon="lucide:memory-stick" width="10" height="10" class="inline mr-0.5"></iconify-icon>Mem {{ c.mem_used }} / {{ c.mem_limit }}</span>
+                {% if c.ports %}<span><iconify-icon icon="lucide:ethernet-port" width="10" height="10" class="inline mr-0.5"></iconify-icon>{{ c.ports }}</span>{% endif %}
+              </div>
+              {% endif %}
+            </div>
+            <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-c{{ loop.index }}"></iconify-icon>
+          </button>
+          <div id="row-c{{ loop.index }}" class="hidden border-t border-line/10 p-4 flex flex-col gap-3 bg-surface/30">
+            {% if c.state == 'restarting' %}
+            <div class="px-3 py-2.5 rounded-lg text-[0.78rem] bg-caution/8 border border-caution/25 text-[#92660b]">
+              Container กำลัง restart loop — ตรวจสอบ logs เพื่อดูสาเหตุ ({{ c.restart_count }} restarts)
+            </div>
+            {% else %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[0.75rem]">
+              <div><span class="text-muted">Container ID:</span> <span class="font-mono text-ink">{{ c.id }}</span></div>
+              <div><span class="text-muted">Restart Policy:</span> <span class="text-ink">{{ c.restart_policy }} ({{ c.restart_count }} restarts)</span></div>
+              <div><span class="text-muted">Network:</span> <span class="text-ink">{{ c.network }}</span></div>
+              <div><span class="text-muted">Volumes:</span> <span class="text-ink">{{ c.volumes or '—' }}</span></div>
+            </div>
+            {% endif %}
+            <div class="flex flex-wrap gap-1.5">
+              {% if c.state == 'exited' %}
+              <button type="button" data-dk-action="start" data-dk-target="{{ c.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:play" width="11" height="11"></iconify-icon>Start</button>
+              {% else %}
+              <button type="button" data-dk-action="stop" data-dk-target="{{ c.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:square" width="11" height="11"></iconify-icon>Stop</button>
+              <button type="button" data-dk-action="restart" data-dk-target="{{ c.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Restart</button>
+              <button type="button" data-dk-action="exec" data-dk-target="{{ c.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:terminal" width="11" height="11"></iconify-icon>Exec Shell</button>
+              {% endif %}
+              <button type="button" data-dk-action="logs" data-dk-target="{{ c.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:file-text" width="11" height="11"></iconify-icon>Logs</button>
+              <button type="button" data-dk-action="remove-container" data-dk-target="{{ c.name }}" data-dk-confirm="ลบ container {{ c.name }}?" data-dk-confirm-body="Container จะถูกลบถาวร ข้อมูลที่ไม่ได้อยู่ใน volume จะหายไป" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="flex flex-col items-center gap-2 px-4 py-8 text-center">
+          <iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>
+          <p class="text-muted text-[0.82rem]">ยังไม่มี container</p>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div id="containerLogsPanel" class="hidden bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 bg-surface/40">
+          <span id="containerLogsTitle" class="text-[0.75rem] font-semibold text-muted font-mono">Logs</span>
+          <button type="button" onclick="document.getElementById('containerLogsPanel').classList.add('hidden')"
+                  class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">ปิด</button>
+        </div>
+        <pre id="containerLogsContent" class="p-4 text-[0.72rem] font-mono text-ink whitespace-pre-wrap max-h-[360px] overflow-y-auto"></pre>
+      </div>
+    </div><!-- /tab-containers -->
+
+
+    <!-- ════════ TAB: Images ════════ -->
+    <div id="tab-images" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col sm:flex-row gap-2">
+        <input type="text" id="pullImageInput" placeholder="เช่น nginx:latest หรือ registry.internal/app:1.2.0"
+               class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition placeholder:text-faint font-mono">
+        <button type="button" data-dk-action="pull-image" class="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+          <iconify-icon icon="lucide:download" width="13" height="13"></iconify-icon>Pull Image
+        </button>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/10 flex items-center justify-between">
+          <h2 class="text-[0.88rem] font-semibold text-ink">Images ในเครื่อง ({{ images | length }})</h2>
+          <button type="button" data-dk-action="prune-images" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:sparkles" width="11" height="11"></iconify-icon>Prune Dangling ({{ images | selectattr('dangling') | list | length }})
+          </button>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for img in images %}
+          <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-mono text-[0.82rem] {{ 'text-ink' if img.repo != '<none>' else 'text-faint' }}">{{ img.repo }}</span>
+                <span class="text-[0.72rem] text-faint">:{{ img.tag }}</span>
+                <span class="zone {{ 'zone-safe' if img.used else ('zone-caution' if img.dangling else 'zone-mute') }}">
+                  {{ 'USED' if img.used else ('DANGLING' if img.dangling else 'UNUSED') }}
+                </span>
+              </div>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5">{{ img.id }} · {{ img.size }} · pulled {{ img.created }}</code>
+            </div>
+            <button type="button" data-dk-action="remove-image" data-dk-target="{{ img.repo }}:{{ img.tag }}" data-dk-confirm="ลบ image {{ img.repo }}:{{ img.tag }}?" data-dk-confirm-body="Image จะถูกลบถาวรจากเครื่องนี้" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="11" height="11"></iconify-icon>Remove</button>
+          </div>
+          {% else %}
+          <div class="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>
+            <p class="text-muted text-[0.82rem]">ยังไม่มี image</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div><!-- /tab-images -->
+
+
+    <!-- ════════ TAB: Networks ════════ -->
+    <div id="tab-networks" class="tab-panel flex flex-col gap-4">
+      <div class="flex justify-end">
+        <button type="button" data-dk-action="create-network" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+          <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>Create Network
+        </button>
+      </div>
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="divide-y divide-line/7">
+          {% for net in networks %}
+          <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+            <iconify-icon icon="lucide:network" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[0.85rem] text-ink font-display">{{ net.name }}</span>
+                <span class="zone {{ 'zone-safe' if net.driver == 'overlay' else 'zone-info' if net.driver == 'bridge' and net.name != 'bridge' else 'zone-mute' }}">{{ net.driver }}</span>
+                {% if net.attachable %}<span class="zone zone-mute">attachable</span>{% endif %}
+              </div>
+              <span class="text-[0.72rem] text-muted">{{ net.detail }}</span>
+            </div>
+            <span class="text-[0.72rem] text-faint flex-shrink-0">{{ net.scope }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div><!-- /tab-networks -->
+
+
+    <!-- ════════ TAB: Volumes ════════ -->
+    <div id="tab-volumes" class="tab-panel flex flex-col gap-4">
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" data-dk-action="prune-volumes" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+          <iconify-icon icon="lucide:sparkles" width="12" height="12"></iconify-icon>Prune Unused
+        </button>
+        <button type="button" data-dk-action="create-volume" class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+          <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>Create Volume
+        </button>
+      </div>
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="divide-y divide-line/7">
+          {% for vol in volumes %}
+          <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+            <iconify-icon icon="lucide:database" width="15" height="15" class="text-muted flex-shrink-0"></iconify-icon>
+            <div class="flex-1 min-w-0">
+              <span class="font-semibold text-[0.85rem] text-ink font-mono">{{ vol.name }}</span>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ vol.mountpoint }}</code>
+            </div>
+            <span class="zone {{ 'zone-safe' if vol.used_by else 'zone-mute' }}">{{ 'USED · ' ~ vol.used_by if vol.used_by else 'UNUSED' }}</span>
+            <span class="text-[0.72rem] text-muted flex-shrink-0">{{ vol.size }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div><!-- /tab-volumes -->
+
+
+    <!-- ════════ TAB: Compose ════════ -->
+    <div id="tab-compose" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+        <p class="text-[0.82rem] text-muted leading-relaxed">
+          จัดการ project ที่ deploy ด้วย <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">docker compose</code> —
+          แก้ไขไฟล์ <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded font-mono">compose.yaml</code> แล้วสั่ง up/down ได้จากหน้านี้
+        </p>
+      </div>
+
+      {% for proj in compose_projects %}
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-compose{{ loop.index }}">
+        <button type="button" onclick="toggleCfg('compose{{ loop.index }}')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+          <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+            <iconify-icon icon="lucide:file-code" width="16" height="16" class="text-muted"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-[0.88rem] text-ink font-display">{{ proj.name }}</span>
+              <span class="zone {{ 'zone-safe' if proj.up else 'zone-mute' }}">{{ 'UP · ' ~ proj.services_running ~ '/' ~ proj.services_total ~ ' services' if proj.up else 'DOWN' }}</span>
+            </div>
+            <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ proj.path }}</code>
+          </div>
+          <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-compose{{ loop.index }}"></iconify-icon>
+        </button>
+        <div id="cfg-viewer-compose{{ loop.index }}" class="hidden border-t border-line/10">
+          <div class="flex items-center justify-between px-4 py-3 bg-surface/40 flex-wrap gap-2">
+            <span class="text-[0.72rem] font-semibold text-muted">compose.yaml</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button type="button" data-dk-action="compose-up" data-dk-target="{{ proj.name }}" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:arrow-up-circle" width="11" height="11"></iconify-icon>Up</button>
+              <button type="button" data-dk-action="compose-restart" data-dk-target="{{ proj.name }}" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Restart</button>
+              <button type="button" data-dk-action="compose-down" data-dk-target="{{ proj.name }}" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:arrow-down-circle" width="11" height="11"></iconify-icon>Down</button>
+              <button type="button" data-dk-action="compose-save" data-dk-target="{{ proj.name }}" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:save" width="11" height="11"></iconify-icon>Save</button>
+            </div>
+          </div>
+          <div class="p-4">
+            <textarea id="compose-content-{{ loop.index }}" spellcheck="false" class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[220px] outline-none resize-y">{{ proj.compose_yaml }}</textarea>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="bg-card border border-line/10 rounded-xl flex flex-col items-center gap-2 px-4 py-8 text-center">
+        <iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>
+        <p class="text-muted text-[0.82rem]">ยังไม่มี compose project</p>
+      </div>
+      {% endfor %}
+
+    </div><!-- /tab-compose -->
+
+
+    <!-- ════════ TAB: Swarm ════════ -->
+    <div id="tab-swarm" class="tab-panel flex flex-col gap-4">
+
+      {% if swarm.active %}
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:share-2" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Swarm:</span>
+          <span class="text-[0.78rem] font-semibold text-safe">active</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:crown" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">บทบาทเครื่องนี้:</span>
+          <span class="text-[0.78rem] font-semibold text-ink">{{ 'Manager (Leader)' if swarm.is_leader else swarm.role | title }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:server" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Nodes:</span>
+          <span class="text-[0.78rem] font-semibold text-ink">{{ swarm.nodes | length }} ({{ swarm.nodes | selectattr('role', 'equalto', 'manager') | list | length }} manager / {{ swarm.nodes | selectattr('role', 'equalto', 'worker') | list | length }} workers)</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:hash" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Cluster ID:</span>
+          <code class="text-[0.75rem] font-mono text-ink">{{ swarm.cluster_id }}</code>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:key-round" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Join Tokens</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-3">
+          <div class="flex flex-col gap-1.5">
+            <span class="text-[0.75rem] font-semibold text-muted">Worker Token</span>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-[0.72rem] font-mono text-ink truncate">docker swarm join --token {{ swarm.worker_token }} {{ swarm.advertise_addr }}</code>
+              <button type="button" data-dk-copy="docker swarm join --token {{ swarm.worker_token }} {{ swarm.advertise_addr }}" class="inline-flex items-center gap-1 px-2.5 py-2 border border-line/15 rounded-lg bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors flex-shrink-0"><iconify-icon icon="lucide:copy" width="12" height="12"></iconify-icon>Copy</button>
+            </div>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <span class="text-[0.75rem] font-semibold text-muted">Manager Token</span>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 px-3 py-2 border border-line/15 rounded-lg bg-surface text-[0.72rem] font-mono text-ink truncate">docker swarm join --token {{ swarm.manager_token }} {{ swarm.advertise_addr }}</code>
+              <button type="button" data-dk-copy="docker swarm join --token {{ swarm.manager_token }} {{ swarm.advertise_addr }}" class="inline-flex items-center gap-1 px-2.5 py-2 border border-line/15 rounded-lg bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors flex-shrink-0"><iconify-icon icon="lucide:copy" width="12" height="12"></iconify-icon>Copy</button>
+            </div>
+          </div>
+          <div class="flex justify-end">
+            <button type="button" data-dk-action="rotate-tokens" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="12" height="12"></iconify-icon>Rotate Tokens</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:server-cog" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Cluster Nodes</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for node in swarm.nodes %}
+          <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+            <iconify-icon icon="{{ 'lucide:crown' if node.leader else ('lucide:server-cog' if node.role == 'manager' else 'lucide:server') }}" width="14" height="14" class="{{ 'text-caution' if node.leader else 'text-muted' }} flex-shrink-0"></iconify-icon>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[0.85rem] text-ink font-display">{{ node.hostname }}</span>
+                <span class="zone {{ 'zone-info' if node.role == 'manager' else 'zone-mute' }}">{{ 'Manager · Leader' if node.leader else node.role | title }}</span>
+                <span class="zone {{ 'zone-safe' if node.status == 'Ready' else 'zone-caution' }}">{{ node.status }}</span>
+                <span class="zone {{ 'zone-safe' if node.availability == 'Active' else 'zone-mute' }}">{{ node.availability }}</span>
+              </div>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5">{{ node.address }} · Engine {{ node.engine_version }}{{ ' · ' ~ node.note if node.note else '' }}</code>
+            </div>
+            {% if node.is_self %}
+            <span class="text-[0.72rem] text-faint flex-shrink-0">เครื่องนี้</span>
+            {% else %}
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              {% if node.role != 'manager' %}
+              <button type="button" data-dk-action="promote-node" data-dk-target="{{ node.hostname }}" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Promote</button>
+              {% endif %}
+              {% if node.status == 'Ready' %}
+              <button type="button" data-dk-action="drain-node" data-dk-target="{{ node.hostname }}" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Drain</button>
+              {% else %}
+              <button type="button" data-dk-action="remove-node" data-dk-target="{{ node.hostname }}" data-dk-confirm="ลบ node {{ node.hostname }} ออกจาก cluster?" class="inline-flex items-center gap-1 px-2 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.7rem] font-semibold hover:bg-danger/5 transition-colors">Remove</button>
+              {% endif %}
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        <div class="px-4 py-3 border-t border-line/10">
+          <button type="button" data-dk-action="show-join-cmd" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line/15 rounded-md bg-card text-[0.75rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:plus" width="12" height="12"></iconify-icon>ดูคำสั่ง Join Node ใหม่</button>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <iconify-icon icon="lucide:layers-3" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+            <h2 class="text-[0.88rem] font-semibold text-ink">Services</h2>
+          </div>
+          <button type="button" data-dk-action="create-service" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-accent/40 rounded-md bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:plus" width="12" height="12"></iconify-icon>Create Service</button>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for svc in swarm.services %}
+          <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[0.85rem] text-ink font-display">{{ svc.name }}</span>
+                <span class="zone {{ 'zone-safe' if svc.replicas_running == svc.replicas_desired else 'zone-caution' }} {{ 'zone-info' if svc.mode == 'global' else '' }}">{{ svc.mode }} · {{ svc.replicas_running }}/{{ svc.replicas_desired }}</span>
+              </div>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5">{{ svc.image }} · {{ svc.ports or 'ไม่เปิด port' }}</code>
+            </div>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <button type="button" data-dk-action="scale-service" data-dk-target="{{ svc.name }}" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Scale</button>
+              <button type="button" data-dk-action="update-service" data-dk-target="{{ svc.name }}" class="inline-flex items-center gap-1 px-2 py-1 border border-line/15 rounded-md bg-card text-[0.7rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">Update</button>
+            </div>
+          </div>
+          {% else %}
+          <div class="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>
+            <p class="text-muted text-[0.82rem]">ยังไม่มี service</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:layers" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">Stacks (deployed via docker stack)</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for stack in swarm.stacks %}
+          <div class="flex items-center gap-3 px-4 py-3 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <span class="font-semibold text-[0.85rem] text-ink font-display">{{ stack.name }}</span>
+              <span class="text-[0.72rem] text-muted ml-2">{{ stack.services_count }} services · deploy จาก {{ stack.path }}</span>
+            </div>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <button type="button" data-dk-action="redeploy-stack" data-dk-target="{{ stack.name }}" class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"><iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Redeploy</button>
+              <button type="button" data-dk-action="remove-stack" data-dk-target="{{ stack.name }}" data-dk-confirm="ลบ stack {{ stack.name }}?" data-dk-confirm-body="Service ทั้งหมดใน stack นี้จะถูกลบออกจาก cluster" class="inline-flex items-center gap-1 px-2.5 py-1 border border-danger/25 rounded-md bg-card text-danger text-[0.72rem] font-semibold hover:bg-danger/5 transition-colors"><iconify-icon icon="lucide:x-circle" width="11" height="11"></iconify-icon>Remove Stack</button>
+            </div>
+          </div>
+          {% else %}
+          <div class="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <iconify-icon icon="lucide:inbox" width="28" height="28" class="text-faint"></iconify-icon>
+            <p class="text-muted text-[0.82rem]">ยังไม่มี stack</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="bg-card border border-danger/20 rounded-xl">
+        <div class="px-4 py-4 border-b border-danger/15 flex items-center gap-2">
+          <iconify-icon icon="lucide:triangle-alert" width="15" height="15" class="text-danger flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-danger">Danger Zone</h2>
+        </div>
+        <div class="p-4 flex items-center justify-between gap-3 flex-wrap">
+          <p class="text-[0.78rem] text-muted">ให้เครื่องนี้ออกจาก Swarm cluster — services ที่รันอยู่บนเครื่องนี้จะถูกย้ายออก</p>
+          <button type="button" data-dk-action="leave-swarm" data-dk-confirm="ออกจาก Swarm cluster?" data-dk-confirm-body="เครื่องนี้จะออกจาก cluster ทันที services ที่รันอยู่จะถูกย้ายไป node อื่น"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:log-out" width="13" height="13"></iconify-icon>Leave Swarm</button>
+        </div>
+      </div>
+
+      {% else %}
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-8 flex flex-col items-center gap-3 text-center">
+        <div class="w-12 h-12 rounded-full bg-surface border border-line/10 flex items-center justify-center">
+          <iconify-icon icon="lucide:share-2" width="20" height="20" class="text-faint"></iconify-icon>
+        </div>
+        <div>
+          <h2 class="text-[0.95rem] font-semibold text-ink">Swarm ยังไม่เปิดใช้งาน</h2>
+          <p class="text-[0.8rem] text-muted mt-1 max-w-md">เปิด Swarm mode เพื่อรวมหลายเครื่องเป็น cluster และ deploy service/stack แบบ high-availability</p>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 mt-2">
+          <button type="button" data-dk-action="init-swarm" class="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+            <iconify-icon icon="lucide:play-circle" width="14" height="14"></iconify-icon>Initialize Swarm
+          </button>
+          <button type="button" data-dk-action="join-swarm" class="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+            <iconify-icon icon="lucide:link" width="14" height="14"></iconify-icon>Join Existing Swarm
+          </button>
+        </div>
+      </div>
+      {% endif %}
+
+    </div><!-- /tab-swarm -->
+
+
+    <!-- ════════ TAB: ตั้งค่า ════════ -->
+    <div id="tab-settings" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-daemon">
+        <button type="button" onclick="toggleCfg('daemon')" class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+          <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+            <iconify-icon icon="lucide:file-json" width="16" height="16" class="text-muted"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-[0.88rem] text-ink font-display">daemon.json</span>
+              <span class="zone {{ 'zone-safe' if daemon_json_exists else 'zone-caution' }}">{{ 'OK' if daemon_json_exists else 'MISSING' }}</span>
+            </div>
+            <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">/etc/docker/daemon.json</code>
+            <p class="text-[0.73rem] text-muted mt-1 leading-snug">ตั้งค่า storage driver, log rotation, registry mirrors, insecure registries</p>
+          </div>
+          <iconify-icon icon="lucide:chevron-down" width="15" height="15" class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-daemon"></iconify-icon>
+        </button>
+        <div id="cfg-viewer-daemon" class="hidden border-t border-line/10">
+          <div class="flex items-center justify-between px-4 py-3 bg-surface/40 flex-wrap gap-2">
+            <span class="text-[0.72rem] font-semibold text-muted">แก้ไข Config</span>
+            <button type="button" data-dk-action="save-daemon-json" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-accent/40 rounded-md bg-accent text-white text-[0.72rem] font-semibold hover:bg-blue-700 transition-colors"><iconify-icon icon="lucide:save" width="11" height="11"></iconify-icon>Save &amp; Restart Daemon</button>
+          </div>
+          <div class="p-4">
+            <textarea id="daemonJsonContent" spellcheck="false" class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[200px] outline-none resize-y">{{ daemon_json_content }}</textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:sliders-horizontal" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ค่าเริ่มต้นของระบบ</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          {% for label, desc, on, note in daemon_flags %}
+          <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+            <div>
+              <span class="text-[0.82rem] text-ink font-medium">{{ label }}</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">{{ desc }}</p>
+            </div>
+            <span class="zone {{ 'zone-safe' if on else ('zone-caution' if note else 'zone-mute') }}">{{ note or (('enabled' if on else 'disabled')) }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="bg-card border border-danger/20 rounded-xl">
+        <div class="px-4 py-4 border-b border-danger/15 flex items-center gap-2">
+          <iconify-icon icon="lucide:triangle-alert" width="15" height="15" class="text-danger flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-danger">Danger Zone</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+          <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+            <p class="text-[0.78rem] text-muted">ลบ container, image, network, build cache ที่ไม่ได้ใช้งานทั้งหมด</p>
+            <button type="button" data-dk-action="system-prune" data-dk-confirm="System Prune ทั้งหมด?" data-dk-confirm-body="Container, Image, Network และ Build Cache ที่ไม่ได้ใช้งานจะถูกลบถาวร" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>System Prune (All)</button>
+          </div>
+          <div class="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
+            <p class="text-[0.78rem] text-muted">ถอนการติดตั้ง Docker Engine ออกจากเครื่องนี้ทั้งหมด</p>
+            <button type="button" data-dk-action="uninstall-docker" data-dk-confirm="ถอนการติดตั้ง Docker?" data-dk-confirm-body="Container, Image, Volume และการตั้งค่าทั้งหมดจะถูกลบออกจากเครื่องนี้ถาวร ไม่สามารถกู้คืนได้" class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors flex-shrink-0"><iconify-icon icon="lucide:power-off" width="13" height="13"></iconify-icon>Uninstall Docker</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tab-settings -->
+
+  </div><!-- /content -->
+
+</div><!-- /root -->
+
+<!-- ── Confirm Modal ── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">ยกเลิก</button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        ลบ
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var IS_MOCK = {{ 'true' if is_mock else 'false' }};
+  var statusResultEl = document.getElementById("statusResult");
+
+  /* ── Tab switching ── */
+  window.dkTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
+    document.querySelectorAll(".dk-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent\/8", on);
+      btn.classList.toggle("text-accent", on);
+      btn.classList.toggle("font-semibold", on);
+      btn.classList.toggle("text-muted", !on);
+    });
+  };
+
+  /* ── Accordion toggles (container rows, compose/daemon config viewers) ── */
+  window.toggleRow = function (key) {
+    var row  = document.getElementById("row-" + key);
+    var chev = document.getElementById("chevron-" + key);
+    if (!row) return;
+    var nowHidden = row.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+  };
+
+  window.toggleCfg = function (key) {
+    var viewer = document.getElementById("cfg-viewer-" + key);
+    var chev   = document.getElementById("chevron-" + key);
+    if (!viewer) return;
+    var nowHidden = viewer.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+  };
+
+  /* ── Container search filter ── */
+  var searchInput = document.getElementById("containerSearch");
+  if (searchInput) {
+    searchInput.addEventListener("input", function () {
+      var q = searchInput.value.trim().toLowerCase();
+      document.querySelectorAll(".container-row").forEach(function (row) {
+        var match = !q || row.dataset.name.indexOf(q) !== -1 || row.dataset.image.indexOf(q) !== -1;
+        row.style.display = match ? "" : "none";
+      });
+    });
+  }
+
+  /* ── Copy-to-clipboard (join tokens) ── */
+  document.querySelectorAll("[data-dk-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = btn.dataset.dkCopy;
+      if (navigator.clipboard) { navigator.clipboard.writeText(text).catch(function () {}); }
+      var original = btn.innerHTML;
+      btn.textContent = "Copied";
+      setTimeout(function () { btn.innerHTML = original; }, 1200);
+    });
+  });
+
+  /* ── Action buttons — เรียก API จริงใน server.py (/api/docker/...) ── */
+  function postJson(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok || d.status === "error") throw new Error((d.errors || ["Request failed"]).join(" "));
+        return d;
+      });
+    });
+  }
+
+  function deleteJson(url) {
+    return fetch(url, { method: "DELETE" }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok || d.status === "error") throw new Error((d.errors || ["Request failed"]).join(" "));
+        return d;
+      });
+    });
+  }
+
+  function showMsg(text, kind) {
+    if (statusResultEl) {
+      statusResultEl.className = "msg " + (kind === "error" ? "msg-error" : "msg-ok");
+      statusResultEl.textContent = text;
+    }
+    if (window.showToast) window.showToast(text, kind === "error" ? "error" : "ok");
+  }
+
+  function reloadSoon() {
+    setTimeout(function () { location.reload(); }, 900);
+  }
+
+  var UNSUPPORTED = "ยังไม่รองรับผ่านหน้าเว็บ — กรุณาใช้คำสั่งผ่าน terminal โดยตรง";
+
+  function showLogs(name, text) {
+    var panel = document.getElementById("containerLogsPanel");
+    var title = document.getElementById("containerLogsTitle");
+    var content = document.getElementById("containerLogsContent");
+    if (!panel || !content) { showMsg(text || "(ไม่มี log)", "ok"); return; }
+    if (title) title.textContent = "Logs · " + name;
+    content.textContent = text || "(ไม่มี log)";
+    panel.classList.remove("hidden");
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function containerAction(name, action) {
+    return postJson("/api/docker/containers/" + encodeURIComponent(name) + "/action", { action: action })
+      .then(function () { showMsg(action + " " + name + " สำเร็จ", "ok"); reloadSoon(); });
+  }
+
+  function composeAction(name, action) {
+    return postJson("/api/docker/compose/" + encodeURIComponent(name) + "/action", { action: action })
+      .then(function () { showMsg("compose " + action + " (" + name + ") สำเร็จ", "ok"); reloadSoon(); });
+  }
+
+  var ACTIONS = {
+    "restart-daemon": function () {
+      return postJson("/api/docker/daemon/restart", {}).then(function () { showMsg("Restart daemon สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "daemon-logs": function () {
+      showMsg("ดู daemon log โดยตรงบนเครื่อง: journalctl -u docker -n 200 --no-pager", "ok");
+      return Promise.resolve();
+    },
+    "system-prune": function () {
+      return postJson("/api/docker/system-prune", {}).then(function () { showMsg("System prune สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "start":   function (btn, target) { return containerAction(target, "start"); },
+    "stop":    function (btn, target) { return containerAction(target, "stop"); },
+    "restart": function (btn, target) { return containerAction(target, "restart"); },
+    "pause":   function (btn, target) { return containerAction(target, "pause"); },
+    "unpause": function (btn, target) { return containerAction(target, "unpause"); },
+    "exec": function () { showMsg(UNSUPPORTED + " (docker exec -it <container> sh)", "error"); return Promise.resolve(); },
+    "logs": function (btn, target) {
+      return fetch("/api/docker/containers/" + encodeURIComponent(target) + "/logs")
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (x) {
+          if (!x.ok || x.d.status === "error") { showMsg((x.d.errors || ["โหลด log ไม่สำเร็จ"]).join(" "), "error"); return; }
+          showLogs(target, x.d.logs);
+        });
+    },
+    "remove-container": function (btn, target) {
+      return postJson("/api/docker/containers/" + encodeURIComponent(target) + "/remove", {})
+        .then(function () { showMsg("ลบ container " + target + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "pull-image": function () {
+      var input = document.getElementById("pullImageInput");
+      var ref = input ? input.value.trim() : "";
+      if (!ref) { showMsg("กรุณาระบุ image", "error"); return Promise.resolve(); }
+      return postJson("/api/docker/images/pull", { ref: ref }).then(function () { showMsg("Pull " + ref + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "remove-image": function (btn, target) {
+      return postJson("/api/docker/images/remove", { ref: target }).then(function () { showMsg("ลบ image " + target + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "prune-images": function () {
+      return postJson("/api/docker/images/prune", {}).then(function () { showMsg("Prune images สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "create-network": function () {
+      var name = window.prompt("ชื่อ network ใหม่:");
+      if (!name) return Promise.resolve();
+      var driver = window.prompt("Driver (bridge / overlay):", "bridge") || "bridge";
+      return postJson("/api/docker/networks", { name: name, driver: driver }).then(function () { showMsg("สร้าง network " + name + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "prune-volumes": function () {
+      return postJson("/api/docker/volumes/prune", {}).then(function () { showMsg("Prune volumes สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "create-volume": function () {
+      var name = window.prompt("ชื่อ volume ใหม่:");
+      if (!name) return Promise.resolve();
+      return postJson("/api/docker/volumes", { name: name }).then(function () { showMsg("สร้าง volume " + name + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "compose-up":      function (btn, target) { return composeAction(target, "up"); },
+    "compose-restart": function (btn, target) { return composeAction(target, "restart"); },
+    "compose-down":    function (btn, target) { return composeAction(target, "down"); },
+    "compose-save": function (btn, target) {
+      var card = btn.closest('[id^="cfg-viewer-compose"]');
+      var textarea = card ? card.querySelector("textarea") : null;
+      var content = textarea ? textarea.value : "";
+      return postJson("/api/docker/compose/" + encodeURIComponent(target) + "/save", { content: content })
+        .then(function () { showMsg("บันทึก compose.yaml (" + target + ") สำเร็จ", "ok"); });
+    },
+    "rotate-tokens": function () {
+      return postJson("/api/docker/swarm/rotate-tokens", {}).then(function () { showMsg("Rotate join tokens สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "promote-node": function (btn, target) {
+      return postJson("/api/docker/swarm/nodes/" + encodeURIComponent(target) + "/promote", {}).then(function () { showMsg("Promote " + target + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "drain-node": function (btn, target) {
+      return postJson("/api/docker/swarm/nodes/" + encodeURIComponent(target) + "/availability", { availability: "drain" }).then(function () { showMsg("Drain " + target + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "remove-node": function (btn, target) {
+      return deleteJson("/api/docker/swarm/nodes/" + encodeURIComponent(target)).then(function () { showMsg("ลบ node " + target + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "show-join-cmd": function () {
+      var el = document.querySelector('[data-dk-copy^="docker swarm join"]');
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      return Promise.resolve();
+    },
+    "create-service": function () {
+      showMsg(UNSUPPORTED + " (Create Service ต้องระบุ image/ports/replicas — ใช้ docker service create ผ่าน terminal)", "error");
+      return Promise.resolve();
+    },
+    "scale-service": function (btn, target) {
+      var replicas = window.prompt("จำนวน replicas สำหรับ " + target + ":", "1");
+      if (replicas === null) return Promise.resolve();
+      var n = parseInt(replicas, 10);
+      if (isNaN(n) || n < 0) { showMsg("จำนวน replicas ไม่ถูกต้อง", "error"); return Promise.resolve(); }
+      return postJson("/api/docker/swarm/services/" + encodeURIComponent(target) + "/scale", { replicas: n })
+        .then(function () { showMsg("Scale " + target + " เป็น " + n + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "update-service": function () { showMsg(UNSUPPORTED, "error"); return Promise.resolve(); },
+    "redeploy-stack": function (btn, target) {
+      return postJson("/api/docker/swarm/stacks/" + encodeURIComponent(target) + "/redeploy", {}).then(function () { showMsg("Redeploy stack " + target + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "remove-stack": function (btn, target) {
+      return deleteJson("/api/docker/swarm/stacks/" + encodeURIComponent(target)).then(function () { showMsg("ลบ stack " + target + " สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "leave-swarm": function () {
+      return postJson("/api/docker/swarm/leave", {}).then(function () { showMsg("ออกจาก Swarm สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "init-swarm": function () {
+      var addr = window.prompt("Advertise address (IP:port) — เว้นว่างเพื่อให้ Docker เลือกอัตโนมัติ:", "");
+      return postJson("/api/docker/swarm/init", { advertise_addr: addr || "" }).then(function () { showMsg("Initialize Swarm สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "join-swarm": function () {
+      var token = window.prompt("Join token:");
+      if (!token) return Promise.resolve();
+      var addr = window.prompt("Manager address (IP:port):");
+      if (!addr) return Promise.resolve();
+      return postJson("/api/docker/swarm/join", { token: token, remote_addr: addr }).then(function () { showMsg("Join Swarm สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "save-daemon-json": function () {
+      var textarea = document.getElementById("daemonJsonContent");
+      var content = textarea ? textarea.value : "";
+      return postJson("/api/docker/daemon-json", { content: content }).then(function () { showMsg("บันทึกและ restart daemon สำเร็จ", "ok"); reloadSoon(); });
+    },
+    "uninstall-docker": function () {
+      return postJson("/api/docker/uninstall", {}).then(function () { showMsg("ถอนการติดตั้ง Docker สำเร็จ", "ok"); reloadSoon(); });
+    },
+  };
+
+  function runAction(action, target, btn) {
+    var handler = ACTIONS[action];
+    if (!handler) { showMsg("ยังไม่รองรับ action นี้", "error"); return; }
+    if (btn) btn.disabled = true;
+    Promise.resolve()
+      .then(function () { return handler(btn, target); })
+      .catch(function (e) { showMsg(e.message || "เกิดข้อผิดพลาด", "error"); })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+
+  document.querySelectorAll("[data-dk-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var action = btn.dataset.dkAction;
+      var target = btn.dataset.dkTarget;
+
+      if (btn.dataset.dkConfirm) {
+        window.showConfirm({
+          title: btn.dataset.dkConfirm,
+          body: btn.dataset.dkConfirmBody || "",
+          okLabel: "ยืนยัน",
+          onOk: function () { runAction(action, target, btn); }
+        });
+      } else {
+        runAction(action, target, btn);
+      }
+    });
+  });
+
+  /* ── Confirm Modal (มาตรฐาน VAS — ห้ามใช้ window.confirm()) ── */
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) {
+      Array.from(btnOk.childNodes).reverse().forEach(function (n) {
+        if (n.nodeType === 3 && n.textContent.trim()) { n.textContent = " " + opts.okLabel; }
+      });
+    }
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
+
+  /* ── SPA cleanup ── */
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () { /* no intervals/SSE on this page */ });
+
+})();
+</script>
+{% endblock %}
