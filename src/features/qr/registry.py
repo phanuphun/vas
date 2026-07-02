@@ -3,7 +3,10 @@ qr_device_registry.py — ลงทะเบียนอุปกรณ์ QR / 
 
 Files:
   ~/.config/vas/qr_devices.json       — list of installed device ids
-  ~/.config/vas/qr_integrations.json  — per-device integration config
+
+Integration config เก็บใน SQLite (ตาราง device_integrations) แล้ว — ไม่ใช้
+~/.config/vas/qr_integrations.json อีกต่อไป (ย้ายข้อมูลแล้วที่ migration version 2
+ดู core/database.py: _migrate_qr_integrations_json_to_device_integrations)
 """
 from __future__ import annotations
 
@@ -32,10 +35,6 @@ def _config_dir() -> Path:
 
 def _devices_path() -> Path:
     return _config_dir() / "qr_devices.json"
-
-
-def _integrations_path() -> Path:
-    return _config_dir() / "qr_integrations.json"
 
 
 # ── Installed devices ─────────────────────────────────────────────────────────
@@ -80,29 +79,27 @@ def uninstall_device(device_id: str) -> None:
         pass
 
 
-# ── Integration config ────────────────────────────────────────────────────────
+# ── Integration config (เก็บใน SQLite: device_integrations) ──────────────────
 
 
 def load_integrations(device_id: str) -> dict[str, Any]:
     """Return integration config dict for a device, keyed by type (webhook/mqtt/pipe)."""
-    path = _integrations_path()
-    if not path.exists():
-        return {}
+    from core.database import list_device_integrations
     try:
-        all_integ: dict[str, Any] = json.loads(path.read_text())
-        return all_integ.get(device_id, {})
+        return list_device_integrations(device_id)
     except Exception:
         return {}
 
 
 def save_integrations(device_id: str, data: dict[str, Any]) -> None:
-    path = _integrations_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    all_integ: dict[str, Any] = {}
-    if path.exists():
-        try:
-            all_integ = json.loads(path.read_text())
-        except Exception:
-            all_integ = {}
-    all_integ[device_id] = data
-    path.write_text(json.dumps(all_integ, ensure_ascii=False, indent=2))
+    """
+    บันทึก integration config ทั้งชุดของ device (keyed by type) — signature เดิม (dict ทั้งก้อน)
+    เพื่อลด diff ที่ server.py แต่ภายใน upsert ทีละ type ลง device_integrations
+    """
+    from core.database import upsert_device_integration
+    for integ_type, integ_data in data.items():
+        if integ_type not in ("webhook", "mqtt", "pipe"):
+            continue
+        if not isinstance(integ_data, dict):
+            continue
+        upsert_device_integration(device_id, integ_type, integ_data)

@@ -1,20 +1,22 @@
 # MQTT Client — เอกสารระบบ
 
-ไฟล์หลัก: `src/mqtt_client.py`
+ไฟล์หลัก: `src/features/mqtt/client.py`
 
 ## ภาพรวม
 
-MQTT client ของ VAS publish QR scan events ออกไปยัง MQTT broker แบบ real-time ทุกครั้งที่ QR reader อ่านได้ค่าใหม่
+MQTT client ของ VAS publish QR scan events ออกไปยัง MQTT broker แบบ real-time ทุกครั้งที่ QR reader อ่านได้ค่าใหม่ **รองรับ broker หลายตัว connect พร้อมกันจริง** — แต่ละ broker enable/disable อิสระต่อกัน broker หนึ่งตัว connect fail จะไม่กระทบ broker ตัวอื่น
 
 **Dependencies:** `paho-mqtt >= 1.6` (`python3-paho-mqtt`)
 
-**Config storage:** `config.json` ที่ project root — ส่วน `"mqtt": {...}`
+**Config storage:** ตาราง `mqtt_brokers` ใน SQLite (`~/.config/vas/vas.db`) **เท่านั้น** — เดิมเก็บใน `config.json` ที่โฟลเดอร์ install แต่ไฟล์นั้นถูกลบไปแล้ว (ข้อมูลถูก migrate เข้า `mqtt_brokers` อัตโนมัติตอน migration version 2 แล้วจึงลบไฟล์ทิ้ง — ดู `docs/database.md`) เหตุผลที่ย้าย: `config.json` เดิมอยู่ในโฟลเดอร์ที่ `vas update` ลบทิ้งทุกครั้ง (`shutil.rmtree`) ทำให้การตั้งค่า MQTT หายทุกรอบอัปเดต ส่วน `vas.db` อยู่นอกโฟลเดอร์นั้นจึงปลอดภัย
 
 ---
 
 ## Configuration
 
 ### `MqttConfig` (dataclass)
+
+Object ชั่วคราวสำหรับส่งค่าระหว่าง DB row กับ `VasMqttClient` เท่านั้น — **ไม่ผูกกับไฟล์ใดๆ อีกต่อไป**
 
 | Field | Type | Default | คำอธิบาย |
 |-------|------|---------|----------|
@@ -24,78 +26,118 @@ MQTT client ของ VAS publish QR scan events ออกไปยัง MQTT b
 | `password` | `str` | `""` | Password สำหรับ auth |
 | `client_id` | `str` | `""` | Client ID (ว่าง = auto-generate) |
 | `tls_insecure` | `bool` | `False` | Skip TLS verify (สำหรับ self-signed cert) |
-| `topic` | `str` | `sterile/vending/qr/scan` | MQTT topic |
+| `topic` | `str` | `sterile/vending/qr/scan` | Topic default ของ broker (resolve จาก `mqtt_broker_topics` ตัวแรกที่ enabled) |
 | `qos` | `int` | `1` | Quality of Service (0/1/2) |
 | `retain` | `bool` | `False` | Retain flag |
-| `payload_mode` | `str` | `"decoded"` | `"decoded"` หรือ `"raw"` |
+| `payload_mode` | `str` | `"decoded"` | `"decoded"` \| `"raw_keycode"` \| `"raw_report"` |
+
+### `broker_db_to_config(broker: dict) → MqttConfig`
+แปลง row จาก `mqtt_brokers` (dict จาก `core.database.get_mqtt_broker()`) เป็น `MqttConfig` — resolve `topic` จาก `mqtt_broker_topics` ตัวแรกที่ `enabled=1` ของ broker นั้น (`mqtt_brokers` เองไม่มี column `topic` โดยตรง เพราะ broker หนึ่งตัวมีได้หลาย topic)
 
 ### Payload Modes
 
 **`"decoded"` (default):**
 ```json
-{"scan": "3833401723", "device": "/dev/hidraw0", "ts": "2026-06-27T10:30:00+00:00"}
+{"scan": "3833401723", "device": "/dev/hidraw0", "ts": "2026-07-02T10:30:00+00:00", "read_mode": "hidraw"}
 ```
 
-**`"raw"`:**
+**`"raw_keycode"`:**
 ```json
-{"scan": [39, 30, 30, 32, 30, 39, 31, 33], "device": "/dev/hidraw0", "ts": "2026-06-27T10:30:00+00:00"}
+{"scan": [39, 30, 30, 32, 30, 39, 31, 33], "device": "/dev/hidraw0", "ts": "2026-07-02T10:30:00+00:00", "read_mode": "hidraw"}
 ```
-ค่าใน `"scan"` เป็น list ของ HID keycodes หรือ evdev scancodes ดิบ
+ค่าใน `"scan"` เป็น list ของ HID keycode (ถ้า `read_mode="hidraw"`) หรือ evdev scancode (ถ้า `read_mode="evdev"`) — คนละ numbering space กัน ต้องดู `read_mode` เพื่อตีความให้ถูก
+
+**`"raw_report"`:**
+```json
+{"scan": ["a1000000000000", "00000000000000"], "device": "/dev/hidraw0", "ts": "2026-07-02T10:30:00+00:00", "read_mode": "hidraw"}
+```
+ค่าใน `"scan"` เป็น list ของ hex string — 64-byte HID report ดิบทั้งก้อนต่อ frame (`report.hex()`) รวม key-up/all-zero frame ด้วย **มีเฉพาะ `read_mode="hidraw"` เท่านั้น** — evdev ไม่มี raw byte report ให้ดัก (kernel แปลงเป็น key event ให้ตั้งแต่ driver แล้ว)
+
+**ทุก payload mode แนบ field `"read_mode"` เข้าไปเสมอ** เพื่อให้ third-party consumer รู้ว่ากำลังอ่าน numbering space ไหน
+
+**ไม่มี silent fallback:** ถ้า broker ตั้ง `payload_mode="raw_report"` แต่เครื่องอ่าน QR เป็น evdev (ไม่มี raw report ให้) ระบบ**จะไม่ publish** (`return False`) แทนที่จะ publish เป็น `decoded` แทนแบบเงียบๆ พร้อมบันทึก `mqtt_events` row ที่ `ok=0` และ payload อธิบายเหตุผล (`{"error": "raw_report not available for read_mode=evdev"}`)
 
 ---
 
-## Config File Management
+## Multi-Broker Support
 
-### `load_mqtt_config() → MqttConfig`
-อ่าน `config.json` และดึงส่วน `"mqtt"` คืน `MqttConfig()` defaults ถ้าไม่มีหรือ parse ไม่ได้
+### `_clients: dict[int, VasMqttClient]`
+Module-level registry แทนที่ singleton ตัวเดียวแบบเดิม — key คือ `broker_id`
 
-### `save_mqtt_config(config: MqttConfig) → None`
-Merge ส่วน `"mqtt"` เข้ากับ `config.json` ที่มีอยู่ (ไม่ทับ key อื่น) เขียน JSON indent=2
+### `start_mqtt_broker(broker_id: int) → VasMqttClient`
+โหลด broker จาก DB, สร้าง/แทนที่ client ใน `_clients[broker_id]`, เรียก `.connect()` — ถ้ามี client เดิมของ broker นี้อยู่แล้วจะ disconnect ก่อน
+
+### `stop_mqtt_broker(broker_id: int) → None`
+Disconnect + ลบ broker นั้นออกจาก `_clients` — ไม่กระทบ broker ตัวอื่น
+
+### `start_all_enabled_brokers() → None`
+วน broker ทุกตัวที่ `enabled=1` แล้วเรียก `start_mqtt_broker()` ทีละตัว **แยก try/except ต่อ broker** — broker ตัวหนึ่ง connect fail ไม่ทำให้ตัวอื่นไม่ทำงาน เรียกตอน server boot อัตโนมัติแทน `start_mqtt()` เดิม
+
+### `get_primary_broker_id() → int | None`
+คืน `id` ของ broker ที่ `is_primary=1` — ใช้กับ path แบบ primary-only (ดูด้านล่าง)
+
+### `get_mqtt_client(broker_id: int | None = None) → VasMqttClient | None`
+คืน client ของ broker ที่ระบุ ถ้าไม่ระบุจะ resolve เป็น primary broker อัตโนมัติ
+
+### Legacy (backward compat)
+`start_mqtt()` / `stop_mqtt()` ยังอยู่ — `stop_mqtt()` ตอนนี้ disconnect + ล้าง client **ทุกตัว** ใน `_clients` (ไม่ใช่แค่ตัวเดียวเหมือนเดิม)
+
+---
+
+## Publish — สอง Code Path แยกกัน
+
+### `publish_qr_scan(scan, device, ts, scan_raw_keycode=None, scan_raw_report=None, read_mode=None) → bool`
+**Primary-broker-only** — publish ไปยัง broker ที่ `is_primary=1` เท่านั้น ไม่สนใจการตั้งค่าต่อ device ใดๆ
+ใช้กับ: CLI `vas mqtt test`, `/api/mqtt/test` (legacy single-broker API) — **ไม่ใช่ path ที่ SSE stream ใช้จริง**
+
+### `publish_qr_scan_for_device(device_id, scan, device, ts, scan_raw_keycode=None, scan_raw_report=None, read_mode=None) → bool`
+**Device-aware** — เลือก broker/topic/payload_mode ตามตาราง `device_integrations` ของ `device_id` นั้นๆ (ดู `docs/database.md`)
+
+Logic:
+1. ดึง `device_integrations` ของ `device_id`, ดู entry ประเภท `"mqtt"`
+2. ถ้าไม่มีหรือ `enabled=0` → `return False` (ไม่ error — แค่ยังไม่เปิดใช้งาน)
+3. ถ้าไม่มี `broker_id` ผูกไว้ → `return False`
+4. ถ้า broker นั้นยังไม่มี client connect อยู่ → `return False`
+5. Publish ผ่าน `client.publish_qr_scan(..., topic_override=<topic ที่ตั้งไว้ที่ device หรือ None>, payload_mode_override=<payload_mode ที่ตั้งไว้ที่ device หรือ None>)`
+
+**นี่คือ path ที่ SSE stream (`/api/qr/stream` ใน `server.py`) เรียกใช้จริง** — ทุกครั้งที่มี scan ใหม่จะเรียก `publish_qr_scan_for_device("zkteco-qr500", ...)`
+
+> `topic_override` ใน `VasMqttClient.publish_qr_scan()`: ถ้าระบุจะใช้แทน `self.config.topic` (topic default ของ broker) — device แต่ละตัวตั้ง topic ของตัวเองแยกจาก topic default ของ broker ได้
+
+> `payload_mode_override` ใน `VasMqttClient.publish_qr_scan()`: ถ้าระบุและอยู่ใน `PAYLOAD_MODES` จะใช้แทน `self.config.payload_mode` (payload mode default ของ broker) — เหตุผลที่เพิ่ม field นี้: ข้อมูลระดับ raw (`raw_keycode`/`raw_report`) มีต้นทางจริงจากฝั่ง **QR reader ต่อ device** ไม่ใช่จากฝั่ง broker การผูก payload mode ไว้ที่ broker เพียงอย่างเดียวทำให้ถ้ามี device หลายตัวใช้ broker เดียวกันแต่ต้องการ mode ต่างกัน (เช่น device หนึ่งเป็น hidraw อยากได้ `raw_report`, อีกตัวเป็น evdev ต้องใช้ `decoded`) จะทำไม่ได้ ตอนนี้ตั้งค่าได้ที่หน้า device (`/qr/devices/zkteco-qr500` → การ์ด MQTT Publish → dropdown "Payload Mode") ถ้าเลือก "ใช้ค่า default ของ Broker" (ค่าว่าง/`None`) จะ fallback ไปใช้ `broker.payload_mode` ตามเดิม
+
+> ⚠️ `vas mqtt test`/`/api/mqtt/test` (primary-broker path) กับ SSE loop (device-aware path) เป็นคนละ code path กัน — ถ้า debug ปัญหา publish ไม่ออกต้องแยกให้ถูกว่ากำลังดู path ไหน primary-broker path **ไม่รองรับ** payload_mode override ต่อ device (ใช้ payload_mode ของ broker เสมอ)
+
+---
+
+## Device Integration Config (`device_integrations` table)
+
+ตั้งค่าผ่านหน้า `/qr/devices/zkteco-qr500` (การ์ด "MQTT Publish") — บันทึกลง SQLite (`device_integrations`: `device_id`, `integration_type='mqtt'`, `enabled`, `broker_id`, `topic`, `qos`) ไม่ใช่ไฟล์ JSON อีกต่อไป (เดิมคือ `qr_integrations.json` ซึ่งถูก migrate เข้า DB แล้วลบทิ้ง)
+
+รองรับ 3 ประเภท integration: `webhook`, `mqtt`, `pipe` — **ปัจจุบันมี backend logic จริงเฉพาะ `mqtt`** ส่วน `webhook`/`pipe` เก็บ config ได้แต่ยังไม่มีการ publish จริง (เตรียม schema ไว้สำหรับอนาคต)
+
+**Payload ที่ publish ออกไปสำหรับ device นี้ ตั้งได้ที่หน้า device โดยตรง** ผ่าน dropdown "Payload Mode" ในการ์ด MQTT Publish (`decoded` / `raw_keycode` / `raw_report` / "ใช้ค่า default ของ Broker") — เก็บเป็น key `payload_mode` ใน `device_integrations.settings_json` (ไม่ต้อง migration schema เพิ่ม เพราะ `settings_json` เป็น JSON column ที่ flexible อยู่แล้ว, flatten กลับเป็น top-level field ตอนอ่านผ่าน `list_device_integrations()`) ถ้าไม่เลือก (ค่าว่าง/`None`) จะ fallback ไปใช้ `payload_mode` ของ broker ที่เลือกไว้ตามเดิม
+
+---
+
+## MQTT Broker Form (`/mqtt/broker/add`, `/mqtt/broker/<id>/edit`)
+
+ฟอร์มสร้าง/แก้ broker มี field `payload_mode` เป็น dropdown เลือกได้จริง (`decoded` / `raw_keycode` / `raw_report`) — pre-select ค่าปัจจุบันถูกต้องตอนแก้ broker เดิม (ก่อนหน้านี้ JS hardcode ส่งค่า `"json"` เสมอ ซึ่งเป็นบั๊ก — แก้แล้วในรอบนี้)
 
 ---
 
 ## `VasMqttClient`
 
-Wrapper รอบ `paho.mqtt.client.Client` พร้อม thread-safe state
+Wrapper รอบ `paho.mqtt.client.Client` พร้อม thread-safe state — หนึ่ง instance ต่อหนึ่ง broker (เก็บใน `_clients` registry ด้านบน)
 
-### Constructor
-```python
-VasMqttClient(config: MqttConfig)
-```
-
-### Properties
-- `is_connected: bool` — สถานะการเชื่อมต่อ (thread-safe)
-- `last_error: str | None` — error ล่าสุด
-
-### `connect() → None`
-เริ่ม connect ใน background thread (non-blocking):
-
-1. **ถ้า connected อยู่แล้ว** → disconnect ก่อน
-2. Parse `broker_url` ด้วย `_parse_broker_url()` → `(host, port, use_tls, use_websocket)`
-3. สร้าง paho client (`MQTTv311`, `clean_session=True`)
-4. ตั้ง auth (`username_pw_set`) ถ้ามี credentials
-5. ตั้ง WebSocket path `/mqtt` ถ้า scheme เป็น `ws`/`wss`
-6. ตั้ง TLS ถ้า scheme เป็น `mqtts`/`wss`:
-   - `tls_insecure=True` → สร้าง SSL context ที่ข้าม verify
-   - `tls_insecure=False` → `tls_set(PROTOCOL_TLS_CLIENT)`
-7. ตั้ง callbacks: `on_connect`, `on_disconnect`, `on_log`
-8. ตั้ง `reconnect_delay_set(min_delay=3, max_delay=30)` — auto-reconnect
-9. `connect_async()` + `loop_start()` — non-blocking network loop
-
-**Raises:** `ImportError` ถ้า paho-mqtt ไม่ได้ติดตั้ง
-
-### `disconnect() → None`
-`disconnect()` + `loop_stop()` บน paho client
+### `connect() / disconnect()`
+เชื่อมต่อ/ตัดการเชื่อมต่อแบบ non-blocking (background thread ของ paho, auto-reconnect ผ่าน `reconnect_delay_set`)
 
 ### `publish(topic, payload) → bool`
-Publish message ไปยัง topic ที่กำหนด:
-- คืน `True` ถ้า `result.rc == 0`
-- คืน `False` ถ้าไม่ connected หรือ error
+Publish message ดิบ — คืน `False` ถ้าไม่ connected
 
-### `publish_qr_scan(scan, device, ts, scan_raw=None) → bool`
-Publish QR scan event:
-- ถ้า `payload_mode == "raw"` และมี `scan_raw` → ใช้ raw keycodes
-- ไม่ทำอะไรถ้า `config.enabled == False`
+### `publish_qr_scan(scan, device, ts, scan_raw_keycode=None, scan_raw_report=None, read_mode=None, topic_override=None, payload_mode_override=None) → bool`
+สร้าง payload ตาม `payload_mode_override` ถ้าระบุและถูกต้อง (ไม่งั้น fallback ไป `self.config.payload_mode`) แล้ว publish ไปที่ `topic_override` ถ้าระบุ ไม่งั้นใช้ `self.config.topic` — ดู "Payload Modes" ด้านบนสำหรับ logic แบบเต็ม (รวม no-silent-fallback)
 
 ### `status_dict() → dict`
 ```python
@@ -113,7 +155,7 @@ Publish QR scan event:
 
 ## URL Scheme Mapping
 
-`_parse_broker_url(url)` แปลง URL เป็น connection params:
+`_parse_broker_url(url)` แปลง URL เป็น connection params — ไม่เปลี่ยนจากเดิม:
 
 | Scheme | Transport | TLS | Default Port |
 |--------|-----------|-----|-------------|
@@ -124,58 +166,48 @@ Publish QR scan event:
 
 ---
 
-## Module-level Singleton
+## Client ID Auto-generation
 
-### `start_mqtt(config=None) → VasMqttClient`
-เริ่ม global singleton — disconnect ตัวเก่าถ้ามี
-
-### `stop_mqtt() → None`
-Disconnect และล้าง global singleton
-
-### `get_mqtt_client() → VasMqttClient | None`
-คืน singleton ปัจจุบัน (thread-safe)
-
-### `publish_qr_scan(scan, device, ts, scan_raw=None) → bool`
-Convenience wrapper — publish ถ้า client เชื่อมต่ออยู่
-
-### `get_mqtt_status() → dict`
-คืน status dict สำหรับ API/template
+ถ้า `client_id` ว่าง จะ generate อัตโนมัติ: `vas-qr-reader-<6 random alphanumeric chars>`
 
 ---
 
-## Client ID Auto-generation
+## MQTT Monitor Session (`MqttMonitorSession`)
 
-ถ้า `client_id` ว่าง จะ generate อัตโนมัติ:
-```python
-vas-qr-reader-<6 random alphanumeric chars>
-# เช่น: vas-qr-reader-k3m9xp
-```
+Client แยกต่างหากสำหรับ subscribe ทดสอบ (ดูข้อความสด) — ไม่ใช้ `_clients` registry หลัก เชื่อมต่อผ่าน `broker_db_to_config()` เหมือนกัน
+
+---
+
+## Config File Management
+
+~~`load_mqtt_config()` / `save_mqtt_config()`~~ — **ถูกลบออกแล้ว** พร้อม `main_config_path()` ใน `core/config.py` การตั้งค่า MQTT อ่าน/เขียนผ่าน `core.database` (`get_mqtt_broker`, `create_mqtt_broker`, `update_mqtt_broker`, `get_primary_broker_id`) โดยตรงแทน `config.json` ไม่ถูกใช้งานแล้วสำหรับ MQTT
 
 ---
 
 ## Integration กับส่วนอื่น
 
-### QR Reader SSE Stream
-เมื่อ scan ใหม่ถูกตรวจพบใน `/api/qr/stream`:
+### QR Reader SSE Stream (`/api/qr/stream`)
+เมื่อ scan ใหม่ถูกตรวจพบ ระบบดึง `scan_raw_keycode`/`scan_raw_report`/`read_mode` จาก reader แล้วเรียก:
 ```python
-from mqtt_client import publish_qr_scan as _mqtt_publish
-_mqtt_publish(scan, reader.device_path, ts, scan_raw=scan_raw)
+from features.mqtt.client import publish_qr_scan_for_device
+publish_qr_scan_for_device(
+    "zkteco-qr500", scan, reader.device_path, ts,
+    scan_raw_keycode=scan_raw_keycode, scan_raw_report=scan_raw_report, read_mode=read_mode,
+)
 ```
 
 ### Server Boot
 ```python
-cfg = load_mqtt_config()
-if cfg.enabled:
-    start_mqtt(cfg)
+start_all_enabled_brokers()   # เดิมคือ start_mqtt(load_mqtt_config())
 ```
 
 ### Server Shutdown (atexit)
 ```python
-atexit.register(stop_mqtt)
+atexit.register(stop_mqtt)   # disconnect ทุก broker ใน _clients
 ```
 
 ### CLI `vas mqtt config`
-หลังบันทึก config จะ POST ไปยัง `http://localhost:8888/api/mqtt/config` เพื่อ reload MQTT ทันที (ถ้า server กำลัง run)
+หลังบันทึก config (เขียนลง `mqtt_brokers`/`mqtt_broker_topics`) จะ POST ไปยัง `http://localhost:8888/api/mqtt/config` เพื่อ reload primary broker ทันที (ถ้า server กำลัง run)
 
 ---
 
@@ -183,16 +215,16 @@ atexit.register(stop_mqtt)
 
 | Command | คำอธิบาย |
 |---------|----------|
-| `vas mqtt status` | แสดง config และสถานะการเชื่อมต่อ |
-| `vas mqtt config --broker-url ...` | ตั้งค่า broker URL |
+| `vas mqtt status` | แสดง config และสถานะการเชื่อมต่อของ primary broker |
+| `vas mqtt config --broker-url ...` | ตั้งค่า broker URL ของ primary broker |
 | `vas mqtt config --username ... --password ...` | ตั้งค่า credentials |
-| `vas mqtt config --topic ...` | ตั้งค่า topic |
+| `vas mqtt config --topic ...` | ตั้งค่า topic (sync เข้า `mqtt_broker_topics`) |
 | `vas mqtt config --qos 1` | ตั้งค่า QoS |
-| `vas mqtt config --enable` | เปิดใช้งาน |
-| `vas mqtt config --disable` | ปิดใช้งาน |
+| `vas mqtt config --payload-mode {decoded,raw_keycode,raw_report}` | ตั้งค่า payload mode |
+| `vas mqtt config --enable` / `--disable` | เปิด/ปิดใช้งาน |
 | `vas mqtt config --tls-insecure` | Skip TLS verify |
 | `vas mqtt config --retain` | Enable retain |
-| `vas mqtt test` | Test publish ไปยัง broker |
+| `vas mqtt test` | Test publish ไปยัง primary broker |
 
 ---
 
@@ -200,10 +232,19 @@ atexit.register(stop_mqtt)
 
 | Method | Path | คำอธิบาย |
 |--------|------|----------|
-| `GET` | `/api/mqtt/status` | สถานะ MQTT client |
-| `POST` | `/api/mqtt/config` | บันทึก config และ restart client |
-| `POST` | `/api/mqtt/test` | Publish test message `{"scan":"TEST-VAS-QR",...}` |
-| `POST` | `/api/mqtt/disconnect` | ตัดการเชื่อมต่อ |
+| `GET` | `/api/mqtt/status` | สถานะ primary broker |
+| `POST` | `/api/mqtt/brokers` | สร้าง broker ใหม่ |
+| `PUT` | `/api/mqtt/brokers/<id>` | แก้ broker — reload connection ของ broker นั้นเท่านั้น |
+| `DELETE` | `/api/mqtt/brokers/<id>` | ลบ broker — disconnect ก่อนลบ |
+| `GET` | `/api/mqtt/brokers/<id>/status` | สถานะ connection ของ broker ที่ระบุ |
+| `POST` | `/api/mqtt/brokers/<id>/connect` | เชื่อมต่อ broker ที่ระบุ |
+| `POST` | `/api/mqtt/brokers/<id>/disconnect` | ตัดการเชื่อมต่อ broker ที่ระบุ (ไม่กระทบตัวอื่น) |
+| `POST` | `/api/mqtt/brokers/<id>/test` | Test publish ไปยัง broker ที่ระบุ |
+| `GET`/`POST`/`PUT`/`DELETE` | `/api/mqtt/brokers/<id>/topics...` | จัดการ topics ของ broker |
+| `POST` | `/api/mqtt/config` | Legacy — อ่าน/เขียน primary broker |
+| `POST` | `/api/mqtt/test` | Legacy — test publish ไปยัง primary broker |
+| `POST` | `/api/mqtt/disconnect` | Legacy — ตัดการเชื่อมต่อ primary broker |
+| `POST`/`GET` | `/api/mqtt/monitor/...` | MQTT monitor session (subscribe ทดสอบ) |
 
 ---
 

@@ -48,6 +48,14 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("about-os", help="Print OS information for bootstrap POC.")
     subcommands.add_parser("version", help="Print CLI version.")
 
+    # ── db subcommand ───────────────────────────────────────────────
+    db = subcommands.add_parser("db", help="Manage the vas.db SQLite schema.")
+    db_subcommands = db.add_subparsers(dest="db_command", required=True)
+    db_subcommands.add_parser(
+        "migrate",
+        help="Apply pending schema migrations (safe to run repeatedly — never drops data).",
+    )
+
     update = subcommands.add_parser("update", help="Update the installed CLI wrapper source from GitHub.")
     update.add_argument("--repo", default=DEFAULT_REPO)
     update.add_argument("--version", default="latest", help="Git tag to install, or latest for branch head.")
@@ -290,6 +298,22 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
         print(APP_VERSION)
         return 0
 
+    if args.command == "db":
+        if args.db_command == "migrate":
+            from core.database import (
+                current_schema_version, latest_schema_version, run_migrations, db_path,
+            )
+            before = current_schema_version()
+            latest = latest_schema_version()
+            if args.dry_run:
+                print(f"migrate {db_path().as_posix()} (schema {before} → {latest})")
+                return 0
+            run_migrations()
+            after = current_schema_version()
+            print(f"Database schema: {before} → {after} (latest={latest})")
+            print(f"  db file: {db_path().as_posix()}")
+            return 0
+
     if args.command == "update":
         if not args.dry_run:
             require_linux()
@@ -425,6 +449,14 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 WireGuardManager(runner).install()
         finally:
             runner.stop_progress()
+
+        # Provision/upgrade DB schema หลัง component อื่นติดตั้งเสร็จ (ไม่ลบข้อมูลเดิม)
+        if not args.dry_run:
+            from core.database import run_migrations
+            print("migrate database schema")
+            run_migrations()
+        else:
+            print("migrate database schema")
         return 0
 
     if args.command == "display":
@@ -702,10 +734,18 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             return 0
 
     if args.command == "mqtt":
-        from features.mqtt.client import load_mqtt_config, save_mqtt_config, MqttConfig
+        from features.mqtt.client import MqttConfig, broker_db_to_config
+        from core.database import get_primary_broker_id, get_mqtt_broker, create_mqtt_broker, update_mqtt_broker
+
+        def _load_primary_config() -> MqttConfig:
+            primary_id = get_primary_broker_id()
+            if primary_id is None:
+                return MqttConfig()
+            broker = get_mqtt_broker(primary_id)
+            return broker_db_to_config(broker) if broker else MqttConfig()
 
         if args.mqtt_command == "status":
-            cfg = load_mqtt_config()
+            cfg = _load_primary_config()
             from features.mqtt.client import get_mqtt_status, _paho_available
             status = get_mqtt_status()
             print("[MQTT]")
@@ -722,12 +762,12 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             print(f"  paho-mqtt    : {'installed' if _paho_available() else 'NOT installed (sudo apt install -y python3-paho-mqtt)'}")
             if status.get("last_error"):
                 print(f"  last_error   : {status['last_error']}")
-            from core.config import main_config_path
-            print(f"  config file  : {main_config_path().as_posix()}")
+            from core.database import db_path
+            print(f"  db file      : {db_path().as_posix()}")
             return 0
 
         if args.mqtt_command == "config":
-            cfg = load_mqtt_config()
+            cfg = _load_primary_config()
             changed = False
             if getattr(args, "broker_url", None):
                 cfg = MqttConfig(**{**cfg.to_dict(), "broker_url": args.broker_url})
@@ -775,9 +815,29 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 for k, v in cfg.to_dict().items():
                     print(f"  {k:14}: {v}")
                 return 0
-            save_mqtt_config(cfg)
-            from core.config import main_config_path
-            print(f"Config saved → {main_config_path().as_posix()}")
+
+            primary_id = get_primary_broker_id()
+            if primary_id is not None:
+                existing_broker = get_mqtt_broker(primary_id) or {}
+                update_mqtt_broker(primary_id, {**existing_broker, **cfg.to_dict(), "is_primary": True})
+            else:
+                primary_id = create_mqtt_broker({
+                    **cfg.to_dict(),
+                    "name": "Primary broker",
+                    "is_primary": True,
+                })
+            # mqtt_brokers ไม่มี column "topic" โดยตรง (เก็บแยกใน mqtt_broker_topics เพราะ
+            # broker หนึ่งตัวมีได้หลาย topic) — sync ค่า --topic เข้าไปเป็น topic ที่ enabled ตัวแรก
+            if getattr(args, "topic", None):
+                from core.database import list_mqtt_topics, add_mqtt_topic, update_mqtt_topic
+                existing_topics = list_mqtt_topics(primary_id)
+                match = next((t for t in existing_topics if t["topic"] == cfg.topic), None)
+                if match is not None:
+                    update_mqtt_topic(match["id"], {"topic": cfg.topic, "label": match.get("label", ""), "enabled": True})
+                else:
+                    add_mqtt_topic(primary_id, cfg.topic)
+            from core.database import db_path
+            print(f"Config saved → {db_path().as_posix()} (mqtt_brokers.id={primary_id})")
             for k, v in cfg.to_dict().items():
                 print(f"  {k:14}: {v}")
             # แจ้ง server process ให้ reload config ทันที (ถ้า server กำลัง run อยู่)
@@ -791,7 +851,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             if not _paho_available():
                 print("Error: paho-mqtt ไม่ได้ติดตั้ง — รัน: sudo apt install -y python3-paho-mqtt")
                 return 1
-            cfg = load_mqtt_config()
+            cfg = _load_primary_config()
             if not cfg.broker_url:
                 print("Error: ยังไม่ได้ตั้งค่า broker_url — รัน: vas mqtt config --broker-url ...")
                 return 1

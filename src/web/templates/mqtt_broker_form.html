@@ -106,6 +106,16 @@
         </select>
       </div>
 
+      <!-- Payload Mode -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="f-payload-mode">Payload Mode</label>
+        <select class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition" id="f-payload-mode">
+          <option value="decoded" {{ 'selected' if (broker is none or broker.payload_mode == 'decoded') else '' }}>decoded — ข้อความที่ decode แล้ว</option>
+          <option value="raw_keycode" {{ 'selected' if broker and broker.payload_mode == 'raw_keycode' else '' }}>raw_keycode — HID keycode/scancode ดิบ</option>
+          <option value="raw_report" {{ 'selected' if broker and broker.payload_mode == 'raw_report' else '' }}>raw_report — HID byte report ดิบทั้งก้อน (hidraw เท่านั้น)</option>
+        </select>
+      </div>
+
     </div>
 
     <!-- Advanced settings -->
@@ -225,7 +235,7 @@
       password:      document.getElementById("f-password").value,
       client_id:     document.getElementById("f-client-id").value.trim(),
       qos:           parseInt(document.getElementById("f-qos").value, 10),
-      payload_mode:  "json",
+      payload_mode:  document.getElementById("f-payload-mode").value,
       enabled:       document.getElementById("f-enabled").checked,
       is_primary:    document.getElementById("f-primary").checked,
       retain:        document.getElementById("f-retain").checked,

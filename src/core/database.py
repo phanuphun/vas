@@ -4,10 +4,19 @@ VAS — SQLite database layer
 ไฟล์ DB: ~/.config/vas/vas.db  (สร้างอัตโนมัติถ้าไม่มี)
 
 Tables:
-    qr_scans       — ประวัติ QR scan ทุกครั้ง
-    mqtt_events    — ทุก MQTT publish attempt
-    audit_log      — system log snapshot events
-    config_history — ทุกครั้งที่มีการบันทึก config เปลี่ยนแปลง
+    qr_scans           — ประวัติ QR scan ทุกครั้ง
+    mqtt_events        — ทุก MQTT publish attempt
+    audit_log          — system log snapshot events
+    config_history     — ทุกครั้งที่มีการบันทึก config เปลี่ยนแปลง
+    mqtt_brokers        — MQTT broker ที่ configure ไว้ (รองรับหลายตัว)
+    mqtt_broker_topics  — topics ของแต่ละ broker
+    device_integrations — integration config ต่อ device (webhook/mqtt/pipe)
+
+Schema migration:
+    ใช้ PRAGMA user_version เก็บเลขเวอร์ชัน schema ปัจจุบัน
+    ดู _MIGRATIONS ด้านล่าง — ห้าม DROP TABLE/DELETE ข้อมูลเดิมใน migration ใดๆ
+    เรียก run_migrations() เพื่ออัปเดต schema จริง (จาก `vas db migrate` หรือตอน install/update)
+    init_db() ที่ใช้ตอน server boot เป็นแค่ read-only version check เท่านั้น — ดู current_schema_version()
 """
 from __future__ import annotations
 
@@ -35,10 +44,15 @@ def db_path() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Schema
+# Schema migrations
 # ---------------------------------------------------------------------------
+#
+# _MIGRATIONS: list[tuple[int, str]] เรียงตาม version (1, 2, 3, ...)
+#   - ห้ามมี DROP TABLE / DELETE ข้อมูลเดิมใน statement ใดๆ
+#   - ใช้ CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS เสมอ เพื่อให้ apply ซ้ำได้อย่างปลอดภัย
+#   - แต่ละ migration ต้อง apply ได้ทั้งกับ DB ว่าง และ DB ที่มีข้อมูลอยู่แล้ว
 
-_SCHEMA = """
+_MIGRATION_1 = """
 CREATE TABLE IF NOT EXISTS qr_scans (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        TEXT    NOT NULL,
@@ -108,7 +122,47 @@ CREATE TABLE IF NOT EXISTS mqtt_broker_topics (
 
 CREATE INDEX IF NOT EXISTS idx_mqtt_brokers_primary   ON mqtt_brokers(is_primary DESC);
 CREATE INDEX IF NOT EXISTS idx_mqtt_broker_topics_bid ON mqtt_broker_topics(broker_id);
+
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    display_name  TEXT    NOT NULL DEFAULT '',
+    password_hash TEXT    NOT NULL,
+    role          TEXT    NOT NULL DEFAULT 'user' CHECK(role IN ('root','admin','user')),
+    created_at    TEXT    NOT NULL,
+    last_login    TEXT    DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
 """
+
+_MIGRATION_2 = """
+CREATE TABLE IF NOT EXISTS device_integrations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id       TEXT    NOT NULL,
+    integration_type TEXT   NOT NULL CHECK(integration_type IN ('webhook','mqtt','pipe')),
+    enabled         INTEGER NOT NULL DEFAULT 0,
+    broker_id       INTEGER REFERENCES mqtt_brokers(id) ON DELETE SET NULL,
+    topic           TEXT    NOT NULL DEFAULT '',
+    qos             INTEGER NOT NULL DEFAULT 1,
+    settings_json   TEXT    NOT NULL DEFAULT '{}',
+    created_at      TEXT    NOT NULL,
+    updated_at      TEXT    NOT NULL,
+    UNIQUE(device_id, integration_type)
+);
+CREATE INDEX IF NOT EXISTS idx_device_integrations_device ON device_integrations(device_id);
+"""
+
+_MIGRATION_3 = """
+ALTER TABLE qr_scans ADD COLUMN raw_keycode TEXT;
+ALTER TABLE qr_scans ADD COLUMN raw_report  TEXT;
+ALTER TABLE qr_scans ADD COLUMN read_mode   TEXT;
+"""
+
+_MIGRATIONS: list[tuple[int, str]] = [
+    (1, _MIGRATION_1),
+    (2, _MIGRATION_2),
+    (3, _MIGRATION_3),
+]
 
 # ---------------------------------------------------------------------------
 # Thread-local connection pool
@@ -149,20 +203,83 @@ def _cursor() -> Generator[sqlite3.Cursor, None, None]:
 
 
 # ---------------------------------------------------------------------------
-# Init
+# Schema version / migrations
 # ---------------------------------------------------------------------------
 
+def current_schema_version() -> int:
+    """อ่าน PRAGMA user_version ปัจจุบันของ vas.db"""
+    conn = _get_conn()
+    row = conn.execute("PRAGMA user_version").fetchone()
+    return int(row[0]) if row else 0
+
+
+def latest_schema_version() -> int:
+    """เวอร์ชัน schema ล่าสุดที่โค้ดนี้รู้จัก (เลขสูงสุดใน _MIGRATIONS)"""
+    return max(v for v, _ in _MIGRATIONS)
+
+
+def run_migrations() -> None:
+    """
+    รัน migration ทุกตัวที่ยังไม่ถึง version ปัจจุบัน เรียงจากน้อยไปมาก (1 → 2 → ...)
+    แต่ละ migration wrap ใน transaction เดียว — commit ต่อเมื่อสำเร็จทั้ง schema statement
+    และ bump PRAGMA user_version แล้วเท่านั้น (ไม่ jump ข้าม version)
+
+    ปลอดภัยเรียกซ้ำได้ — migration ที่ apply ไปแล้วจะถูกข้าม
+    """
+    with _init_lock:
+        conn = _get_conn()
+        current = current_schema_version()
+        for version, script in sorted(_MIGRATIONS, key=lambda m: m[0]):
+            if version <= current:
+                continue
+            try:
+                conn.executescript(script)
+                # data migration ผูกกับ version 2
+                if version == 2:
+                    _migrate_config_json_to_mqtt_brokers(conn)
+                    _migrate_qr_integrations_json_to_device_integrations(conn)
+                conn.execute(f"PRAGMA user_version = {int(version)}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            current = version
+        _initialized_flag[0] = True
+
+
+# เก็บ flag แยกจาก _initialized เดิม (ใช้ภายใน run_migrations เท่านั้น ไม่ผูกกับ init_db)
+_initialized_flag = [False]
+
+
+# ---------------------------------------------------------------------------
+# Init (read-only version check — ไม่เขียน schema อีกต่อไป)
+# ---------------------------------------------------------------------------
+
+class SchemaOutOfDateError(RuntimeError):
+    """Raise เมื่อ DB schema เก่ากว่าที่โค้ดต้องการ — ต้องรัน `vas db migrate` ก่อน"""
+
+
 def init_db() -> None:
-    """สร้าง tables ถ้ายังไม่มี — เรียก 1 ครั้งตอน server start"""
+    """
+    ตรวจสอบ schema version ของ vas.db (read-only) — เรียก 1 ครั้งตอน server start
+
+    ไม่เขียน schema ใดๆ อีกต่อไป (ย้ายไปที่ run_migrations() ซึ่งเรียกจาก
+    `vas db migrate`, `vas install`, และ `vas update` แทน)
+
+    Raises:
+        SchemaOutOfDateError: ถ้า current_schema_version() < latest_schema_version()
+    """
     global _initialized
     with _init_lock:
         if _initialized:
             return
-        conn = _get_conn()
-        conn.executescript(_SCHEMA)
-        conn.commit()
-        from core.auth import init_users
-        init_users()
+        current = current_schema_version()
+        latest = latest_schema_version()
+        if current < latest:
+            raise SchemaOutOfDateError(
+                f"Database schema out of date (current={current}, latest={latest}) — "
+                f"run: vas db migrate"
+            )
         _initialized = True
 
 
@@ -174,12 +291,218 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def log_qr_scan(value: str, device: str | None = None, ts: str | None = None) -> None:
+# ---------------------------------------------------------------------------
+# Data migrations (ผูกกับ migration version 2) — config.json / qr_integrations.json → SQLite
+# ---------------------------------------------------------------------------
+
+def _install_dir() -> Path:
+    """Resolve install_dir แบบเดียวกับที่ core/config.py:44 เคยทำ (ก่อนลบ main_config_path)"""
+    return Path(__file__).parent.parent
+
+
+def _migrate_config_json_to_mqtt_brokers(conn: sqlite3.Connection) -> None:
+    """
+    ย้าย {install_dir}/config.json ส่วน "mqtt" → แถวใหม่ใน mqtt_brokers (is_primary=1)
+
+    Insert แล้ว read-back ยืนยันก่อนเสมอ — ลบไฟล์ config.json จริงเฉพาะเมื่อยืนยันสำเร็จเท่านั้น
+    ถ้าไม่มีไฟล์ → ข้าม ไม่ error
+    """
+    config_path = _install_dir() / "config.json"
+    if not config_path.exists():
+        return
     try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(raw, dict):
+        return
+    mqtt_section = raw.get("mqtt")
+    if not isinstance(mqtt_section, dict):
+        return
+
+    now = _now_utc()
+
+    def _str(key: str, default: str = "") -> str:
+        return str(mqtt_section.get(key) or default)
+
+    def _bool(key: str, default: bool = False) -> int:
+        v = mqtt_section.get(key)
+        return 1 if (v if isinstance(v, bool) else default) else 0
+
+    def _int(key: str, default: int) -> int:
+        try:
+            return int(mqtt_section.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    payload_mode = _str("payload_mode", "decoded")
+    if payload_mode not in ("decoded", "raw_keycode", "raw_report"):
+        payload_mode = "decoded"
+
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO mqtt_brokers
+           (name, broker_url, username, password, client_id,
+            tls_insecure, qos, retain, payload_mode, enabled, is_primary,
+            keep_alive, reconnect_min, reconnect_max, notes, created_at, updated_at)
+           VALUES (?,?,?,?,?, ?,?,?,?,?,1, ?,?,?,?, ?,?)""",
+        (
+            "Migrated from config.json",
+            _str("broker_url", "mqtts://localhost:8883"),
+            _str("username"),
+            _str("password"),
+            _str("client_id"),
+            _bool("tls_insecure"),
+            _int("qos", 1),
+            _bool("retain"),
+            payload_mode,
+            _bool("enabled", False),
+            60, 3, 30, "",
+            now, now,
+        ),
+    )
+    new_id = cur.lastrowid
+
+    # Read-back เพื่อยืนยัน insert สำเร็จก่อนลบไฟล์
+    verify_row = conn.execute(
+        "SELECT id, broker_url FROM mqtt_brokers WHERE id = ?", (new_id,)
+    ).fetchone()
+    if verify_row is None or verify_row["broker_url"] != _str("broker_url", "mqtts://localhost:8883"):
+        # ยืนยันไม่สำเร็จ — ไม่ลบไฟล์ ปล่อยให้ transaction rollback ทีหลังถ้ามี error อื่น
+        return
+
+    try:
+        cur.execute(
+            "INSERT INTO config_history (ts, module, key, old_value, new_value) VALUES (?, ?, ?, ?, ?)",
+            (
+                now, "mqtt", "*",
+                None,
+                json.dumps({k: v for k, v in mqtt_section.items() if k != "password"}, ensure_ascii=False),
+            ),
+        )
+    except Exception:
+        pass
+
+    # ลบไฟล์จริงเฉพาะเมื่อ read-back ยืนยันสำเร็จเท่านั้น
+    try:
+        config_path.unlink()
+    except OSError:
+        pass
+
+
+def _qr_integrations_json_path() -> Path:
+    """~/.config/vas/qr_integrations.json (path เดิมจาก features/qr/registry.py)"""
+    try:
+        from system.status import _effective_home  # type: ignore[import]
+        base = _effective_home() / ".config" / "vas"
+    except Exception:
+        base = Path.home() / ".config" / "vas"
+    return base / "qr_integrations.json"
+
+
+def _migrate_qr_integrations_json_to_device_integrations(conn: sqlite3.Connection) -> None:
+    """
+    ย้าย ~/.config/vas/qr_integrations.json → แถวใหม่ใน device_integrations
+    ต่อ device_id="zkteco-qr500" (device เดียวใน DEVICE_CATALOG ตอนนี้)
+
+    Insert แล้ว read-back ยืนยันก่อนเสมอ — ลบไฟล์จริงเฉพาะเมื่อยืนยันสำเร็จเท่านั้น
+    ถ้าไม่มีไฟล์ → ข้าม ไม่ error
+    """
+    path = _qr_integrations_json_path()
+    if not path.exists():
+        return
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(raw, dict):
+        return
+
+    device_id = "zkteco-qr500"
+    device_section = raw.get(device_id)
+    if not isinstance(device_section, dict):
+        return
+
+    now = _now_utc()
+    cur = conn.cursor()
+    inserted_ids: list[int] = []
+
+    for integ_type, integ_data in device_section.items():
+        if integ_type not in ("webhook", "mqtt", "pipe"):
+            continue
+        if not isinstance(integ_data, dict):
+            continue
+
+        enabled = 1 if integ_data.get("enabled") else 0
+
+        if integ_type == "mqtt":
+            broker_id = integ_data.get("broker_id")
+            try:
+                broker_id_val: int | None = int(broker_id) if broker_id is not None else None
+            except (TypeError, ValueError):
+                broker_id_val = None
+            topic = str(integ_data.get("topic") or "")
+            try:
+                qos = int(integ_data.get("qos", 1))
+            except (TypeError, ValueError):
+                qos = 1
+            extra = {k: v for k, v in integ_data.items() if k not in ("enabled", "broker_id", "topic", "qos")}
+        else:
+            broker_id_val = None
+            topic = ""
+            qos = 1
+            extra = {k: v for k, v in integ_data.items() if k != "enabled"}
+
+        settings_json = json.dumps(extra, ensure_ascii=False)
+
+        cur.execute(
+            """INSERT INTO device_integrations
+               (device_id, integration_type, enabled, broker_id, topic, qos, settings_json, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(device_id, integration_type) DO NOTHING""",
+            (device_id, integ_type, enabled, broker_id_val, topic, qos, settings_json, now, now),
+        )
+        if cur.lastrowid:
+            inserted_ids.append(cur.lastrowid)
+
+    if not inserted_ids:
+        # ไม่มี key ที่รู้จักในไฟล์ (หรือ device section ว่าง) — ไม่ลบไฟล์เพื่อความปลอดภัย
+        return
+
+    # Read-back เพื่อยืนยัน insert สำเร็จก่อนลบไฟล์
+    verify_rows = conn.execute(
+        "SELECT id FROM device_integrations WHERE device_id = ?", (device_id,)
+    ).fetchall()
+    verify_ids = {r["id"] for r in verify_rows}
+    if not set(inserted_ids).issubset(verify_ids):
+        return
+
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def log_qr_scan(
+    value: str,
+    device: str | None = None,
+    ts: str | None = None,
+    raw_keycode: list[int] | None = None,
+    raw_report: list[str] | None = None,
+    read_mode: str | None = None,
+) -> None:
+    """
+    บันทึก QR scan ลง qr_scans
+    raw_keycode/raw_report เก็บเป็น JSON-encoded string ถ้าไม่ None (column เพิ่มจาก migration v3)
+    read_mode: 'hidraw' | 'evdev' | None (เก็บตรงๆ ไม่ encode)
+    """
+    try:
+        raw_keycode_json = json.dumps(raw_keycode, ensure_ascii=False) if raw_keycode is not None else None
+        raw_report_json = json.dumps(raw_report, ensure_ascii=False) if raw_report is not None else None
         with _cursor() as cur:
             cur.execute(
-                "INSERT INTO qr_scans (ts, value, device) VALUES (?, ?, ?)",
-                (ts or _now_utc(), value, device),
+                "INSERT INTO qr_scans (ts, value, device, raw_keycode, raw_report, read_mode) VALUES (?, ?, ?, ?, ?, ?)",
+                (ts or _now_utc(), value, device, raw_keycode_json, raw_report_json, read_mode),
             )
     except Exception:
         pass
@@ -515,6 +838,101 @@ def delete_mqtt_topic(topic_id: int) -> bool:
     try:
         with _cursor() as cur:
             cur.execute("DELETE FROM mqtt_broker_topics WHERE id = ?", (topic_id,))
+        return True
+    except Exception:
+        return False
+
+
+def get_primary_broker_id() -> int | None:
+    """คืน id ของ broker ที่ is_primary=1 (ถ้ามี)"""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT id FROM mqtt_brokers WHERE is_primary = 1 LIMIT 1"
+        ).fetchone()
+        return int(row["id"]) if row else None
+    except sqlite3.OperationalError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Device Integration CRUD (device_integrations — migration version 2)
+# ---------------------------------------------------------------------------
+
+def _device_integration_row_to_dict(row: sqlite3.Row) -> dict[str, object]:
+    try:
+        settings = json.loads(row["settings_json"]) if row["settings_json"] else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        settings = {}
+    d: dict[str, object] = {
+        "id":               row["id"],
+        "device_id":        row["device_id"],
+        "integration_type": row["integration_type"],
+        "enabled":          bool(row["enabled"]),
+        "broker_id":        row["broker_id"],
+        "topic":            row["topic"],
+        "qos":              row["qos"],
+        "created_at":       row["created_at"],
+        "updated_at":       row["updated_at"],
+    }
+    # เติม field เฉพาะประเภทที่เก็บใน settings_json เข้าไปที่ระดับบนสุด (flatten)
+    for k, v in settings.items():
+        if k not in d:
+            d[k] = v
+    return d
+
+
+def list_device_integrations(device_id: str) -> dict[str, dict[str, object]]:
+    """คืน integration config ของ device หนึ่งตัว keyed by integration_type (webhook/mqtt/pipe)"""
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM device_integrations WHERE device_id = ?", (device_id,)
+        ).fetchall()
+        return {r["integration_type"]: _device_integration_row_to_dict(r) for r in rows}
+    except sqlite3.OperationalError:
+        return {}
+
+
+def upsert_device_integration(
+    device_id: str,
+    integration_type: str,
+    data: dict[str, object],
+) -> bool:
+    """สร้างหรืออัปเดต integration config ของ device+type (UNIQUE(device_id, integration_type))"""
+    if integration_type not in ("webhook", "mqtt", "pipe"):
+        return False
+    now = _now_utc()
+    enabled = 1 if data.get("enabled") else 0
+    broker_id = data.get("broker_id")
+    try:
+        broker_id_val: int | None = int(broker_id) if broker_id not in (None, "") else None  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        broker_id_val = None
+    topic = str(data.get("topic") or "")
+    try:
+        qos = int(data.get("qos", 1))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        qos = 1
+    known_cols = {"enabled", "broker_id", "topic", "qos", "type"}
+    extra = {k: v for k, v in data.items() if k not in known_cols}
+    settings_json = json.dumps(extra, ensure_ascii=False)
+
+    try:
+        with _cursor() as cur:
+            cur.execute(
+                """INSERT INTO device_integrations
+                   (device_id, integration_type, enabled, broker_id, topic, qos, settings_json, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(device_id, integration_type) DO UPDATE SET
+                       enabled=excluded.enabled,
+                       broker_id=excluded.broker_id,
+                       topic=excluded.topic,
+                       qos=excluded.qos,
+                       settings_json=excluded.settings_json,
+                       updated_at=excluded.updated_at""",
+                (device_id, integration_type, enabled, broker_id_val, topic, qos, settings_json, now, now),
+            )
         return True
     except Exception:
         return False

@@ -4,8 +4,12 @@ MQTT client สำหรับ VAS — publish QR scan events ออกไปย
 Dependencies:
     paho-mqtt >= 1.6  (sudo apt install -y python3-paho-mqtt)
 
-Config file:
-    {project_root}/config.json  ส่วน "mqtt": { ... }
+Config storage:
+    ตาราง mqtt_brokers ใน SQLite (~/.config/vas/vas.db) — ไม่ใช้ config.json อีกต่อไป
+
+Multi-broker:
+    รองรับ broker หลายตัว connect พร้อมกันจริง — เก็บใน `_clients: dict[int, VasMqttClient]`
+    (key = broker_id) แทน singleton ตัวเดียวแบบเดิม แต่ละ broker enable/disable อิสระต่อกัน
 """
 from __future__ import annotations
 
@@ -23,11 +27,17 @@ from urllib.parse import urlparse
 # Config
 # ---------------------------------------------------------------------------
 
-PAYLOAD_MODES = ("decoded", "raw")
+PAYLOAD_MODES = ("decoded", "raw_keycode", "raw_report")
 """
 payload_mode:
-    "decoded"  → publish ข้อมูลหลัง decode แล้ว  {"scan":"3833401723","device":"...","ts":"..."}
-    "raw"      → publish raw keycodes ก่อน decode  {"scan":[39,30,30,...],"device":"...","ts":"..."}
+    "decoded"     → publish ข้อมูลหลัง decode แล้ว     {"scan":"3833401723","device":"...","ts":"...","read_mode":"..."}
+    "raw_keycode" → publish raw keycodes ก่อน decode  {"scan":[39,30,30,...],"device":"...","ts":"...","read_mode":"..."}
+    "raw_report"  → publish raw HID byte report (hex) {"scan":["a1000000...","00000000..."],"device":"...","ts":"...","read_mode":"..."}
+                    (มีเฉพาะ read_mode="hidraw" เท่านั้น -- evdev ไม่มี raw byte report)
+
+ทุก mode แนบ field "read_mode" เข้า payload เสมอ (ค่า 'hidraw' | 'evdev' | None)
+ถ้าข้อมูลของ mode ที่เลือกเป็น None (เช่นขอ raw_report แต่ read_mode="evdev") จะไม่ publish
+และ return False -- ห้าม silent fallback ไปโหมดอื่น
 """
 
 
@@ -42,7 +52,7 @@ class MqttConfig:
     topic: str = "sterile/vending/qr/scan"
     qos: int = 1
     retain: bool = False
-    payload_mode: str = "decoded"   # "decoded" | "raw"
+    payload_mode: str = "decoded"   # "decoded" | "raw_keycode" | "raw_report"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -89,36 +99,41 @@ class MqttConfig:
         )
 
 
-def load_mqtt_config() -> MqttConfig:
-    """โหลด config จาก config.json → ส่วน "mqtt" """
-    from core.config import main_config_path
-    path = main_config_path()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return MqttConfig()
-    if not isinstance(raw, dict):
-        return MqttConfig()
-    mqtt_section = raw.get("mqtt")
-    if not isinstance(mqtt_section, dict):
-        return MqttConfig()
-    return MqttConfig.from_dict(mqtt_section)
+def broker_db_to_config(broker: dict[str, object]) -> MqttConfig:
+    """
+    แปลง row จาก mqtt_brokers (dict จาก core.database.get_mqtt_broker()) เป็น MqttConfig
+    ใช้เป็น in-memory transfer object เท่านั้น — ไม่ผูกกับไฟล์อีกต่อไป
 
+    หมายเหตุ: mqtt_brokers ไม่มี column "topic" โดยตรง (topics เก็บแยกใน mqtt_broker_topics
+    เพราะ broker หนึ่งตัวมีได้หลาย topic) — publish_qr_scan ใช้ topic แรกที่ enabled ของ
+    broker นั้น (pattern เดียวกับ mqtt_broker_test_api ใน server.py) ถ้าไม่มี topic ที่ enabled เลย
+    จะ fallback เป็นค่า default เดิม
+    """
+    topic = str(broker.get("topic") or "")
+    if not topic:
+        try:
+            from core.database import list_mqtt_topics
+            broker_id = broker.get("id")
+            if broker_id is not None:
+                topics = list_mqtt_topics(int(broker_id))  # type: ignore[arg-type]
+                topic = next((str(t["topic"]) for t in topics if t.get("enabled")), "")
+        except Exception:
+            topic = ""
+    if not topic:
+        topic = "sterile/vending/qr/scan"
 
-def save_mqtt_config(config: MqttConfig) -> None:
-    """บันทึก config ลง config.json (merge กับ section อื่นที่มีอยู่)"""
-    from core.config import main_config_path
-    path = main_config_path()
-    # โหลด existing content ก่อน (อาจมี key อื่น)
-    try:
-        raw: dict[str, object] = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            raw = {}
-    except (OSError, json.JSONDecodeError):
-        raw = {}
-    raw["mqtt"] = config.to_dict()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return MqttConfig(
+        enabled=bool(broker.get("enabled", False)),
+        broker_url=str(broker.get("broker_url") or "mqtts://localhost:8883"),
+        username=str(broker.get("username") or ""),
+        password=str(broker.get("password") or ""),
+        client_id=str(broker.get("client_id") or ""),
+        tls_insecure=bool(broker.get("tls_insecure", False)),
+        topic=topic,
+        qos=int(broker.get("qos", 1)),  # type: ignore[arg-type]
+        retain=bool(broker.get("retain", False)),
+        payload_mode=str(broker.get("payload_mode") or "decoded"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -313,29 +328,69 @@ class VasMqttClient:
         scan: str,
         device: str,
         ts: str,
-        scan_raw: "list[int] | None" = None,
+        scan_raw_keycode: "list[int] | None" = None,
+        scan_raw_report: "list[str] | None" = None,
+        read_mode: "str | None" = None,
+        topic_override: "str | None" = None,
+        payload_mode_override: "str | None" = None,
     ) -> bool:
         """
-        Publish QR scan ไปยัง topic ที่ config ไว้
+        Publish QR scan ไปยัง topic ที่ config ไว้ (หรือ topic_override ถ้าระบุ)
 
-        payload_mode == "decoded"  → {"scan": "<decoded_text>", "device":"...", "ts":"..."}
-        payload_mode == "raw"      → {"scan": [39,30,30,...],   "device":"...", "ts":"..."}
-                                     scan_raw คือ list ของ HID keycodes / evdev scancodes
-                                     ถ้า scan_raw เป็น None จะ fallback เป็น decoded mode
+        payload_mode == "decoded"     → {"scan": "<decoded_text>",  "device":"...", "ts":"...", "read_mode":"..."}
+        payload_mode == "raw_keycode" → {"scan": [39,30,30,...],    "device":"...", "ts":"...", "read_mode":"..."}
+        payload_mode == "raw_report"  → {"scan": ["a1000000...",..],"device":"...", "ts":"...", "read_mode":"..."}
+
+        ทุก mode แนบ "read_mode" เข้า payload เสมอ
+
+        ถ้าข้อมูลของ payload_mode ที่เลือกเป็น None (เช่นขอ raw_report แต่ read_mode="evdev"
+        ทำให้ scan_raw_report=None) → **ไม่ publish**, return False, log ผ่าน log_mqtt_event(ok=False)
+        พร้อมเหตุผล -- ห้าม silent fallback ไปโหมดอื่น
+
+        topic_override: ถ้าไม่ใช่ None ใช้แทน self.config.topic ทั้งใน publish() และใน
+        payload/error-log construction — ใช้สำหรับ device-aware publish
+        (ดู publish_qr_scan_for_device()) ที่ topic มาจาก device_integrations แทน broker เอง
+
+        payload_mode_override: ถ้าไม่ใช่ None และอยู่ใน PAYLOAD_MODES ใช้แทน
+        self.config.payload_mode — ให้ device_integrations (ต้นทางข้อมูลจริงคือฝั่ง QR
+        reader) กำหนดรูปแบบ payload ต่อ device ได้ แทนที่จะผูกตายตัวกับ broker เพียงอย่างเดียว
+        (broker.payload_mode ยังเป็นค่า default เผื่อ device ไม่ได้ override)
         """
         if not self.config.enabled:
             return False
 
-        if self.config.payload_mode == "raw" and scan_raw is not None:
-            scan_value: object = scan_raw
+        topic = topic_override if topic_override is not None else self.config.topic
+
+        mode = self.config.payload_mode
+        if payload_mode_override is not None and payload_mode_override in PAYLOAD_MODES:
+            mode = payload_mode_override
+        if mode == "raw_keycode":
+            scan_value: object = scan_raw_keycode
+        elif mode == "raw_report":
+            scan_value = scan_raw_report
         else:
             scan_value = scan
 
-        payload = json.dumps({"scan": scan_value, "device": device, "ts": ts}, ensure_ascii=False)
-        ok = self.publish(self.config.topic, payload)
+        if scan_value is None:
+            error_payload = json.dumps(
+                {"error": f"{mode} not available for read_mode={read_mode}"},
+                ensure_ascii=False,
+            )
+            try:
+                from core.database import log_mqtt_event as _db_mqtt
+                _db_mqtt(scan=scan, topic=topic, payload=error_payload, ok=False, ts=ts)
+            except Exception:
+                pass
+            return False
+
+        payload = json.dumps(
+            {"scan": scan_value, "device": device, "ts": ts, "read_mode": read_mode},
+            ensure_ascii=False,
+        )
+        ok = self.publish(topic, payload)
         try:
             from core.database import log_mqtt_event as _db_mqtt
-            _db_mqtt(scan=scan, topic=self.config.topic, payload=payload, ok=ok, ts=ts)
+            _db_mqtt(scan=scan, topic=topic, payload=payload, ok=ok, ts=ts)
         except Exception:
             pass
         return ok
@@ -353,62 +408,208 @@ class VasMqttClient:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton
+# Module-level multi-client registry
 # ---------------------------------------------------------------------------
+#
+# แทนที่ singleton ตัวเดียว (_client) ด้วย dict เก็บ client ต่อ broker_id — รองรับหลาย broker
+# connect พร้อมกันจริง แต่ละ broker enable/disable อิสระต่อกัน (broker หนึ่งตัว connect fail
+# ต้องไม่กระทบ broker ตัวอื่น — ดู start_all_enabled_brokers())
 
-_client: VasMqttClient | None = None
+_clients: dict[int, VasMqttClient] = {}
 _client_lock = threading.Lock()
 
 
-def get_mqtt_client() -> VasMqttClient | None:
+def get_mqtt_client(broker_id: int | None = None) -> VasMqttClient | None:
+    """
+    คืน client ตาม broker_id ที่ระบุ — ถ้าไม่ระบุ (None) ใช้ primary broker
+    คืน None ถ้าไม่มี client สำหรับ broker นั้น (ยังไม่ได้ connect หรือไม่มี broker)
+    """
     with _client_lock:
-        return _client
+        if broker_id is not None:
+            return _clients.get(broker_id)
+        primary_clients = dict(_clients)
+    if broker_id is None:
+        from core.database import get_primary_broker_id
+        primary_id = get_primary_broker_id()
+        if primary_id is None:
+            return None
+        return primary_clients.get(primary_id)
+    return None
+
+
+def start_mqtt_broker(broker_id: int) -> VasMqttClient:
+    """
+    โหลด broker จาก DB ตาม broker_id, แปลงด้วย broker_db_to_config, สร้าง/เก็บใน
+    _clients[broker_id] แล้ว connect() — ถ้ามี client เดิมของ broker นี้อยู่แล้วจะ disconnect ก่อน
+
+    Raises:
+        ImportError: ถ้า paho-mqtt ไม่ได้ติดตั้ง
+        ValueError: ถ้าไม่พบ broker ตาม broker_id
+    """
+    from core.database import get_mqtt_broker
+    broker = get_mqtt_broker(broker_id)
+    if broker is None:
+        raise ValueError(f"MQTT broker not found: id={broker_id}")
+
+    cfg = broker_db_to_config(broker)
+    with _client_lock:
+        existing = _clients.get(broker_id)
+        if existing is not None:
+            existing.disconnect()
+        c = VasMqttClient(cfg)
+        c.connect()
+        _clients[broker_id] = c
+    return c
+
+
+def stop_mqtt_broker(broker_id: int) -> None:
+    """Disconnect broker ตาม broker_id แล้วลบออกจาก _clients"""
+    with _client_lock:
+        c = _clients.pop(broker_id, None)
+    if c is not None:
+        c.disconnect()
+
+
+def start_all_enabled_brokers() -> None:
+    """
+    วน broker ทุกตัวที่ enabled=1 ใน DB แล้วเรียก start_mqtt_broker ทีละตัว
+    แยก try/except ต่อ broker — broker ตัวหนึ่ง connect fail ต้องไม่ทำให้ตัวอื่นไม่ทำงาน
+    """
+    from core.database import list_mqtt_brokers
+    for broker in list_mqtt_brokers():
+        if not broker.get("enabled"):
+            continue
+        broker_id = broker.get("id")
+        if broker_id is None:
+            continue
+        try:
+            start_mqtt_broker(int(broker_id))  # type: ignore[arg-type]
+        except Exception:
+            pass  # broker ตัวนี้ connect ไม่สำเร็จ — ไม่กระทบ broker ตัวอื่น
 
 
 def start_mqtt(config: MqttConfig | None = None) -> VasMqttClient:
     """
-    เริ่ม MQTT client global singleton.
-    ถ้า config=None จะโหลดจาก config.json
+    (Legacy compat) เริ่ม MQTT client โดยใช้ config ที่ให้มาตรงๆ โดยไม่ผูกกับ broker_id ใน DB
+    ใช้ broker_id=0 เป็น key ภายใน — สำหรับ caller เดิม (เช่น `vas mqtt test`) ที่ยังไม่ได้ผ่าน DB
+    ถ้า config=None จะใช้ primary broker จาก DB แทน
+
     Raises:
         ImportError: ถ้า paho-mqtt ไม่ได้ติดตั้ง
     """
-    global _client
-    cfg = config or load_mqtt_config()
+    if config is None:
+        from core.database import get_primary_broker_id, get_mqtt_broker
+        primary_id = get_primary_broker_id()
+        if primary_id is not None:
+            return start_mqtt_broker(primary_id)
+        config = MqttConfig()
+
     with _client_lock:
-        if _client is not None:
-            _client.disconnect()
-        c = VasMqttClient(cfg)
+        existing = _clients.get(0)
+        if existing is not None:
+            existing.disconnect()
+        c = VasMqttClient(config)
         c.connect()
-        _client = c
+        _clients[0] = c
     return c
 
 
 def stop_mqtt() -> None:
-    global _client
+    """
+    Disconnect + ลบ client ทั้งหมดใน registry (ทุก broker) — ใช้สำหรับ shutdown/legacy
+    single-connection call sites ที่คาดหวังพฤติกรรม "ตัด MQTT ทั้งหมด"
+    """
     with _client_lock:
-        if _client is not None:
-            _client.disconnect()
-            _client = None
+        clients = list(_clients.values())
+        _clients.clear()
+    for c in clients:
+        c.disconnect()
 
 
 def publish_qr_scan(
     scan: str,
     device: str,
     ts: str,
-    scan_raw: "list[int] | None" = None,
+    scan_raw_keycode: "list[int] | None" = None,
+    scan_raw_report: "list[str] | None" = None,
+    read_mode: "str | None" = None,
 ) -> bool:
-    """Convenience wrapper — ส่งออก MQTT ถ้า client เชื่อมต่ออยู่"""
-    with _client_lock:
-        c = _client
+    """
+    Convenience wrapper — publish ไปยัง broker ที่ is_primary=1 เท่านั้น (ไม่ device-aware
+    routing — เลือก broker ตาม device_integrations เป็น scope ของรอบถัดไป)
+    """
+    from core.database import get_primary_broker_id
+    primary_id = get_primary_broker_id()
+    if primary_id is None:
+        return False
+    c = get_mqtt_client(primary_id)
     if c is None:
         return False
-    return c.publish_qr_scan(scan, device, ts, scan_raw=scan_raw)
+    return c.publish_qr_scan(
+        scan, device, ts,
+        scan_raw_keycode=scan_raw_keycode,
+        scan_raw_report=scan_raw_report,
+        read_mode=read_mode,
+    )
+
+
+def publish_qr_scan_for_device(
+    device_id: str,
+    scan: str,
+    device: str,
+    ts: str,
+    scan_raw_keycode: "list[int] | None" = None,
+    scan_raw_report: "list[str] | None" = None,
+    read_mode: "str | None" = None,
+) -> bool:
+    """
+    Device-aware publish — เลือก broker ตาม device_integrations ของ device_id นั้นๆ แทน
+    primary broker ตรงๆ (ต่างจาก publish_qr_scan() ด้านบนที่เป็น primary-broker-only)
+
+    Return False (ไม่ error) ถ้า:
+        - device ไม่มี integration แบบ "mqtt" หรือไม่ enabled
+        - integration ไม่มี broker_id ผูกไว้
+        - broker ที่ผูกไว้ยังไม่มี client connect อยู่ (get_mqtt_client คืน None)
+
+    payload_mode: อ่านจาก device_integrations (mqtt_integ["payload_mode"]) ถ้าตั้งไว้ — เก็บใน
+    settings_json ผ่าน upsert_device_integration() แบบเดียวกับ field เสริมอื่นๆ (ไม่ต้อง
+    migration schema เพิ่ม) ถือเป็น override เหนือ broker.payload_mode เพราะข้อมูล raw
+    ต้นทางจริงๆ มาจากฝั่ง QR reader ต่อ device ไม่ใช่จากฝั่ง broker — ถ้า device ไม่ได้ตั้งไว้
+    (None/ค่าว่าง) จะ fallback ไปใช้ payload_mode ของ broker เอง (ดู publish_qr_scan())
+
+    หมายเหตุ: นี่คือ code path ที่ SSE loop (server.py qr_stream_api) ใช้จริง — แยกจาก
+    publish_qr_scan() ที่ยังใช้กับ `vas mqtt test` / `/api/mqtt/test` เหมือนเดิม
+    """
+    from core.database import list_device_integrations, get_mqtt_broker  # noqa: F401
+
+    integrations = list_device_integrations(device_id)
+    mqtt_integ = integrations.get("mqtt")
+    if not mqtt_integ or not mqtt_integ.get("enabled"):
+        return False
+
+    broker_id = mqtt_integ.get("broker_id")
+    if broker_id is None:
+        return False
+
+    c = get_mqtt_client(broker_id)  # type: ignore[arg-type]
+    if c is None:
+        return False
+
+    topic = mqtt_integ.get("topic") or None
+    payload_mode = mqtt_integ.get("payload_mode") or None
+    return c.publish_qr_scan(
+        scan, device, ts,
+        scan_raw_keycode=scan_raw_keycode,
+        scan_raw_report=scan_raw_report,
+        read_mode=read_mode,
+        topic_override=topic,  # type: ignore[arg-type]
+        payload_mode_override=payload_mode,  # type: ignore[arg-type]
+    )
 
 
 def get_mqtt_status() -> dict[str, object]:
-    """Return status dict ที่ใช้ใน API/template"""
-    with _client_lock:
-        c = _client
+    """Return status dict ของ primary broker — ใช้ใน API/template (legacy single-status view)"""
+    c = get_mqtt_client(None)
     if c is None:
         return {
             "enabled": False,
@@ -432,20 +633,17 @@ def _paho_available() -> bool:
 def get_broker_connection_status(broker_id: int) -> dict[str, object]:
     """คืน connection status ของ broker ตาม id — ใช้ใน detail page"""
     with _client_lock:
-        c = _client
+        c = _clients.get(broker_id)
+    is_active = c is not None
     if c is None:
-        return {"connected": False, "broker_url": None, "last_error": None}
+        return {"connected": False, "is_active": False, "broker_url": None, "last_error": None}
     status = c.status_dict()
-    # ตรวจว่า active client กำลังใช้ broker นี้อยู่หรือเปล่า
-    from core.database import get_mqtt_broker
-    broker = get_mqtt_broker(broker_id)
-    if broker and status.get("broker_url") == broker.get("broker_url"):
-        return {
-            "connected": status.get("connected", False),
-            "broker_url": status.get("broker_url"),
-            "last_error": status.get("last_error"),
-        }
-    return {"connected": False, "broker_url": None, "last_error": None}
+    return {
+        "connected": status.get("connected", False),
+        "is_active": is_active,
+        "broker_url": status.get("broker_url"),
+        "last_error": status.get("last_error"),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -679,9 +679,13 @@ def create_app() -> Flask:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    # ── Database init ────────────────────────────────────────────
-    from core.database import init_db as _init_db
-    _init_db()
+    # ── Database version check (read-only — ไม่เขียน schema ตอน boot อีกต่อไป) ──
+    from core.database import init_db as _init_db, SchemaOutOfDateError as _SchemaOutOfDateError
+    try:
+        _init_db()
+    except _SchemaOutOfDateError as exc:
+        print(f"[FATAL] {exc}")
+        raise
 
     import atexit
     from features.qr.reader import stop_reader as _stop_qr_reader
@@ -697,12 +701,10 @@ def create_app() -> Flask:
     except Exception:
         pass  # ยังไม่มี device — reader จะ start เมื่อกด restart หรือเสียบ USB ใหม่
 
-    # Auto-start MQTT ถ้า enabled
+    # Auto-start ทุก MQTT broker ที่ enabled=1 ใน DB (แยก try/except ต่อ broker อยู่ภายใน)
     try:
-        from features.mqtt.client import load_mqtt_config as _load_mqtt_cfg, start_mqtt as _auto_start_mqtt
-        _mqtt_boot_cfg = _load_mqtt_cfg()
-        if _mqtt_boot_cfg.enabled:
-            _auto_start_mqtt(_mqtt_boot_cfg)
+        from features.mqtt.client import start_all_enabled_brokers as _auto_start_brokers
+        _auto_start_brokers()
     except Exception:
         pass
 
@@ -806,7 +808,9 @@ def create_app() -> Flask:
         SSE event format:
 
             event: scan
-            data: {"scan": "<value>", "device": "<path>", "ts": "<ISO8601-UTC>"}
+            data: {"scan": "<value>", "device": "<path>", "ts": "<ISO8601-UTC>",
+                   "raw_keycode": [<int>,...]|null, "raw_report": [<hex str>,...]|null,
+                   "read_mode": "hidraw"|"evdev"|null}
 
             event: status
             data: {"running": <bool>, "device": "<path>"|null}
@@ -875,18 +879,33 @@ def create_app() -> Flask:
                         if scan is not None and scan != last_seen:
                             last_seen = scan
                             ts = datetime.now(timezone.utc).isoformat()
-                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts})}\n\n"
+                            scan_raw_keycode = getattr(reader, "last_scan_raw", None)
+                            scan_raw_report = getattr(reader, "last_scan_raw_report", None)
+                            read_mode = getattr(reader, "read_mode", None)
+                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts, 'raw_keycode': scan_raw_keycode, 'raw_report': scan_raw_report, 'read_mode': read_mode})}\n\n"
                             # Log QR scan ลง DB
                             try:
                                 from core.database import log_qr_scan as _db_log_qr
-                                _db_log_qr(scan, reader.device_path, ts)
+                                _db_log_qr(
+                                    scan, reader.device_path, ts,
+                                    raw_keycode=scan_raw_keycode,
+                                    raw_report=scan_raw_report,
+                                    read_mode=read_mode,
+                                )
                             except Exception:
                                 pass
-                            # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่
+                            # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่ (device-aware routing
+                            # ตาม device_integrations — คนละ code path จาก publish_qr_scan()
+                            # ที่ใช้กับ `vas mqtt test` / `/api/mqtt/test`)
                             try:
-                                from features.mqtt.client import publish_qr_scan as _mqtt_publish
-                                scan_raw = getattr(reader, "last_scan_raw", None)
-                                _mqtt_publish(scan, reader.device_path, ts, scan_raw=scan_raw)
+                                from features.mqtt.client import publish_qr_scan_for_device as _mqtt_publish
+                                _mqtt_publish(
+                                    "zkteco-qr500",
+                                    scan, reader.device_path, ts,
+                                    scan_raw_keycode=scan_raw_keycode,
+                                    scan_raw_report=scan_raw_report,
+                                    read_mode=read_mode,
+                                )
                             except Exception:
                                 pass
             except GeneratorExit:
@@ -1013,7 +1032,7 @@ def create_app() -> Flask:
     def mqtt_page() -> str:
         from core.database import list_mqtt_brokers
         from features.mqtt.client import get_mqtt_client
-        c = get_mqtt_client()
+        c = get_mqtt_client()  # primary broker client (ถ้ามี)
         active_url = c.config.broker_url if c else None
         brokers = list_mqtt_brokers()
         return render_template(
@@ -1081,15 +1100,16 @@ def create_app() -> Flask:
     def mqtt_broker_update_api(broker_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
         """อัปเดต broker"""
         from core.database import update_mqtt_broker, get_mqtt_broker
-        from features.mqtt.client import start_mqtt_broker, stop_mqtt
+        from features.mqtt.client import start_mqtt_broker, stop_mqtt_broker
         payload = request.get_json(silent=True) or {}
         try:
             ok = update_mqtt_broker(broker_id, payload)
             if not ok:
                 return {"status": "error", "errors": ["update ไม่สำเร็จ"]}, 500
             broker = get_mqtt_broker(broker_id)
-            if broker and broker.get("is_primary"):
-                stop_mqtt()
+            if broker:
+                # reload connection ของ broker นี้เท่านั้น (ไม่กระทบ broker ตัวอื่นที่ connect อยู่)
+                stop_mqtt_broker(broker_id)
                 if broker.get("enabled"):
                     try:
                         start_mqtt_broker(broker_id)
@@ -1103,12 +1123,10 @@ def create_app() -> Flask:
     def mqtt_broker_delete_api(broker_id: int) -> tuple[dict[str, object], int] | dict[str, object]:
         """ลบ broker"""
         from core.database import delete_mqtt_broker, get_mqtt_broker
-        from features.mqtt.client import stop_mqtt, get_mqtt_client
+        from features.mqtt.client import stop_mqtt_broker
         broker = get_mqtt_broker(broker_id)
-        if broker and broker.get("is_primary"):
-            c = get_mqtt_client()
-            if c and c.config.broker_url == broker.get("broker_url"):
-                stop_mqtt()
+        if broker:
+            stop_mqtt_broker(broker_id)
         ok = delete_mqtt_broker(broker_id)
         if not ok:
             return {"status": "error", "errors": ["ลบไม่สำเร็จ"]}, 500
@@ -1133,12 +1151,8 @@ def create_app() -> Flask:
 
     @app.post("/api/mqtt/brokers/<int:broker_id>/disconnect")
     def mqtt_broker_disconnect_api(broker_id: int) -> dict[str, object]:
-        from features.mqtt.client import stop_mqtt, get_mqtt_client
-        from core.database import get_mqtt_broker
-        broker = get_mqtt_broker(broker_id)
-        c = get_mqtt_client()
-        if broker and c and c.config.broker_url == broker.get("broker_url"):
-            stop_mqtt()
+        from features.mqtt.client import stop_mqtt_broker
+        stop_mqtt_broker(broker_id)
         return {"status": "ok", "connected": False}
 
     @app.post("/api/mqtt/brokers/<int:broker_id>/test")
@@ -1151,7 +1165,7 @@ def create_app() -> Flask:
         broker = get_mqtt_broker(broker_id)
         if broker is None:
             return {"status": "error", "errors": ["ไม่พบ broker"]}, 404
-        c = get_mqtt_client()
+        c = get_mqtt_client(broker_id)
         conn = get_broker_connection_status(broker_id)
         if not conn.get("is_active") or not conn.get("connected"):
             return {"status": "error", "errors": ["broker นี้ไม่ได้ active หรือยังไม่เชื่อมต่อ"]}, 400
@@ -1199,18 +1213,44 @@ def create_app() -> Flask:
         return {"status": "ok"} if ok else ({"status": "error", "errors": ["ลบไม่สำเร็จ"]}, 500)
 
     # ── Legacy single-config MQTT API (kept for backward compat) ──
+    # อ่าน/เขียน mqtt_brokers (primary broker) แทน config.json
 
     @app.post("/api/mqtt/config")
     def mqtt_config_save_api() -> tuple[dict[str, object], int] | dict[str, object]:
-        from features.mqtt.client import MqttConfig, save_mqtt_config, start_mqtt, stop_mqtt, load_mqtt_config
+        from features.mqtt.client import (
+            MqttConfig, broker_db_to_config, start_mqtt_broker, stop_mqtt_broker,
+        )
+        from core.database import (
+            get_primary_broker_id, get_mqtt_broker, create_mqtt_broker, update_mqtt_broker,
+        )
         payload = request.get_json(silent=True) or {}
         try:
-            old_config = load_mqtt_config()
             config = MqttConfig.from_dict(payload)
-            save_mqtt_config(config)
-            stop_mqtt()
+            primary_id = get_primary_broker_id()
+            if primary_id is not None:
+                old_broker = get_mqtt_broker(primary_id)
+                old_config = broker_db_to_config(old_broker) if old_broker else MqttConfig()
+                update_mqtt_broker(primary_id, {**(old_broker or {}), **config.to_dict(), "is_primary": True})
+                broker_id = primary_id
+            else:
+                old_config = MqttConfig()
+                broker_id = create_mqtt_broker({
+                    **config.to_dict(),
+                    "name": "Primary broker",
+                    "is_primary": True,
+                })
+            # mqtt_brokers ไม่มี column "topic" โดยตรง — sync เข้า mqtt_broker_topics แทน
+            if config.topic:
+                from core.database import list_mqtt_topics, add_mqtt_topic, update_mqtt_topic
+                existing_topics = list_mqtt_topics(broker_id)
+                match = next((t for t in existing_topics if t["topic"] == config.topic), None)
+                if match is not None:
+                    update_mqtt_topic(match["id"], {"topic": config.topic, "label": match.get("label", ""), "enabled": True})
+                else:
+                    add_mqtt_topic(broker_id, config.topic)
+            stop_mqtt_broker(broker_id)
             if config.enabled:
-                start_mqtt(config)
+                start_mqtt_broker(broker_id)
         except ImportError as e:
             return {"status": "error", "errors": [str(e)]}, 500
         except Exception as e:
@@ -1230,7 +1270,7 @@ def create_app() -> Flask:
         from features.mqtt.client import get_mqtt_client
         from datetime import datetime, timezone
         import json as _j
-        c = get_mqtt_client()
+        c = get_mqtt_client()  # primary broker
         if c is None:
             return {"status": "error", "errors": ["MQTT client ยังไม่ได้เชื่อมต่อ"]}, 400
         if not c.is_connected:
@@ -1246,8 +1286,11 @@ def create_app() -> Flask:
 
     @app.post("/api/mqtt/disconnect")
     def mqtt_disconnect_api() -> dict[str, object]:
-        from features.mqtt.client import stop_mqtt
-        stop_mqtt()
+        from features.mqtt.client import stop_mqtt_broker
+        from core.database import get_primary_broker_id
+        primary_id = get_primary_broker_id()
+        if primary_id is not None:
+            stop_mqtt_broker(primary_id)
         return {"status": "ok", "connected": False}
 
     # ── MQTT Monitor (background subscriber for live testing) ─────

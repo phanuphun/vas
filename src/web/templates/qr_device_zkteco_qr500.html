@@ -66,6 +66,16 @@
   .integ-body { padding:1rem 1.25rem; display:flex; flex-direction:column; gap:.875rem; }
   .integ-body.is-hidden { display:none; }
   .payload-box { font-family:'Bai Jamjuree',monospace; font-size:.75rem; background:rgb(var(--c-surface)); border:1px solid rgb(var(--c-line)/0.10); border-radius:.5rem; padding:.75rem 1rem; color:rgb(var(--c-muted)); line-height:1.6; white-space:pre-wrap; word-break:break-all; }
+
+  /* ── Scan display mode toggle ──────────────── */
+  .scan-mode-btn {
+    padding:.32rem .7rem; font-size:.74rem; font-weight:600; border-radius:.5rem;
+    border:1px solid rgb(var(--c-line)/0.14); background:rgb(var(--c-card));
+    color:rgb(var(--c-muted)); cursor:pointer; transition:background .15s,color .15s,border-color .15s;
+    font-family:'Bai Jamjuree',sans-serif;
+  }
+  .scan-mode-btn:hover { background:rgb(var(--c-surface-2)); color:rgb(var(--c-ink)); }
+  .scan-mode-btn.is-active { background:rgb(var(--c-accent)/0.08); border-color:rgb(var(--c-accent)/0.4); color:rgb(var(--c-accent)); }
 </style>
 
 <div style="display:flex;flex-direction:column;gap:1rem;max-width:100%;">
@@ -174,12 +184,17 @@
     </div>
   </div>
   <div class="px-5 py-5">
+    <div class="flex items-center gap-1.5 mb-3">
+      <button type="button" class="scan-mode-btn is-active" data-mode="decoded" onclick="setScanDisplayMode('decoded')">Decoded</button>
+      <button type="button" class="scan-mode-btn" data-mode="raw_keycode" onclick="setScanDisplayMode('raw_keycode')">Raw Keycode</button>
+      <button type="button" class="scan-mode-btn" data-mode="raw_report" onclick="setScanDisplayMode('raw_report')">Raw Report</button>
+    </div>
     <div id="qr-scan-display"
          class="font-display text-[2.2rem] font-bold leading-none tracking-wide text-faint"
          style="min-height:2.75rem;word-break:break-all;transition:color .3s;">
       {{ qr_reader.last_scan or '—' }}
     </div>
-    <p class="mt-2 text-[0.72rem] text-faint">รับข้อมูล real-time ผ่าน SSE &nbsp;·&nbsp; กด Copy เพื่อคัดลอกค่า</p>
+    <p class="mt-2 text-[0.72rem] text-faint">รับข้อมูล real-time ผ่าน SSE &nbsp;·&nbsp; กด Copy เพื่อคัดลอกค่าตามโหมดที่เลือก</p>
   </div>
 </div>
 
@@ -457,8 +472,20 @@
         </div>
       </div>
       <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted">Payload Mode</label>
+        <select id="mqtt-payload-mode"
+                class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-display">
+          <option value="" {{ 'selected' if not integrations.mqtt.payload_mode else '' }}>ใช้ค่า default ของ Broker ที่เลือก</option>
+          <option value="decoded" {{ 'selected' if integrations.mqtt.payload_mode == 'decoded' else '' }}>Decoded — ข้อความที่ decode แล้ว</option>
+          <option value="raw_keycode" {{ 'selected' if integrations.mqtt.payload_mode == 'raw_keycode' else '' }}>Raw Keycode — HID keycode/scancode ดิบ</option>
+          <option value="raw_report" {{ 'selected' if integrations.mqtt.payload_mode == 'raw_report' else '' }}>Raw Report — HID byte report ดิบทั้งก้อน (hidraw เท่านั้น)</option>
+        </select>
+        <p class="text-[0.72rem] text-faint mt-0.5">กำหนดรูปแบบข้อมูลที่ publish จากตัวอ่าน QR นี้โดยเฉพาะ — ถ้าไม่เลือกจะใช้ payload mode ของ Broker แทน</p>
+      </div>
+      <div class="flex flex-col gap-1.5">
         <label class="text-[0.75rem] font-semibold text-muted">Payload (ตัวอย่าง)</label>
-        <pre class="payload-box">{"scan":"1234567890","device":"/dev/hidraw0","ts":"2026-06-27T11:40:18Z"}</pre>
+        <pre class="payload-box">{"scan":"1234567890","device":"/dev/hidraw0","ts":"2026-06-27T11:40:18Z","read_mode":"hidraw"}</pre>
+        <p class="text-[0.72rem] text-faint mt-0.5">รูปแบบของ scan ขึ้นอยู่กับ Payload Mode ด้านบน — ถ้าไม่ได้ตั้งจะ fallback ไปใช้ payload mode ของ broker ที่เลือก</p>
       </div>
       <div class="flex justify-end">
         <button onclick="saveInteg('mqtt')"
@@ -544,6 +571,10 @@
   var sse = null;
   var scanCount = 0;
   var lastScanVal = null;
+  var lastScanRawKeycode = null;
+  var lastScanRawReport = null;
+  var lastScanReadMode = null;
+  var scanDisplayMode = 'decoded';  // 'decoded' | 'raw_keycode' | 'raw_report' — default = decoded
   var scanHistory = [];
   var MAX_HIST = 50;
   var agoInterval = null;
@@ -568,7 +599,9 @@
     sse.addEventListener('scan', function (e) {
       try {
         var data = JSON.parse(e.data);
-        onScan(data.value, data.device);
+        /* หมายเหตุ: SSE payload ใช้ key "scan" (ไม่ใช่ "value") ตาม server.py qr_stream_api
+           แนบ raw_keycode/raw_report/read_mode มาด้วยเสมอ (null ได้ถ้าไม่มีข้อมูลของโหมดนั้น) */
+        onScan(data);
       } catch (_) {}
     });
 
@@ -601,10 +634,63 @@
     if (hbadge) hbadge.className = 'zone ' + (online ? 'zone-safe' : 'zone-neutral');
   }
 
+  /* ══ Scan display mode toggle ════════════════════════════════════════════ */
+  function formatHexReport(hex) {
+    return (String(hex).match(/.{1,2}/g) || []).join(' ');
+  }
+
+  function renderScanDisplay() {
+    var disp = document.getElementById('qr-scan-display');
+    if (!disp) return;
+
+    if (lastScanVal == null) {
+      disp.className = 'font-display text-[2.2rem] font-bold leading-none tracking-wide text-faint';
+      disp.textContent = '—';
+      return;
+    }
+
+    var text = '—';
+    var isRaw = false;
+
+    if (scanDisplayMode === 'raw_keycode') {
+      isRaw = true;
+      text = (lastScanRawKeycode && lastScanRawKeycode.length)
+        ? lastScanRawKeycode.join(' ')
+        : 'ไม่มีข้อมูล raw_keycode สำหรับการสแกนนี้';
+    } else if (scanDisplayMode === 'raw_report') {
+      isRaw = true;
+      text = (lastScanRawReport && lastScanRawReport.length)
+        ? lastScanRawReport.map(function (r, i) { return '#' + (i + 1) + '  ' + formatHexReport(r); }).join('\n')
+        : 'ไม่มีข้อมูล raw_report — มีเฉพาะ read_mode=hidraw (ตอนนี้ read_mode=' + (lastScanReadMode || '-') + ')';
+    } else {
+      text = lastScanVal;
+    }
+
+    disp.className = isRaw
+      ? 'font-display text-[0.82rem] font-mono font-semibold leading-relaxed tracking-normal text-ink'
+      : 'font-display text-[2.2rem] font-bold leading-none tracking-wide text-ink';
+    disp.style.whiteSpace = isRaw ? 'pre-wrap' : 'normal';
+    disp.textContent = text;
+  }
+
+  window.setScanDisplayMode = function (mode) {
+    scanDisplayMode = mode;
+    document.querySelectorAll('.scan-mode-btn').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.dataset.mode === mode);
+    });
+    renderScanDisplay();
+  };
+
   /* ══ Scan handler ════════════════════════════════════════════════════════ */
-  function onScan(value, device) {
+  function onScan(data) {
+    var value  = data.scan;
+    var device = data.device;
+
     scanCount++;
-    lastScanVal  = value;
+    lastScanVal         = value;
+    lastScanRawKeycode  = (data.raw_keycode !== undefined) ? data.raw_keycode : null;
+    lastScanRawReport   = (data.raw_report  !== undefined) ? data.raw_report  : null;
+    lastScanReadMode    = (data.read_mode   !== undefined) ? data.read_mode   : null;
     lastScanDate = new Date();
 
     /* stat row */
@@ -615,11 +701,10 @@
     var dEl = document.getElementById('stat-device');
     if (dEl && device) dEl.textContent = device;
 
-    /* live display */
+    /* live display — เรนเดอร์ตาม scanDisplayMode ที่เลือกไว้ (default decoded) */
+    renderScanDisplay();
     var disp = document.getElementById('qr-scan-display');
     if (disp) {
-      disp.textContent = value;
-      disp.style.color = 'rgb(var(--c-ink))';
       disp.classList.remove('scan-flash');
       void disp.offsetWidth; /* reflow */
       disp.classList.add('scan-flash');
@@ -764,7 +849,16 @@
   /* ══ Copy scan value ═════════════════════════════════════════════════════ */
   window.copyScanValue = function () {
     if (lastScanVal == null) return;
-    copyValue(lastScanVal);
+    var text;
+    if (scanDisplayMode === 'raw_keycode') {
+      text = (lastScanRawKeycode && lastScanRawKeycode.length) ? JSON.stringify(lastScanRawKeycode) : '';
+    } else if (scanDisplayMode === 'raw_report') {
+      text = (lastScanRawReport && lastScanRawReport.length) ? JSON.stringify(lastScanRawReport) : '';
+    } else {
+      text = lastScanVal;
+    }
+    if (!text) return;
+    copyValue(text);
   };
 
   /* ══ Unified tab switching (4 tabs) ══════════════════════════════════════ */
@@ -805,9 +899,10 @@
       payload.retry       = parseInt((document.getElementById('webhook-retry')   || {}).value || '5', 10);
       payload.timeout_sec = parseInt((document.getElementById('webhook-timeout') || {}).value || '5', 10);
     } else if (type === 'mqtt') {
-      payload.broker_id  = parseInt((document.getElementById('mqtt-broker-id') || {}).value || '0', 10) || null;
-      payload.topic      = (document.getElementById('mqtt-topic')       || {}).value || 'vas/qr/scan';
-      payload.qos        = parseInt((document.getElementById('mqtt-qos') || {}).value || '1', 10);
+      payload.broker_id    = parseInt((document.getElementById('mqtt-broker-id') || {}).value || '0', 10) || null;
+      payload.topic        = (document.getElementById('mqtt-topic')       || {}).value || 'vas/qr/scan';
+      payload.qos          = parseInt((document.getElementById('mqtt-qos') || {}).value || '1', 10);
+      payload.payload_mode = (document.getElementById('mqtt-payload-mode') || {}).value || null;
     } else if (type === 'pipe') {
       payload.path = (document.getElementById('pipe-path') || {}).value || '/tmp/vas_qr_pipe';
     }

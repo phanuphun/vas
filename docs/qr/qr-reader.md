@@ -1,15 +1,15 @@
 # QR Reader — เอกสารระบบ
 
-ไฟล์หลัก: `src/qr_reader.py`
+ไฟล์หลัก: `src/features/qr/reader.py`
 
 ## ภาพรวม
 
-VAS รองรับเครื่องอ่าน QR รุ่น **ZKTeco QR500-BM** (VendorID `0416`, ProductID `5020`) ผ่าน USB HID สามารถทำงานได้สองโหมด ขึ้นอยู่กับการตั้งค่าของอุปกรณ์:
+VAS รองรับเครื่องอ่าน QR รุ่น **ZKTeco QR500-BM** (VendorID `0416`, ProductID `5020`) ผ่าน USB HID สามารถทำงานได้สองโหมด ขึ้นอยู่กับการตั้งค่าของอุปกรณ์ — **รองรับทั้งสองโหมดพร้อมกันได้ (hybrid)** ต่อเครื่อง ไม่ได้บังคับให้ใช้โหมดใดโหมดหนึ่งเท่านั้น:
 
-| โหมด | Device path | คลาส Thread |
-|------|-------------|--------------|
-| HID Keyboard = Close (HID Raw) | `/dev/hidraw*` | `QrReaderThread` |
-| HID Keyboard = Open (evdev) | `/dev/input/event*` | `EvdevQrReaderThread` |
+| โหมด | Device path | คลาส Thread | `read_mode` | Raw byte report |
+|------|-------------|--------------|-------------|------------------|
+| HID Keyboard = Close (HID Raw) | `/dev/hidraw*` | `QrReaderThread` | `"hidraw"` | มี (`last_scan_raw_report`) |
+| HID Keyboard = Open (evdev) | `/dev/input/event*` | `EvdevQrReaderThread` | `"evdev"` | ไม่มี (`None` เสมอ — evdev ไม่มี raw USB byte report ให้ดัก) |
 
 ---
 
@@ -22,10 +22,12 @@ VAS รองรับเครื่องอ่าน QR รุ่น **ZKTeco
 - `KEYCODE_SHIFT_MAP`: keycode → character (กด shift)
 - `SHIFT_MASK = 0x22` — bitmask ตรวจ left/right shift ใน byte[0] ของ report
 - `ENTER_KEYCODE = 40` — keycode ของ Enter ที่ใช้เป็น end-of-scan marker
-- `REPORT_SIZE = 64` — ขนาด HID report (bytes)
+- `REPORT_SIZE = 64` — ขนาด HID report (bytes) ที่อ่านต่อครั้งด้วย `os.read()`
 
 ### `EVDEV_KEYMAP`
 ใช้สำหรับโหมด evdev — แปลง Linux evdev scancode เป็น character
+
+**หมายเหตุสำคัญ:** keycode (hidraw) กับ scancode (evdev) เป็นคนละ numbering space กัน แม้ตัวอักษรผลลัพธ์จะเหมือนกัน (เช่น "1" = keycode `30` ฝั่ง hidraw แต่ = scancode `2` ฝั่ง evdev) — ดูฟิลด์ `read_mode` เพื่อรู้ว่ากำลังตีความ raw data ชุดไหนอยู่
 
 ### `EVDEV_DEVICE_NAMES`
 ```python
@@ -120,8 +122,10 @@ Background daemon thread อ่าน raw HID report จาก `/dev/hidraw*`
 ```python
 thread = QrReaderThread(device_path="/dev/hidraw0")
 thread.start()
-scan     = thread.last_scan      # decoded text เช่น "3833401723"
-scan_raw = thread.last_scan_raw  # raw keycodes เช่น [39, 30, 30, 32]
+scan            = thread.last_scan              # decoded text เช่น "3833401723"
+scan_raw        = thread.last_scan_raw           # raw keycodes เช่น [39, 30, 30, 32]
+scan_raw_report = thread.last_scan_raw_report     # raw HID byte report (hex) — ทุก frame
+read_mode       = thread.read_mode                # "hidraw" (คงที่)
 thread.stop()
 thread.join(timeout=2.0)
 ```
@@ -129,12 +133,15 @@ thread.join(timeout=2.0)
 **Main loop (`run`):**
 1. เปิด device file ใน binary mode
 2. อ่าน 64 bytes ต่อ report ด้วย `os.read()`
-3. ถ้า report มี Enter keycode → flush buffer → อัปเดต `_last_scan` และ `_last_scan_raw`
-4. วนซ้ำจนกว่า `_stop_event` จะถูก set หรือ I/O error
+3. เก็บ `report.hex()` ของ**ทุก**report ที่อ่านได้ (รวม key-up/all-zero frame) เข้า `raw_report_buf` — **ไม่ filter** ต่างจาก keycode list
+4. ถ้า report มี Enter keycode → flush buffer → อัปเดต `_last_scan`, `_last_scan_raw`, และ `_last_scan_raw_report`
+5. วนซ้ำจนกว่า `_stop_event` จะถูก set หรือ I/O error
 
 **Properties (thread-safe):**
-- `last_scan: str | None` — scan text ล่าสุด
-- `last_scan_raw: list[int] | None` — raw HID keycodes ล่าสุด
+- `last_scan: str | None` — scan text ล่าสุด (decoded)
+- `last_scan_raw: list[int] | None` — raw HID keycode ล่าสุด (**ตัด** modifier byte, reserved byte, empty slot, และ Enter ออกแล้ว — ไม่ใช่ byte report ดิบทั้งก้อน)
+- `last_scan_raw_report: list[str] | None` — raw HID byte report (hex string ต่อ frame, `report.hex()`) ของ scan ล่าสุด **รวมทุก frame ที่อุปกรณ์ส่งมาจริง** (รวม key-up all-zero frame) — นี่คือระดับ "ดิบที่สุด" ที่ vas เก็บได้
+- `read_mode: str` — `"hidraw"` เสมอสำหรับ class นี้
 
 ### `EvdevQrReaderThread` (โหมด evdev)
 
@@ -144,13 +151,15 @@ Background daemon thread อ่าน QR ผ่าน `python3-evdev`
 - ใช้ `device.grab()` เพื่อกัน keystrokes ไม่ให้ถึง OS/UI
 - อ่าน `EV_KEY` events จาก `device.read_loop()`
 - scancode 28 = KEY_ENTER → end-of-scan
-- `last_scan_raw` คือ evdev scancodes (ไม่ใช่ HID keycodes)
+- `last_scan_raw` คือ evdev scancodes (ไม่ใช่ HID keycodes — คนละ numbering space กัน ดู hint ด้านบน)
+- `last_scan_raw_report` **คืน `None` เสมอ** — evdev เป็น kernel abstraction ที่แปลง USB HID report เป็น key event ให้แล้วตั้งแต่ driver ระดับ kernel ไม่มีทางดัก byte report ดิบจาก evdev ได้ (คุณสมบัตินี้มีไว้เพื่อให้ caller เขียนโค้ดเดียวกันเรียกทั้งสอง class ได้โดยไม่ต้อง `isinstance` check)
+- `read_mode: str` — `"evdev"` เสมอสำหรับ class นี้
 
 ---
 
 ## Global Singleton Management
 
-### `get_reader() → QrReaderThread | None`
+### `get_reader() → QrReaderThread | EvdevQrReaderThread | None`
 คืน thread ที่กำลัง run อยู่ หรือ None (thread-safe)
 
 ### `start_reader(device_path=None) → QrReaderThread | EvdevQrReaderThread`
@@ -177,12 +186,16 @@ Background daemon thread อ่าน QR ผ่าน `python3-evdev`
 ## การ Integrate กับส่วนอื่น
 
 ### Flask Server (`server.py`)
-- **Auto-start**: server boot เรียก `start_reader()` ทันที (ถ้ามี device)
+- **Auto-start**: server boot เรียก `start_reader()` ทันที (ถ้ามี device) — ทำงานคู่กับการเช็ค DB schema version ตอน boot (ดู `docs/database.md`)
 - **`atexit`**: ลงทะเบียน `stop_reader()` เพื่อหยุด thread เมื่อ process ปิด
-- **SSE Stream (`/api/qr/stream`)**: poll `reader.last_scan` ทุก 0.2 วินาที และส่ง `event: scan` พร้อม auto-restart ถ้า reader ตาย
+- **SSE Stream (`/api/qr/stream`)**: poll `reader.last_scan` ทุก 0.2 วินาที เมื่อมี scan ใหม่จะ:
+  1. ส่ง `event: scan` พร้อม `scan`, `device`, `ts`, `raw_keycode`, `raw_report`, `read_mode`
+  2. บันทึกลง `qr_scans` ผ่าน `log_qr_scan()` ครบทั้ง 3 ระดับข้อมูล + `read_mode`
+  3. Publish ออก MQTT ผ่าน `publish_qr_scan_for_device("zkteco-qr500", ...)` — เลือก broker ตาม `device_integrations` ที่ตั้งไว้ในหน้า `/qr/devices/zkteco-qr500` (ดู `docs/networking/mqtt.md`)
+  - มี auto-restart ถ้า reader ตาย
 
-### MQTT (`mqtt_client.py`)
-เมื่อ SSE stream ตรวจพบ scan ใหม่ จะเรียก `publish_qr_scan()` ส่งข้อมูลออก MQTT broker โดยอัตโนมัติ (ถ้า enabled)
+### MQTT (`features/mqtt/client.py`)
+เมื่อ SSE stream ตรวจพบ scan ใหม่ จะเรียก `publish_qr_scan_for_device()` ส่งข้อมูลออก MQTT broker ที่ผูกกับ device นั้นโดยอัตโนมัติ (ถ้า integration enabled) — รูปแบบ payload (`decoded`/`raw_keycode`/`raw_report`) ขึ้นกับ `payload_mode` ที่ตั้งไว้ที่ broker นั้น ดูรายละเอียดเต็มที่ `docs/networking/mqtt.md`
 
 ---
 
@@ -197,11 +210,20 @@ Background daemon thread อ่าน QR ผ่าน `python3-evdev`
 | `GET` | `/api/qr/config` | ดู QR config ปัจจุบัน |
 | `POST` | `/api/qr/config` | บันทึก QR config (body: `{"device_path": "..."}`) |
 | `GET` | `/api/qr/stream` | Server-Sent Events stream (real-time scan) |
+| `GET` | `/api/qr/integrations` | ดู integration config (webhook/mqtt/pipe) ของ device — เก็บใน SQLite (`device_integrations`) |
+| `POST` | `/api/qr/integrations/<type>` | บันทึก integration config ของ device |
 
 ### SSE Event Types (`/api/qr/stream`)
 ```
 event: scan
-data: {"scan": "<value>", "device": "<path>", "ts": "<ISO8601-UTC>"}
+data: {
+  "scan": "<decoded value>",
+  "device": "<path>",
+  "ts": "<ISO8601-UTC>",
+  "raw_keycode": [39, 30, 30, ...] | null,
+  "raw_report": ["a1000000...", "00000000..."] | null,
+  "read_mode": "hidraw" | "evdev" | null
+}
 
 event: status
 data: {"running": <bool>, "device": "<path>"|null}
@@ -244,23 +266,25 @@ USB QR Scanner (ZKTeco QR500-BM)
          │
          ├─ HID Keyboard = Close ──▶ /dev/hidraw0
          │                               │
-         │                         QrReaderThread
+         │                         QrReaderThread   read_mode="hidraw"
          │                         .run() loop
-         │                         os.read(64 bytes)
+         │                         os.read(64 bytes)  ──▶ raw_report_buf (ทุก frame, hex)
          │                         decode_hid_report()
          │                               │
          └─ HID Keyboard = Open  ──▶ /dev/input/event6
                                         │
-                                  EvdevQrReaderThread
+                                  EvdevQrReaderThread   read_mode="evdev"
                                   device.grab()
                                   read_loop() → EV_KEY
                                         │
                                         ▼
                                  last_scan (str)
                                  last_scan_raw (list[int])
+                                 last_scan_raw_report (list[str] hex, hidraw only — null บน evdev)
+                                 read_mode ("hidraw" | "evdev")
                                         │
-                          ┌─────────────┴────────────┐
-                          │                          │
-                    SSE Stream                  MQTT publish
-                 /api/qr/stream            publish_qr_scan()
+                        ┌───────────────┼────────────────┐
+                        │               │                │
+                  SSE Stream       qr_scans (DB)     MQTT publish
+               /api/qr/stream    log_qr_scan()   publish_qr_scan_for_device()
 ```

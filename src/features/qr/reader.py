@@ -336,18 +336,23 @@ class QrReaderThread(threading.Thread):
     Usage:
         thread = QrReaderThread(device_path="/dev/hidraw0")
         thread.start()
-        scan     = thread.last_scan      # decoded text  e.g. "3833401723"
-        scan_raw = thread.last_scan_raw  # raw keycodes  e.g. [39,30,30,32,...]
+        scan            = thread.last_scan             # decoded text  e.g. "3833401723"
+        scan_raw        = thread.last_scan_raw          # raw keycodes  e.g. [39,30,30,32,...]
+        scan_raw_report = thread.last_scan_raw_report    # raw HID byte report (hex) ทุก frame
         thread.stop()
         thread.join(timeout=2.0)
     """
 
+    read_mode: str = "hidraw"
+
     def __init__(self, device_path: str) -> None:
         super().__init__(daemon=True, name="qr-reader")
         self.device_path = device_path
+        self.read_mode = "hidraw"
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
         self._last_scan_raw: list[int] | None = None  # raw HID keycodes ก่อน decode
+        self._last_scan_raw_report: list[str] | None = None  # raw HID byte report (hex) ทุก frame
         self._lock = threading.Lock()
 
     @property
@@ -362,17 +367,30 @@ class QrReaderThread(threading.Thread):
         with self._lock:
             return self._last_scan_raw
 
+    @property
+    def last_scan_raw_report(self) -> list[str] | None:
+        """
+        Raw HID byte report (hex string ต่อ frame) ของ scan ล่าสุด หรือ None
+        เก็บ**ทุก**report ที่อ่านได้ในรอบ scan รวมถึง key-up/all-zero frame ด้วย
+        (ไม่ filter เหมือน last_scan_raw) เพื่อให้เห็นข้อมูลดิบตรงตามที่อุปกรณ์ส่งมาจริง
+        """
+        with self._lock:
+            return self._last_scan_raw_report
+
     def stop(self) -> None:
         """Signal ให้ thread หยุด"""
         self._stop_event.set()
 
     def run(self) -> None:
         """
-        Main loop — เก็บทั้ง decoded text และ raw keycodes ควบคู่กัน
-        raw_buf: list[int] เก็บ keycode จาก byte[2:8] ของแต่ละ report (ไม่รวม 0 และ Enter)
+        Main loop — เก็บทั้ง decoded text, raw keycodes, และ raw byte report ควบคู่กัน
+        raw_buf:        list[int] เก็บ keycode จาก byte[2:8] ของแต่ละ report (ไม่รวม 0 และ Enter)
+        raw_report_buf: list[str] เก็บ report.hex() ของ**ทุก**os.read() ที่อ่านได้ในรอบ scan
+                        (รวม key-up/all-zero frame ด้วย -- ไม่ filter เหมือน raw_buf)
         """
         buffer = ""
         raw_buf: list[int] = []
+        raw_report_buf: list[str] = []
         try:
             with open(self.device_path, "rb") as fd:
                 while not self._stop_event.is_set():
@@ -382,6 +400,8 @@ class QrReaderThread(threading.Thread):
                         break
                     if len(report) < 3:
                         continue
+                    # เก็บ raw byte report ดิบทุก frame (รวม all-zero key-up frame)
+                    raw_report_buf.append(report.hex())
                     has_enter = ENTER_KEYCODE in report[2:8]
                     chars = decode_hid_report(report)
                     buffer += chars
@@ -393,8 +413,10 @@ class QrReaderThread(threading.Thread):
                         with self._lock:
                             self._last_scan = buffer.strip()
                             self._last_scan_raw = list(raw_buf)
+                            self._last_scan_raw_report = list(raw_report_buf)
                         buffer = ""
                         raw_buf = []
+                        raw_report_buf = []
         except (OSError, IOError):
             pass
 
@@ -409,16 +431,21 @@ class EvdevQrReaderThread(threading.Thread):
     ใช้ device.grab() เพื่อป้องกัน keystrokes ไม่ให้ถึง OS / UI
 
     Interface เหมือน QrReaderThread:
-        thread.last_scan      -> str | None         decoded text
-        thread.last_scan_raw  -> list[int] | None   raw evdev scancodes
-        thread.device_path    -> str
+        thread.last_scan            -> str | None         decoded text
+        thread.last_scan_raw        -> list[int] | None   raw evdev scancodes
+        thread.last_scan_raw_report -> None (คงที่เสมอ -- evdev ไม่มี raw byte report)
+        thread.read_mode            -> "evdev" (คงที่)
+        thread.device_path          -> str
         thread.stop()
         thread.join(timeout)
     """
 
+    read_mode: str = "evdev"
+
     def __init__(self, device_path: str) -> None:
         super().__init__(daemon=True, name="qr-reader-evdev")
         self.device_path = device_path
+        self.read_mode = "evdev"
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
         self._last_scan_raw: list[int] | None = None  # raw evdev scancodes ก่อน decode
@@ -434,6 +461,15 @@ class EvdevQrReaderThread(threading.Thread):
         """Raw evdev scancode sequence ของ scan ล่าสุด หรือ None"""
         with self._lock:
             return self._last_scan_raw
+
+    @property
+    def last_scan_raw_report(self) -> None:
+        """
+        Evdev mode ไม่มี raw HID byte report ให้เก็บ (ไม่ได้อ่านจาก /dev/hidraw โดยตรง)
+        Return None เสมอ เพื่อให้ caller เขียน code เดียวกันได้ทั้งสอง reader class
+        โดยไม่ต้อง isinstance check
+        """
+        return None
 
     def stop(self) -> None:
         self._stop_event.set()

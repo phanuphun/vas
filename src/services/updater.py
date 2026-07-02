@@ -60,6 +60,10 @@ class SelfUpdater:
             shutil.copytree(source_dir, self.install_dir)
             install_wrappers(self.install_dir, self.bin_dir)
 
+        # อัปเดต DB schema ให้ทันสมัย (ไม่ลบข้อมูลเดิม) — import ตรงเพราะ python process เดียวกัน
+        from core.database import run_migrations
+        run_migrations()
+
     def archive_url(self) -> str:
         if self.version == "latest":
             return f"https://github.com/{self.repo}/archive/refs/heads/{self.branch}.tar.gz"
@@ -260,6 +264,11 @@ def start_web_update(
                 shutil.copytree(source_dir, updater.install_dir)
                 install_wrappers(updater.install_dir, updater.bin_dir)
                 emit_log("✓ ติดตั้งไฟล์เรียบร้อย")
+
+                emit_progress(95, "migrate", "กำลังอัปเดต database schema...")
+                from core.database import run_migrations
+                run_migrations()
+                emit_log("✓ database schema อัปเดตแล้ว (ข้อมูลเดิมไม่หาย)")
 
             emit_progress(100, "done", "อัปเดตเสร็จสิ้น")
             q.put({"event": "done"})
