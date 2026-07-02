@@ -460,7 +460,7 @@
 
     if (p.installed) {
       if (p.can_uninstall) {
-        return '<button onclick="uninstallPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+        return '<button onclick="uninstallPkg(\'' + esc(p.id) + '\')" id="btn-' + p.id + '" ' +
                'class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.75rem] font-semibold hover:bg-danger/8 transition-colors">' +
                '<iconify-icon icon="lucide:trash-2" width="12" height="12"></iconify-icon>ถอน</button>';
       }
@@ -472,7 +472,7 @@
 
     if (opts.hasChildren) {
       // Parent not installed → open sub-select modal so user can pick what to install
-      return '<button onclick="openSubSelectModal(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+      return '<button onclick="openSubSelectModal(\'' + esc(p.id) + '\')" id="btn-' + p.id + '" ' +
              'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
              '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>ติดตั้ง</button>';
     }
@@ -483,7 +483,7 @@
              '<iconify-icon icon="lucide:lock" width="12" height="12"></iconify-icon>รอ dependency</button>';
     }
 
-    return '<button onclick="installPkg(' + JSON.stringify(p.id) + ')" id="btn-' + p.id + '" ' +
+    return '<button onclick="installPkg(\'' + esc(p.id) + '\')" id="btn-' + p.id + '" ' +
            'class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">' +
            '<iconify-icon icon="lucide:download" width="12" height="12"></iconify-icon>Install</button>';
   }
