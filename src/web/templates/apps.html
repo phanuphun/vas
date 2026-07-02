@@ -36,7 +36,7 @@
   .terminal-box {
     font-family: 'Bai Jamjuree', monospace; font-size: 0.72rem; line-height: 1.65;
     background: #0f1117; color: #e2e8f0; border-radius: 0.5rem;
-    padding: 0.875rem 1rem; overflow-y: auto; max-height: 320px;
+    padding: 0.875rem 1rem; overflow-y: auto; max-height: min(480px, 60vh); min-height: 220px;
     white-space: pre-wrap; word-break: break-all;
   }
   .terminal-box::-webkit-scrollbar { width: 4px; }
@@ -306,7 +306,7 @@
 
 <!-- ── Install modal ───────────────────────────────────────────── -->
 <div class="modal-backdrop" id="install-modal-backdrop" onclick="closeInstallModal()"></div>
-<div class="modal-dialog" id="install-modal" style="max-width:min(580px,calc(100vw - 2rem));">
+<div class="modal-dialog" id="install-modal" style="width:min(760px,calc(100vw - 2rem));max-width:min(760px,calc(100vw - 2rem));">
   <div class="flex items-start justify-between gap-3 mb-3">
     <div class="flex items-center gap-3 min-w-0">
       <img id="modal-logo" src="" alt="" class="w-8 h-8 object-contain rounded flex-shrink-0">
@@ -356,13 +356,13 @@
   </div>
 </div>
 
-<!-- ── Confirm Modal (ใช้สำหรับยืนยันก่อนถอนการติดตั้ง) ───────── -->
+<!-- ── Confirm Modal (ใช้ก่อนติดตั้ง/ถอนการติดตั้งทุกครั้ง) ────── -->
 <div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
   <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
   <div id="confirm-box">
     <div class="flex items-start gap-3 mb-4">
-      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
-        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      <div id="confirm-icon-box" class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon id="confirm-icon" icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
       </div>
       <div class="min-w-0">
         <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
@@ -394,6 +394,15 @@
   var FALLBACK_LOGO = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%23f1f5f9'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='%2394a3b8'%3E%F0%9F%93%A6%3C/text%3E%3C/svg%3E";
 
   var allPackages = [];
+  var lastCategories = {};
+
+  // pkgId -> "install" | "uninstall" — action ที่กำลังทำงานอยู่จริง (sync ทันทีตอนกดยืนยัน
+  // ไม่รอ network) ใช้กัน double-click/double-submit และให้ปุ่มในหน้ารายการโชว์ state ถูกต้อง
+  // แม้จะปิด modal ไปแล้วก็ตาม
+  var activeAction = {};
+  // pkgId -> opts ที่ใช้ตอน render ปุ่มล่าสุด (hasChildren / depsBlocked) เก็บไว้เพื่ออัปเดต
+  // ปุ่มเดี่ยวๆ ได้โดยไม่ต้อง re-render ทั้งรายการ
+  var btnOptsById = {};
 
   // ── Tab switch ────────────────────────────────────────────────
   window.setTab = function (id) {
@@ -419,7 +428,18 @@
   // ── Render packages — list style ──────────────────────────────
   function renderPackages(pkgs, cats) {
     allPackages = pkgs;
+    lastCategories = cats;
     var list = document.getElementById("pkg-list");
+
+    // sync สถานะ busy จาก server (เช่น refresh หน้าระหว่างติดตั้งอยู่) เข้ากับ local state —
+    // ไม่เขียนทับ local state ที่ set ไว้เองระหว่างรอ network เพราะ server ยังไม่ทันเห็นงานที่เพิ่งเริ่ม
+    pkgs.forEach(function (p) {
+      if (p.busy) {
+        activeAction[p.id] = p.busy;
+      } else if (activeAction[p.id]) {
+        delete activeAction[p.id];
+      }
+    });
 
     // Build set of child IDs — they render inside their parent, not as top-level rows
     var childIds = {};
@@ -454,9 +474,21 @@
 
 
 
+  // ── Busy button — กำลังติดตั้ง/ถอนอยู่ (ไม่ให้กดซ้ำ) ─────────
+  function busyButtonHtml(action) {
+    var label = action === "uninstall" ? "กำลังถอน..." : "กำลังติดตั้ง...";
+    return '<button disabled ' +
+           'class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/10 rounded-lg bg-surface text-muted text-[0.75rem] font-medium cursor-not-allowed">' +
+           '<span class="spin"></span>' + label + '</button>';
+  }
+
   // ── Action button (install / uninstall / blocked states) ──────
   function actionButtonHtml(p, opts) {
     opts = opts || {};
+
+    if (activeAction[p.id]) {
+      return busyButtonHtml(activeAction[p.id]);
+    }
 
     if (p.installed) {
       if (p.can_uninstall) {
@@ -513,7 +545,9 @@
           }).join(', ') + '</span></div>'
       : '';
 
-    var btn = actionButtonHtml(p, { hasChildren: hasChildren });
+    var btnOpts = { hasChildren: hasChildren };
+    btnOptsById[p.id] = btnOpts;
+    var btn = actionButtonHtml(p, btnOpts);
 
     var parentRow = '<div class="pkg-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" id="card-' + p.id + '">' +
       '<img src="' + logoSrc + '" alt="' + esc(p.name) + '" ' +
@@ -528,7 +562,7 @@
         '<p class="text-[0.75rem] text-muted mt-0.5 leading-snug">' + esc(p.description) + '</p>' +
         depLine +
       '</div>' +
-      '<div class="flex-shrink-0">' + btn + '</div>' +
+      '<div class="flex-shrink-0" id="btn-wrap-' + p.id + '">' + btn + '</div>' +
     '</div>';
 
     // Render children as indented sub-rows below the parent
@@ -575,7 +609,9 @@
           }).join(', ') + '</span></div>'
       : '';
 
-    var btn = actionButtonHtml(p, { depsBlocked: !depsOk });
+    var btnOpts = { depsBlocked: !depsOk };
+    btnOptsById[p.id] = btnOpts;
+    var btn = actionButtonHtml(p, btnOpts);
 
     return '<div class="sub-row flex items-center gap-3 pr-4 py-3 border-b border-line/6" id="card-' + p.id + '">' +
       '<div class="sub-connector"></div>' +
@@ -591,14 +627,32 @@
         '<p class="text-[0.72rem] text-muted mt-0.5 leading-snug">' + esc(p.description) + '</p>' +
         depLine +
       '</div>' +
-      '<div class="flex-shrink-0">' + btn + '</div>' +
+      '<div class="flex-shrink-0" id="btn-wrap-' + p.id + '">' + btn + '</div>' +
     '</div>';
+  }
+
+  // ── Busy-state helpers ──────────────────────────────────────────
+  function updateButtonState(pkgId) {
+    var wrap = document.getElementById("btn-wrap-" + pkgId);
+    if (!wrap) return;
+    var pkg = allPackages.find(function (p) { return p.id === pkgId; });
+    if (!pkg) return;
+    wrap.innerHTML = actionButtonHtml(pkg, btnOptsById[pkgId] || {});
+  }
+  function clearActiveAction(pkgId) {
+    delete activeAction[pkgId];
+    updateButtonState(pkgId);
   }
 
   // ── Install ───────────────────────────────────────────────────
   window.installPkg = function (pkgId) {
     var pkg = allPackages.find(function (p) { return p.id === pkgId; });
     if (!pkg) return;
+
+    if (activeAction[pkgId]) {
+      showToast("รายการนี้กำลังดำเนินการอยู่แล้ว", "error");
+      return;
+    }
 
     if (pkg.depends.length > 0 && !pkg.deps_ok) {
       var missing = pkg.depends.filter(function (d) {
@@ -615,6 +669,21 @@
       }
     }
 
+    showConfirm({
+      variant: "accent",
+      title:   "ติดตั้ง " + pkg.name + "?",
+      body:    "ระบบจะรันคำสั่งติดตั้ง " + pkg.name + " บนเครื่องนี้ทันที ใช้เวลาสักครู่ขึ้นอยู่กับความเร็วอินเทอร์เน็ต",
+      okLabel: "ติดตั้ง",
+      onOk: function () { runInstall(pkgId); }
+    });
+  };
+
+  function runInstall(pkgId) {
+    var pkg = allPackages.find(function (p) { return p.id === pkgId; });
+    if (!pkg || activeAction[pkgId]) return;
+
+    activeAction[pkgId] = "install";
+    updateButtonState(pkgId);
     openInstallModal(pkg, "install");
     fetch("/api/settings/install/" + encodeURIComponent(pkgId), { method: "POST" })
       .then(function (r) { return r.json(); })
@@ -623,17 +692,26 @@
           appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
           setModalStatus("เกิดข้อผิดพลาด", "danger");
           markModalError();
+          clearActiveAction(pkgId);
           return;
         }
         streamAction(pkgId, "install");
       })
-      .catch(function (e) { appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m"); });
-  };
+      .catch(function (e) {
+        appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m");
+        clearActiveAction(pkgId);
+      });
+  }
 
   // ── Uninstall ─────────────────────────────────────────────────
   window.uninstallPkg = function (pkgId) {
     var pkg = allPackages.find(function (p) { return p.id === pkgId; });
     if (!pkg) return;
+
+    if (activeAction[pkgId]) {
+      showToast("รายการนี้กำลังดำเนินการอยู่แล้ว", "error");
+      return;
+    }
 
     if (!pkg.can_uninstall) {
       showToast("ต้องถอนการติดตั้ง " + (pkg.uninstall_blockers || []).join(", ") + " ก่อน", "error");
@@ -641,26 +719,38 @@
     }
 
     showConfirm({
+      variant: "danger",
       title:   "ถอนการติดตั้ง " + pkg.name + "?",
       body:    pkg.uninstall_warning || "โปรแกรมนี้จะถูกถอนออกจากเครื่อง — ไฟล์ตั้งค่าที่เกี่ยวข้องจะยังคงอยู่",
       okLabel: "ถอนการติดตั้ง",
-      onOk: function () {
-        openInstallModal(pkg, "uninstall");
-        fetch("/api/settings/uninstall/" + encodeURIComponent(pkgId), { method: "POST" })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            if (d.status !== "ok") {
-              appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
-              setModalStatus("เกิดข้อผิดพลาด", "danger");
-              markModalError();
-              return;
-            }
-            streamAction(pkgId, "uninstall");
-          })
-          .catch(function (e) { appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m"); });
-      }
+      onOk: function () { runUninstall(pkgId); }
     });
   };
+
+  function runUninstall(pkgId) {
+    var pkg = allPackages.find(function (p) { return p.id === pkgId; });
+    if (!pkg || activeAction[pkgId]) return;
+
+    activeAction[pkgId] = "uninstall";
+    updateButtonState(pkgId);
+    openInstallModal(pkg, "uninstall");
+    fetch("/api/settings/uninstall/" + encodeURIComponent(pkgId), { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status !== "ok") {
+          appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
+          setModalStatus("เกิดข้อผิดพลาด", "danger");
+          markModalError();
+          clearActiveAction(pkgId);
+          return;
+        }
+        streamAction(pkgId, "uninstall");
+      })
+      .catch(function (e) {
+        appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m");
+        clearActiveAction(pkgId);
+      });
+  }
 
   // ── Stream install/uninstall (single package) ─────────────────
   function streamAction(pkgId, action, onComplete) {
@@ -675,6 +765,7 @@
     evtSrc.addEventListener("done", function () {
       evtSrc.close();
       markModalDone();
+      clearActiveAction(pkgId);
       if (window.refreshNavStatus) window.refreshNavStatus();
       if (onComplete) {
         setModalStatus("เสร็จแล้ว ✓", "ok");
@@ -688,6 +779,7 @@
       try { appendTerminal("\x1b[31mError: " + JSON.parse(e.data).msg + "\x1b[0m"); } catch (_) {}
       evtSrc.close();
       markModalError();
+      clearActiveAction(pkgId);
       setModalStatus("Error", "danger");
     });
     evtSrc.onerror = function () { evtSrc.close(); };
@@ -778,6 +870,8 @@
       }
       setModalProgress(0, 1);
       setModalStatus("กำลังติดตั้ง " + pkg.name + "...", "pending");
+      activeAction[pkgId] = "install";
+      updateButtonState(pkgId);
 
       fetch("/api/settings/install/" + encodeURIComponent(pkgId), { method: "POST" })
         .then(function (r) { return r.json(); })
@@ -786,11 +880,15 @@
             appendTerminal("\x1b[31mError: " + (d.errors || []).join(", ") + "\x1b[0m");
             setModalStatus("เกิดข้อผิดพลาด", "danger");
             markModalError();
+            clearActiveAction(pkgId);
             return;
           }
           streamAction(pkgId, "install", next);
         })
-        .catch(function (e) { appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m"); });
+        .catch(function (e) {
+          appendTerminal("\x1b[31mFetch error: " + e + "\x1b[0m");
+          clearActiveAction(pkgId);
+        });
     }
 
     next();
@@ -853,7 +951,7 @@
     document.getElementById("dep-modal-title").textContent = "ต้องติดตั้ง " + depNames.join(", ") + " ก่อน";
     document.getElementById("dep-modal-msg").textContent =
       pkg.name + " ต้องการ " + depNames.join(", ") + " — ต้องการติดตั้งเดี๋ยวนี้เลยไหม?";
-    document.getElementById("dep-go-btn").onclick = function () { closeDepModal(); installPkg(depId); };
+    document.getElementById("dep-go-btn").onclick = function () { closeDepModal(); runInstall(depId); };
     document.getElementById("dep-modal-backdrop").classList.add("is-visible");
     document.getElementById("dep-modal").classList.add("is-visible");
     document.body.classList.add("modal-open");
@@ -886,7 +984,27 @@
     btnOk.parentNode.replaceChild(clone, btnOk);
     btnOk = clone;
 
-    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    // variant: "danger" (default — ถอนการติดตั้ง/ลบ) หรือ "accent" (ติดตั้ง) —
+    // set class ใหม่ทุกครั้งเพราะ cloneNode คัดลอก class เดิมมาด้วย ไม่ล้างให้เอง
+    var isAccent = opts.variant === "accent";
+    var iconBox = document.getElementById("confirm-icon-box");
+    var icon = document.getElementById("confirm-icon");
+    var okIcon = btnOk.querySelector("iconify-icon");
+    if (isAccent) {
+      iconBox.className = "w-9 h-9 rounded-lg bg-accent/8 border border-accent/15 grid place-items-center flex-shrink-0";
+      icon.setAttribute("icon", "lucide:download");
+      icon.className = "text-accent";
+      btnOk.className = "inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors";
+      if (okIcon) okIcon.setAttribute("icon", "lucide:download");
+    } else {
+      iconBox.className = "w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0";
+      icon.setAttribute("icon", "lucide:trash-2");
+      icon.className = "text-danger";
+      btnOk.className = "inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors";
+      if (okIcon) okIcon.setAttribute("icon", "lucide:trash-2");
+    }
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการดำเนินการ";
     document.getElementById("confirm-body").textContent  = opts.body  || "";
     if (opts.okLabel) {
       var labelEl = btnOk.querySelector("span");

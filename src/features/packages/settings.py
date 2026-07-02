@@ -340,6 +340,9 @@ def get_package_status(pkg_id: str | None = None) -> list[dict[str, Any]]:
             and _safe_check(other)[0]
         ]
 
+        # กำลังติดตั้ง/ถอนอยู่ไหม — ให้ UI แสดง state ได้ถูกต้องแม้ refresh หน้าใหม่ระหว่างดำเนินการ
+        busy = "install" if is_installing(p["id"]) else ("uninstall" if is_uninstalling(p["id"]) else None)
+
         result.append({
             "id":          p["id"],
             "name":        p["name"],
@@ -354,6 +357,7 @@ def get_package_status(pkg_id: str | None = None) -> list[dict[str, Any]]:
             "can_uninstall":       len(blocking_dependents) == 0,
             "uninstall_blockers":  blocking_dependents,
             "uninstall_warning":   p.get("uninstall_warning"),
+            "busy":        busy,
         })
     return result
 

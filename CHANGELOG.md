@@ -2,6 +2,13 @@
 
 ## [2026-07-02]
 
+### หน้า "โปรแกรมเพิ่มเติม" — เพิ่ม confirm modal ก่อนติดตั้ง/ถอน, แสดง state กำลังดำเนินการที่ปุ่ม, ขยาย modal
+- **บั๊กที่เจอ**: กด Install ซ้ำสองครั้งติดกัน เกิดคำสั่ง 2 ครั้ง — ครั้งที่สอง backend ปฏิเสธถูกต้อง ("มีการติดตั้ง/ถอนการติดตั้งรายการนี้อยู่แล้ว") แต่ปุ่มในหน้ารายการไม่มี state บอกว่ากำลังทำงานอยู่ (โดยเฉพาะถ้าปิด modal ไปแล้วกลับมาเห็นปุ่มปกติ เข้าใจผิดว่ากดซ้ำได้)
+- เพิ่ม `activeAction` (JS local state, pkgId → "install"/"uninstall") — set ทันทีแบบ synchronous ตอนผู้ใช้กดยืนยันใน confirm modal ก่อนยิง fetch เสมอ ปิด race window ที่ทำให้กดซ้ำได้จริงๆ ปุ่มจะเปลี่ยนเป็น disabled + spinner + "กำลังติดตั้ง.../กำลังถอน..." ทันที ไม่ต้องรอ network, และคง state นี้ไว้แม้ปิด install modal ไปแล้ว จนกว่า SSE จะส่ง `done`/`error` หรือ request ล้มเหลว
+- Backend (`get_package_status()` ใน `settings.py`) เพิ่ม field `busy` (`"install"` / `"uninstall"` / `null`) จาก `is_installing()`/`is_uninstalling()` ที่มีอยู่แล้ว — ใช้ sync state ตอนโหลดหน้าใหม่ระหว่างที่มีงานค้างอยู่ (เช่น refresh หน้าระหว่างติดตั้ง) ให้ปุ่มยังโชว์ busy ถูกต้อง ไม่ใช่แค่ local state ฝั่ง browser ที่หายไปตอน refresh
+- เพิ่ม confirm modal ก่อนกด **Install** ด้วย (เดิมมีแค่ก่อนถอน) — ใช้ `showConfirm()` เดียวกัน เพิ่ม `variant: "accent"` (ไอคอน/สีฟ้าแทนแดง) ให้แยกจาก uninstall ที่เป็น `variant: "danger"` (ค่า default) — ปุ่ม "ติดตั้งเดี๋ยวนี้" ใน dependency modal (ที่ถามอยู่แล้วว่าจะติดตั้ง dependency เลยไหม) ข้าม confirm ซ้ำซ้อน เรียก `runInstall()` ตรงๆ แทน `installPkg()`
+- ขยาย install/uninstall modal: เดิม inline style ตั้งแค่ `max-width` แต่ class `.modal-dialog` set `width: min(420px, ...)` ไว้แล้ว ทำให้ `max-width` ไม่มีผลจริง (ยังกว้างแค่ ~420px) แก้โดย set ทั้ง `width` และ `max-width` เป็น `min(760px, calc(100vw - 2rem))` และเพิ่มความสูงกล่อง terminal log จาก `max-height:320px` เป็น `min(480px, 60vh)` พร้อม `min-height:220px`
+
 ### หน้า "โปรแกรมเพิ่มเติม" — ติดตั้ง/ถอนเสร็จแล้ว sidebar ไม่อัปเดตเอง ต้อง refresh หน้าเอง
 - `base.html` มี `window.refreshNavStatus()` ให้เรียกอยู่แล้ว (เขียนไว้เผื่อหน้าอื่นเรียกหลัง install/uninstall ตาม comment เดิม) แต่ `apps.html` ไม่เคยเรียกใช้ — sidebar (เช่นเมนู Wireguard/OpenSSH/AnyDesk ที่โผล่เฉพาะตอนติดตั้งแล้ว) เลยไม่รู้ว่ามีการเปลี่ยนแปลงจนกว่าจะ refresh หน้าเอง
 - เพิ่มการเรียก `window.refreshNavStatus()` ใน `apps.html` สองจุด: ใน `streamAction()` ตอน SSE ส่ง event `done` (ครอบคลุมทั้ง install เดี่ยวและ uninstall) และใน `installSequential()` ตอนคิวติดตั้งครบทุกรายการ (flow parent+children) — ไม่ต้องแก้ backend เพราะ `/api/nav/status` เดิมอ่านสถานะสดจากเครื่องอยู่แล้ว
