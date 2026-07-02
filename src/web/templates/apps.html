@@ -675,6 +675,7 @@
     evtSrc.addEventListener("done", function () {
       evtSrc.close();
       markModalDone();
+      if (window.refreshNavStatus) window.refreshNavStatus();
       if (onComplete) {
         setModalStatus("เสร็จแล้ว ✓", "ok");
         setTimeout(onComplete, 600);
@@ -760,6 +761,7 @@
     function next() {
       if (!queue.length) {
         markModalDone();
+        if (window.refreshNavStatus) window.refreshNavStatus();
         setModalStatus("ติดตั้งครบทุกรายการ ✓", "ok");
         setTimeout(loadPackages, 800);
         return;

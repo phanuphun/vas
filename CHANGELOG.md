@@ -2,6 +2,10 @@
 
 ## [2026-07-02]
 
+### หน้า "โปรแกรมเพิ่มเติม" — ติดตั้ง/ถอนเสร็จแล้ว sidebar ไม่อัปเดตเอง ต้อง refresh หน้าเอง
+- `base.html` มี `window.refreshNavStatus()` ให้เรียกอยู่แล้ว (เขียนไว้เผื่อหน้าอื่นเรียกหลัง install/uninstall ตาม comment เดิม) แต่ `apps.html` ไม่เคยเรียกใช้ — sidebar (เช่นเมนู Wireguard/OpenSSH/AnyDesk ที่โผล่เฉพาะตอนติดตั้งแล้ว) เลยไม่รู้ว่ามีการเปลี่ยนแปลงจนกว่าจะ refresh หน้าเอง
+- เพิ่มการเรียก `window.refreshNavStatus()` ใน `apps.html` สองจุด: ใน `streamAction()` ตอน SSE ส่ง event `done` (ครอบคลุมทั้ง install เดี่ยวและ uninstall) และใน `installSequential()` ตอนคิวติดตั้งครบทุกรายการ (flow parent+children) — ไม่ต้องแก้ backend เพราะ `/api/nav/status` เดิมอ่านสถานะสดจากเครื่องอยู่แล้ว
+
 ### ติดตั้ง Node.js/AnyDesk ผ่านหน้าเว็บล้มเหลว — gpg คุย /dev/tty ไม่ได้
 - Test บนเครื่องจริงพบว่าติดตั้ง Node.js และ AnyDesk ผ่านหน้า "โปรแกรมเพิ่มเติม" ค้างที่ขั้น `curl ... | gpg --dearmor -o ...` เสมอ ด้วย error `gpg: cannot open '/dev/tty': No such device or address` ตามด้วย `curl: (23) Failed writing body` (curl เขียนเข้า pipe ที่ gpg ปิดไปแล้วไม่ได้) — สาเหตุคือคำสั่งรันผ่าน `subprocess.Popen` จาก Flask backend (ไม่มี controlling terminal) แต่ `gpg --dearmor` พยายามเปิด `/dev/tty` เพื่อโต้ตอบ (เช่น ถามยืนยันถ้าไฟล์ปลายทางมีอยู่แล้ว) ตามค่าเริ่มต้นเมื่อไม่ได้สั่ง batch mode
 - แก้โดยเพิ่ม `--batch --yes --no-tty` ให้ `gpg --dearmor` ทุกจุดที่เรียกผ่าน `bash -lc` (`src/features/packages/settings.py`: node, anydesk — ทั้งฝั่ง web install ที่เจอบั๊ก และ `src/features/packages/installers.py`: node, anydesk ที่เป็น CLI equivalent เดิม ก็มีบั๊กเดียวกันแฝงอยู่ แก้ไปพร้อมกันเพื่อความสอดคล้อง) — `--batch --no-tty` ปิดการโต้ตอบผ่าน terminal ทั้งหมด `--yes` ให้เขียนทับไฟล์ keyring เดิมได้โดยไม่ถาม
