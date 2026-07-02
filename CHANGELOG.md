@@ -2,6 +2,11 @@
 
 ## [2026-07-02]
 
+### ติดตั้ง Node.js/AnyDesk ผ่านหน้าเว็บล้มเหลว — gpg คุย /dev/tty ไม่ได้
+- Test บนเครื่องจริงพบว่าติดตั้ง Node.js และ AnyDesk ผ่านหน้า "โปรแกรมเพิ่มเติม" ค้างที่ขั้น `curl ... | gpg --dearmor -o ...` เสมอ ด้วย error `gpg: cannot open '/dev/tty': No such device or address` ตามด้วย `curl: (23) Failed writing body` (curl เขียนเข้า pipe ที่ gpg ปิดไปแล้วไม่ได้) — สาเหตุคือคำสั่งรันผ่าน `subprocess.Popen` จาก Flask backend (ไม่มี controlling terminal) แต่ `gpg --dearmor` พยายามเปิด `/dev/tty` เพื่อโต้ตอบ (เช่น ถามยืนยันถ้าไฟล์ปลายทางมีอยู่แล้ว) ตามค่าเริ่มต้นเมื่อไม่ได้สั่ง batch mode
+- แก้โดยเพิ่ม `--batch --yes --no-tty` ให้ `gpg --dearmor` ทุกจุดที่เรียกผ่าน `bash -lc` (`src/features/packages/settings.py`: node, anydesk — ทั้งฝั่ง web install ที่เจอบั๊ก และ `src/features/packages/installers.py`: node, anydesk ที่เป็น CLI equivalent เดิม ก็มีบั๊กเดียวกันแฝงอยู่ แก้ไปพร้อมกันเพื่อความสอดคล้อง) — `--batch --no-tty` ปิดการโต้ตอบผ่าน terminal ทั้งหมด `--yes` ให้เขียนทับไฟล์ keyring เดิมได้โดยไม่ถาม
+- Docker ไม่กระทบ เพราะขั้นตอนดาวน์โหลด key ของ Docker ใช้ `curl -o` เขียนไฟล์ `.asc` ตรงๆ ไม่ได้ผ่าน `gpg --dearmor`
+
 ### หน้า "โปรแกรมเพิ่มเติม" — แก้บั๊ก onclick พัง (JSON.stringify ใน double-quoted attribute)
 - ปุ่ม `installPkg`/`uninstallPkg`/`openSubSelectModal` เดิมสร้าง `onclick="fn(' + JSON.stringify(p.id) + ')"` — `JSON.stringify` คืน string ที่ครอบด้วย double quote (`"node"`) ไปฝังอยู่ใน HTML attribute ที่ครอบด้วย double quote เหมือนกัน ทำให้ quote ปิด attribute ก่อนเวลา (`onclick="installPkg("` เท่านั้น) กดปุ่มแล้วได้ `Uncaught SyntaxError: expected expression, got '}'` ทันที — บั๊กนี้มีอยู่เดิมตั้งแต่ก่อนเพิ่มปุ่มถอน แต่ไม่เคยโผล่ให้เห็นเพราะ dev-mode (`VAS_DEV_FAKE_INSTALLED=1`) ทำให้ทุก package โชว์ "Installed" (ปุ่ม disabled ไม่มี onclick) จนกว่าจะรันบนเครื่องจริงที่มี package ยังไม่ติดตั้งแล้วกดปุ่มจริงๆ ครั้งแรก
 - แก้เป็น `onclick="fn(\'' + esc(p.id) + '\')"` — ใช้ single quote ครอบค่าที่ฝังใน attribute แทน ไม่ชนกับ double quote ของ attribute เอง

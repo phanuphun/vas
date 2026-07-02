@@ -114,7 +114,7 @@ PACKAGES: list[dict[str, Any]] = [
             [
                 "bash", "-lc",
                 "curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key "
-                "| gpg --dearmor -o /usr/share/keyrings/nodesource.gpg",
+                "| gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/nodesource.gpg",
             ],
             [
                 "bash", "-lc",
@@ -241,7 +241,7 @@ PACKAGES: list[dict[str, Any]] = [
             [
                 "bash", "-lc",
                 "curl -fsSL https://keys.anydesk.com/repos/DEB-GPG-KEY "
-                "| gpg --dearmor -o /usr/share/keyrings/anydesk.gpg",
+                "| gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/anydesk.gpg",
             ],
             [
                 "bash", "-lc",
