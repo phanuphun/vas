@@ -737,6 +737,33 @@ def create_app() -> Flask:
             "running": running,
         }
 
+    @app.get("/api/qr/scans")
+    def qr_scans_list_api() -> dict[str, object]:
+        """
+        ประวัติการสแกน QR จาก DB ทั้งหมด (ไม่ใช่แค่ session ของ browser) — รองรับ pagination
+        Query params: limit (100|250|500, default 100), offset (default 0)
+        Return: {"status":"ok","rows":[...],"total":<int>,"limit":<int>,"offset":<int>}
+        """
+        from core.database import list_qr_scans
+        try:
+            limit = int(request.args.get("limit", 100))
+        except (TypeError, ValueError):
+            limit = 100
+        if limit not in (100, 250, 500):
+            limit = 100
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        result = list_qr_scans(limit=limit, offset=offset)
+        return {"status": "ok", **result}
+
+    @app.get("/api/qr/scans/stats")
+    def qr_scans_stats_api() -> dict[str, object]:
+        """Return: {"status":"ok","today_count":<int>}"""
+        from core.database import count_qr_scans_today
+        return {"status": "ok", "today_count": count_qr_scans_today()}
+
     @app.post("/api/qr/start")
     def qr_start_api() -> tuple[dict[str, object], int] | dict[str, object]:
         """
@@ -1094,6 +1121,27 @@ def create_app() -> Flask:
     def mqtt_status_api() -> dict[str, object]:
         from features.mqtt.client import get_mqtt_status
         return {"status": "ok", **get_mqtt_status()}
+
+    @app.get("/api/mqtt/events")
+    def mqtt_events_list_api() -> dict[str, object]:
+        """
+        ประวัติการ publish MQTT จาก DB — รองรับ pagination
+        Query params: limit (100|250|500, default 100), offset (default 0)
+        Return: {"status":"ok","rows":[...],"total":<int>,"limit":<int>,"offset":<int>}
+        """
+        from core.database import list_mqtt_events
+        try:
+            limit = int(request.args.get("limit", 100))
+        except (TypeError, ValueError):
+            limit = 100
+        if limit not in (100, 250, 500):
+            limit = 100
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        result = list_mqtt_events(limit=limit, offset=offset)
+        return {"status": "ok", **result}
 
     @app.post("/api/mqtt/brokers")
     def mqtt_broker_create_api() -> tuple[dict[str, object], int] | dict[str, object]:

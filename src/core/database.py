@@ -556,6 +556,99 @@ def log_config_change(
         pass
 
 
+def count_qr_scans_today(tz: str = "Asia/Bangkok") -> int:
+    """
+    นับจำนวน qr_scans ของ "วันนี้" ตาม timezone ที่กำหนด (default Asia/Bangkok)
+    ใช้แทน session counter ฝั่ง browser ที่หายเมื่อ reload — ค่านี้มาจาก DB ตรงๆ
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        now_local = datetime.now(ZoneInfo(tz))
+    except Exception:
+        now_local = datetime.now(timezone.utc)
+    start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start_local.astimezone(timezone.utc).isoformat()
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM qr_scans WHERE ts >= ?", (start_utc,)
+        ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.OperationalError:
+        return 0
+
+
+def list_qr_scans(limit: int = 100, offset: int = 0) -> dict[str, object]:
+    """
+    ประวัติการสแกน QR ทั้งหมดจาก DB (ไม่ใช่แค่ session ของ browser) — รองรับ pagination
+    คืนค่า raw_keycode/raw_report เป็น list ที่ decode แล้ว (ไม่ใช่ JSON string ดิบ)
+    """
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+    conn = _get_conn()
+    try:
+        total_row = conn.execute("SELECT COUNT(*) FROM qr_scans").fetchone()
+        total = total_row[0] if total_row else 0
+        rows = conn.execute(
+            """SELECT id, ts, value, device, raw_keycode, raw_report, read_mode
+               FROM qr_scans ORDER BY id DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {"rows": [], "total": 0, "limit": limit, "offset": offset}
+
+    result_rows = []
+    for r in rows:
+        try:
+            raw_keycode = json.loads(r["raw_keycode"]) if r["raw_keycode"] else None
+        except (TypeError, ValueError):
+            raw_keycode = None
+        try:
+            raw_report = json.loads(r["raw_report"]) if r["raw_report"] else None
+        except (TypeError, ValueError):
+            raw_report = None
+        result_rows.append({
+            "id": r["id"],
+            "ts": r["ts"],
+            "value": r["value"],
+            "device": r["device"],
+            "raw_keycode": raw_keycode,
+            "raw_report": raw_report,
+            "read_mode": r["read_mode"],
+        })
+    return {"rows": result_rows, "total": total, "limit": limit, "offset": offset}
+
+
+def list_mqtt_events(limit: int = 100, offset: int = 0) -> dict[str, object]:
+    """ประวัติการ publish MQTT ทั้งหมดจาก DB (ทุกครั้งที่มีการ publish_qr_scan) — รองรับ pagination"""
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+    conn = _get_conn()
+    try:
+        total_row = conn.execute("SELECT COUNT(*) FROM mqtt_events").fetchone()
+        total = total_row[0] if total_row else 0
+        rows = conn.execute(
+            """SELECT id, ts, scan, topic, payload, ok
+               FROM mqtt_events ORDER BY id DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {"rows": [], "total": 0, "limit": limit, "offset": offset}
+
+    result_rows = [
+        {
+            "id": r["id"],
+            "ts": r["ts"],
+            "scan": r["scan"],
+            "topic": r["topic"],
+            "payload": r["payload"],
+            "ok": bool(r["ok"]),
+        }
+        for r in rows
+    ]
+    return {"rows": result_rows, "total": total, "limit": limit, "offset": offset}
+
+
 # ---------------------------------------------------------------------------
 # Read helpers
 # ---------------------------------------------------------------------------
