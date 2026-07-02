@@ -175,10 +175,12 @@
               onclick="copyScanValue()"
               class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.78rem] font-semibold hover:bg-surface transition-colors"
               disabled>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-        </svg>
-        Copy
+        <span id="btn-copy-scan-label" class="inline-flex items-center gap-1.5">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          Copy
+        </span>
       </button>
       <span class="zone zone-neutral text-[0.72rem]" id="sse-badge">ออฟไลน์</span>
     </div>
@@ -586,6 +588,9 @@
     mqtt:    {{ 'true' if integrations.mqtt.enabled    else 'false' }},
     pipe:    {{ 'true' if integrations.pipe.enabled    else 'false' }},
   };
+  var mqttBrokerId = {% if integrations.mqtt.broker_id %}{{ integrations.mqtt.broker_id }}{% else %}null{% endif %};
+  /* baseline (resting) status สีของแต่ละ chip: 'idle' (เทา) | 'warn' (เหลือง/แดง — enabled แต่ไม่ได้เชื่อม broker) */
+  var integBaseline = { webhook: 'idle', mqtt: 'idle', pipe: 'idle' };
 
   /* ══ SSE ════════════════════════════════════════════════════════════════ */
   function connectSSE() {
@@ -727,10 +732,11 @@
       }, 1400);
     }
 
-    /* pipeline flash */
-    var types = ['webhook', 'mqtt', 'pipe'];
-    types.forEach(function (t) {
-      if (integState[t]) { setTimeout(function () { flashPipelineChip(t); }, 200); }
+    /* pipeline flash — mqtt ใช้สถานะจริงจาก data.mqtt (enabled/connected/published/error)
+       webhook/pipe ยังไม่มี backend ส่งสถานะจริงกลับมา เลย flash แบบ generic (ok) เหมือนเดิม */
+    if (integState.mqtt) { setTimeout(function () { updateMqttChipStatus(data.mqtt); }, 200); }
+    ['webhook', 'pipe'].forEach(function (t) {
+      if (integState[t]) { setTimeout(function () { flashPipelineChip(t, 'ok'); }, 200); }
     });
 
     /* history */
@@ -743,6 +749,17 @@
     mqtt:    { label: 'MQTT',     icon: 'lucide:activity' },
     pipe:    { label: 'Pipe I/O', icon: 'lucide:git-branch' },
   };
+
+  /* สีสถานะของ chip: idle (เทา/ปกติ) | warn (เหลือง — enabled แต่ไม่ได้เชื่อม broker)
+     | ok (เขียว — publish สำเร็จ, ชั่วคราว) | error (แดง — publish ผิดพลาด, ชั่วคราว) */
+  var CHIP_STATUS_CLASS = {
+    idle:  'bg-surface border-line/15 text-muted',
+    warn:  'bg-caution/10 border-caution/25 text-[#92660b]',
+    ok:    'bg-safe/10 border-safe/25 text-safe',
+    error: 'bg-danger/10 border-danger/25 text-danger',
+  };
+  var CHIP_BASE = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.72rem] font-semibold border transition-all';
+  var chipFlashTimers = {};
 
   function renderPipelineChips() {
     var chips  = document.getElementById('pipeline-chips');
@@ -760,17 +777,55 @@
       var m = INTEG_META[k] || { label: k, icon: 'lucide:circle' };
       var chip = document.createElement('span');
       chip.id = 'pipeline-chip-' + k;
-      chip.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.72rem] font-semibold bg-safe/8 border border-safe/20 text-safe transition-all';
+      chip.className = CHIP_BASE + ' ' + CHIP_STATUS_CLASS[integBaseline[k] || 'idle'];
       chip.innerHTML = '<iconify-icon icon="' + m.icon + '" width="10" height="10"></iconify-icon>' + m.label;
       chips.appendChild(chip);
     });
   }
 
-  function flashPipelineChip(key) {
+  /* ตั้ง chip กลับไปที่สี baseline (resting state) ของมัน */
+  function applyChipBaseline(key) {
     var chip = document.getElementById('pipeline-chip-' + key);
     if (!chip) return;
-    chip.classList.add('bg-safe/20', 'scale-105');
-    setTimeout(function () { chip.classList.remove('bg-safe/20', 'scale-105'); }, 700);
+    chip.className = CHIP_BASE + ' ' + CHIP_STATUS_CLASS[integBaseline[key] || 'idle'] + ' scale-100';
+  }
+
+  /* Flash chip เป็นสี status ชั่วคราว (ok/error) แล้ว revert กลับไปที่ baseline อัตโนมัติ */
+  function flashPipelineChip(key, status) {
+    var chip = document.getElementById('pipeline-chip-' + key);
+    if (!chip || !status) return;
+    if (chipFlashTimers[key]) { clearTimeout(chipFlashTimers[key]); }
+    chip.className = CHIP_BASE + ' ' + (CHIP_STATUS_CLASS[status] || CHIP_STATUS_CLASS.idle) + ' scale-105';
+    chipFlashTimers[key] = setTimeout(function () {
+      applyChipBaseline(key);
+      chipFlashTimers[key] = null;
+    }, 1600);
+  }
+
+  /* อัปเดตสถานะ MQTT chip จาก data.mqtt ที่แนบมากับ SSE 'scan' event ทุกครั้ง
+     enabled=false  -> ไม่ต้องทำอะไร (ปกติไม่เกิดถ้า integState.mqtt=true)
+     connected=false -> baseline = warn (เหลือง) ค้างไว้จนกว่าจะเชื่อมต่อสำเร็จ
+     connected=true  -> baseline = idle (เทา), flash เขียว/แดงตาม published ของ scan นี้ */
+  function updateMqttChipStatus(status) {
+    var m = status || {};
+    if (!m.enabled) return;
+    integBaseline.mqtt = m.connected ? 'idle' : 'warn';
+    applyChipBaseline('mqtt');
+    if (m.connected) {
+      flashPipelineChip('mqtt', m.published ? 'ok' : 'error');
+    }
+  }
+
+  /* เช็คสถานะ broker ตอนโหลดหน้า (ก่อนมี scan ใดๆ) เพื่อให้ chip โชว์ warn ทันทีถ้ายังไม่ได้เชื่อม */
+  function checkInitialMqttStatus() {
+    if (!integState.mqtt || !mqttBrokerId) return;
+    fetch('/api/mqtt/brokers/' + mqttBrokerId + '/status')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        integBaseline.mqtt = d && d.connected ? 'idle' : 'warn';
+        applyChipBaseline('mqtt');
+      })
+      .catch(function () {});
   }
 
   function setPipelineDotState(running) {
@@ -781,7 +836,7 @@
       ? 'rgb(var(--c-safe))' : (hasInteg ? 'rgb(var(--c-faint)/0.4)' : 'rgb(var(--c-faint)/0.4)');
   }
 
-  function initFlowPipeline() { renderPipelineChips(); }
+  function initFlowPipeline() { renderPipelineChips(); checkInitialMqttStatus(); }
 
   /* ══ History ═════════════════════════════════════════════════════════════ */
   function addToHistory(value, ts, device) {
@@ -847,9 +902,18 @@
   window.__vasCleanup.push(function () { if (agoInterval) clearInterval(agoInterval); });
 
   /* ══ Copy scan value ═════════════════════════════════════════════════════ */
+  var copyScanRevertTimer = null;
+  var COPY_LABEL_DEFAULT =
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy';
+  var COPY_LABEL_DONE =
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
+    '<polyline points="20 6 9 17 4 12"/></svg>Copied';
+
   window.copyScanValue = function () {
     if (lastScanVal == null) return;
     var text;
+    /* คัดลอกค่าตาม scanDisplayMode ที่เลือกอยู่ ณ ตอนกด — decoded/raw_keycode/raw_report แยกกันชัดเจน */
     if (scanDisplayMode === 'raw_keycode') {
       text = (lastScanRawKeycode && lastScanRawKeycode.length) ? JSON.stringify(lastScanRawKeycode) : '';
     } else if (scanDisplayMode === 'raw_report') {
@@ -859,6 +923,19 @@
     }
     if (!text) return;
     copyValue(text);
+
+    var btn   = document.getElementById('btn-copy-scan');
+    var label = document.getElementById('btn-copy-scan-label');
+    if (label) {
+      if (copyScanRevertTimer) clearTimeout(copyScanRevertTimer);
+      label.innerHTML = COPY_LABEL_DONE;
+      if (btn) { btn.classList.add('border-safe/40', 'text-safe'); }
+      copyScanRevertTimer = setTimeout(function () {
+        label.innerHTML = COPY_LABEL_DEFAULT;
+        if (btn) { btn.classList.remove('border-safe/40', 'text-safe'); }
+        copyScanRevertTimer = null;
+      }, 1600);
+    }
   };
 
   /* ══ Unified tab switching (4 tabs) ══════════════════════════════════════ */

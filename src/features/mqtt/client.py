@@ -29,13 +29,19 @@ from urllib.parse import urlparse
 
 PAYLOAD_MODES = ("decoded", "raw_keycode", "raw_report")
 """
-payload_mode:
-    "decoded"     → publish ข้อมูลหลัง decode แล้ว     {"scan":"3833401723","device":"...","ts":"...","read_mode":"..."}
-    "raw_keycode" → publish raw keycodes ก่อน decode  {"scan":[39,30,30,...],"device":"...","ts":"...","read_mode":"..."}
-    "raw_report"  → publish raw HID byte report (hex) {"scan":["a1000000...","00000000..."],"device":"...","ts":"...","read_mode":"..."}
+payload_mode -- กำหนดรูปแบบของ field "data" ใน payload ที่ publish ออกไป:
+    "decoded"     → publish ข้อมูลหลัง decode แล้ว     {"data":"3833401723","device":"...","mode":"decoded","read_mode":"...","timestamp":"..."}
+    "raw_keycode" → publish raw keycodes ก่อน decode  {"data":[39,30,30,...],"device":"...","mode":"raw_keycode","read_mode":"...","timestamp":"..."}
+    "raw_report"  → publish raw HID byte report (hex) {"data":["a1000000...","00000000..."],"device":"...","mode":"raw_report","read_mode":"...","timestamp":"..."}
                     (มีเฉพาะ read_mode="hidraw" เท่านั้น -- evdev ไม่มี raw byte report)
 
-ทุก mode แนบ field "read_mode" เข้า payload เสมอ (ค่า 'hidraw' | 'evdev' | None)
+payload keys:
+    data      -- ข้อมูลตาม mode ที่เลือก (string สำหรับ decoded, array ของ int/hex string สำหรับ raw_*)
+    device    -- path ของ device เช่น /dev/hidraw0, /dev/input/event7
+    mode      -- payload_mode ที่ใช้จริงตอน publish นี้ ("decoded" | "raw_keycode" | "raw_report")
+    read_mode -- วิธีที่ device อ่านค่า ("hidraw" | "evdev" | None) -- ใช้ตีความ numbering space ของ raw_keycode
+    timestamp -- เวลาที่ publish (ISO 8601 UTC) -- เดิมชื่อ "ts", เปลี่ยนชื่อให้อ่านง่ายขึ้น
+
 ถ้าข้อมูลของ mode ที่เลือกเป็น None (เช่นขอ raw_report แต่ read_mode="evdev") จะไม่ publish
 และ return False -- ห้าม silent fallback ไปโหมดอื่น
 """
@@ -337,11 +343,12 @@ class VasMqttClient:
         """
         Publish QR scan ไปยัง topic ที่ config ไว้ (หรือ topic_override ถ้าระบุ)
 
-        payload_mode == "decoded"     → {"scan": "<decoded_text>",  "device":"...", "ts":"...", "read_mode":"..."}
-        payload_mode == "raw_keycode" → {"scan": [39,30,30,...],    "device":"...", "ts":"...", "read_mode":"..."}
-        payload_mode == "raw_report"  → {"scan": ["a1000000...",..],"device":"...", "ts":"...", "read_mode":"..."}
+        payload_mode == "decoded"     → {"data": "<decoded_text>",  "device":"...", "mode":"decoded",     "read_mode":"...", "timestamp":"..."}
+        payload_mode == "raw_keycode" → {"data": [39,30,30,...],    "device":"...", "mode":"raw_keycode", "read_mode":"...", "timestamp":"..."}
+        payload_mode == "raw_report"  → {"data": ["a1000000...",..],"device":"...", "mode":"raw_report",  "read_mode":"...", "timestamp":"..."}
 
-        ทุก mode แนบ "read_mode" เข้า payload เสมอ
+        ทุก mode แนบ "mode"/"read_mode"/"timestamp" เข้า payload เสมอ (เดิม key ชื่อ "scan"/"ts" —
+        เปลี่ยนเป็น "data"/"timestamp" ให้อ่านง่ายขึ้น และเพิ่ม "mode" บอกว่า data เป็นรูปแบบไหน)
 
         ถ้าข้อมูลของ payload_mode ที่เลือกเป็น None (เช่นขอ raw_report แต่ read_mode="evdev"
         ทำให้ scan_raw_report=None) → **ไม่ publish**, return False, log ผ่าน log_mqtt_event(ok=False)
@@ -384,7 +391,7 @@ class VasMqttClient:
             return False
 
         payload = json.dumps(
-            {"scan": scan_value, "device": device, "ts": ts, "read_mode": read_mode},
+            {"data": scan_value, "device": device, "mode": mode, "read_mode": read_mode, "timestamp": ts},
             ensure_ascii=False,
         )
         ok = self.publish(topic, payload)
@@ -561,15 +568,22 @@ def publish_qr_scan_for_device(
     scan_raw_keycode: "list[int] | None" = None,
     scan_raw_report: "list[str] | None" = None,
     read_mode: "str | None" = None,
-) -> bool:
+) -> dict[str, object]:
     """
     Device-aware publish — เลือก broker ตาม device_integrations ของ device_id นั้นๆ แทน
     primary broker ตรงๆ (ต่างจาก publish_qr_scan() ด้านบนที่เป็น primary-broker-only)
 
-    Return False (ไม่ error) ถ้า:
-        - device ไม่มี integration แบบ "mqtt" หรือไม่ enabled
-        - integration ไม่มี broker_id ผูกไว้
-        - broker ที่ผูกไว้ยังไม่มี client connect อยู่ (get_mqtt_client คืน None)
+    Return status dict เสมอ (ไม่ raise) รูปแบบ:
+        {"enabled": bool, "connected": bool, "published": bool, "error": str | None}
+
+        enabled=False   → device ไม่มี integration แบบ "mqtt" หรือปิดอยู่ (ไม่ใช่ error)
+        connected=False → enabled=True แต่ไม่มี broker ผูกไว้ หรือ broker ที่ผูกไว้ยังไม่ connect
+        published=True  → publish สำเร็จจริง (enabled+connected+publish ผ่านหมด)
+        error           → ข้อความอธิบายเมื่อ published=False ทั้งที่ enabled=True (ใช้โชว์ที่ UI)
+
+    ใช้แทน bool เดิมเพื่อให้ frontend (SSE 'scan' event ใน server.py) แสดงสถานะสีของ
+    integration chip ได้ตรงกับความเป็นจริง (เทา=idle, เหลือง/แดง=enabled แต่ไม่ได้เชื่อม broker,
+    เขียว=publish สำเร็จ, แดง=publish error)
 
     payload_mode: อ่านจาก device_integrations (mqtt_integ["payload_mode"]) ถ้าตั้งไว้ — เก็บใน
     settings_json ผ่าน upsert_device_integration() แบบเดียวกับ field เสริมอื่นๆ (ไม่ต้อง
@@ -578,26 +592,26 @@ def publish_qr_scan_for_device(
     (None/ค่าว่าง) จะ fallback ไปใช้ payload_mode ของ broker เอง (ดู publish_qr_scan())
 
     หมายเหตุ: นี่คือ code path ที่ SSE loop (server.py qr_stream_api) ใช้จริง — แยกจาก
-    publish_qr_scan() ที่ยังใช้กับ `vas mqtt test` / `/api/mqtt/test` เหมือนเดิม
+    publish_qr_scan() ที่ยังใช้กับ `vas mqtt test` / `/api/mqtt/test` เหมือนเดิม (ยัง return bool)
     """
     from core.database import list_device_integrations, get_mqtt_broker  # noqa: F401
 
     integrations = list_device_integrations(device_id)
     mqtt_integ = integrations.get("mqtt")
     if not mqtt_integ or not mqtt_integ.get("enabled"):
-        return False
+        return {"enabled": False, "connected": False, "published": False, "error": None}
 
     broker_id = mqtt_integ.get("broker_id")
     if broker_id is None:
-        return False
+        return {"enabled": True, "connected": False, "published": False, "error": "ยังไม่ได้เลือก broker"}
 
     c = get_mqtt_client(broker_id)  # type: ignore[arg-type]
     if c is None:
-        return False
+        return {"enabled": True, "connected": False, "published": False, "error": "broker ยังไม่ได้เชื่อมต่อ"}
 
     topic = mqtt_integ.get("topic") or None
     payload_mode = mqtt_integ.get("payload_mode") or None
-    return c.publish_qr_scan(
+    ok = c.publish_qr_scan(
         scan, device, ts,
         scan_raw_keycode=scan_raw_keycode,
         scan_raw_report=scan_raw_report,
@@ -605,6 +619,8 @@ def publish_qr_scan_for_device(
         topic_override=topic,  # type: ignore[arg-type]
         payload_mode_override=payload_mode,  # type: ignore[arg-type]
     )
+    error = None if ok else (c.last_error or "publish ไม่สำเร็จ")
+    return {"enabled": True, "connected": c.is_connected, "published": ok, "error": error}
 
 
 def get_mqtt_status() -> dict[str, object]:

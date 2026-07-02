@@ -810,13 +810,18 @@ def create_app() -> Flask:
             event: scan
             data: {"scan": "<value>", "device": "<path>", "ts": "<ISO8601-UTC>",
                    "raw_keycode": [<int>,...]|null, "raw_report": [<hex str>,...]|null,
-                   "read_mode": "hidraw"|"evdev"|null}
+                   "read_mode": "hidraw"|"evdev"|null,
+                   "mqtt": {"enabled": bool, "connected": bool, "published": bool, "error": str|null}}
 
             event: status
             data: {"running": <bool>, "device": "<path>"|null}
 
             event: heartbeat
             data: {}
+
+        หมายเหตุ: การตรวจจับ "scan ใหม่" ใช้ reader.last_scan_seq (ตัวนับที่เพิ่มทุกครั้งที่
+        scan เสร็จ แม้ค่าจะซ้ำกับครั้งก่อน) แทนการเทียบค่า string เดิม — เพื่อให้สแกน QR code
+        เดิมซ้ำๆ ยังคง publish/log ทุกครั้ง ไม่ถูกข้ามเพราะค่าไม่เปลี่ยน
         """
         from flask import stream_with_context, Response
         import time
@@ -841,7 +846,7 @@ def create_app() -> Flask:
             device = reader.device_path if running else None
             yield f"event: status\ndata: {_json_dumps({'running': running, 'device': device})}\n\n"
 
-            last_seen: str | None = None
+            last_seq = -1  # -1 = sentinel เพื่อให้ scan ล่าสุดที่มีอยู่แล้ว (ถ้ามี) ถูกส่งครั้งแรกตอน connect
             last_heartbeat = time.monotonic()
             last_restart_try = 0.0  # ลอง restart ทันทีรอบแรกถ้า reader ตาย
             HEARTBEAT_INTERVAL = 5.0
@@ -876,14 +881,17 @@ def create_app() -> Flask:
 
                     if reader is not None and reader.is_alive():
                         scan = reader.last_scan
-                        if scan is not None and scan != last_seen:
-                            last_seen = scan
+                        seq = getattr(reader, "last_scan_seq", None)
+                        # เทียบ seq (ไม่ใช่ค่า string) — scan ค่าเดิมซ้ำก็ต้องนับเป็น scan ใหม่
+                        # ทุกครั้งที่ seq เปลี่ยน ไม่ถูกข้ามเพราะค่าไม่เปลี่ยน (ตามที่ผู้ใช้ต้องการ)
+                        if scan is not None and seq is not None and seq != last_seq:
+                            last_seq = seq
                             ts = datetime.now(timezone.utc).isoformat()
                             scan_raw_keycode = getattr(reader, "last_scan_raw", None)
                             scan_raw_report = getattr(reader, "last_scan_raw_report", None)
                             read_mode = getattr(reader, "read_mode", None)
-                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts, 'raw_keycode': scan_raw_keycode, 'raw_report': scan_raw_report, 'read_mode': read_mode})}\n\n"
-                            # Log QR scan ลง DB
+
+                            # Log QR scan ลง DB (ทำก่อน publish เพื่อไม่ให้ log หายถ้า publish error)
                             try:
                                 from core.database import log_qr_scan as _db_log_qr
                                 _db_log_qr(
@@ -894,20 +902,29 @@ def create_app() -> Flask:
                                 )
                             except Exception:
                                 pass
-                            # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่ (device-aware routing
-                            # ตาม device_integrations — คนละ code path จาก publish_qr_scan()
-                            # ที่ใช้กับ `vas mqtt test` / `/api/mqtt/test`)
+
+                            # Publish ออก MQTT (device-aware routing ตาม device_integrations —
+                            # คนละ code path จาก publish_qr_scan() ที่ใช้กับ `vas mqtt test` /
+                            # `/api/mqtt/test`) — ทำก่อน yield event เพื่อแนบผลลัพธ์จริงไปกับ
+                            # SSE payload ให้ frontend โชว์สีสถานะ (เขียว/แดง/เหลือง) ได้ถูกต้อง
+                            mqtt_status: dict[str, object] = {
+                                "enabled": False, "connected": False, "published": False, "error": None,
+                            }
                             try:
                                 from features.mqtt.client import publish_qr_scan_for_device as _mqtt_publish
-                                _mqtt_publish(
+                                mqtt_status = _mqtt_publish(
                                     "zkteco-qr500",
                                     scan, reader.device_path, ts,
                                     scan_raw_keycode=scan_raw_keycode,
                                     scan_raw_report=scan_raw_report,
                                     read_mode=read_mode,
                                 )
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                mqtt_status = {
+                                    "enabled": True, "connected": False, "published": False, "error": str(exc),
+                                }
+
+                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts, 'raw_keycode': scan_raw_keycode, 'raw_report': scan_raw_report, 'read_mode': read_mode, 'mqtt': mqtt_status})}\n\n"
             except GeneratorExit:
                 # client disconnected
                 return

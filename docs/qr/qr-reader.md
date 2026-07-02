@@ -188,14 +188,14 @@ Background daemon thread อ่าน QR ผ่าน `python3-evdev`
 ### Flask Server (`server.py`)
 - **Auto-start**: server boot เรียก `start_reader()` ทันที (ถ้ามี device) — ทำงานคู่กับการเช็ค DB schema version ตอน boot (ดู `docs/database.md`)
 - **`atexit`**: ลงทะเบียน `stop_reader()` เพื่อหยุด thread เมื่อ process ปิด
-- **SSE Stream (`/api/qr/stream`)**: poll `reader.last_scan` ทุก 0.2 วินาที เมื่อมี scan ใหม่จะ:
-  1. ส่ง `event: scan` พร้อม `scan`, `device`, `ts`, `raw_keycode`, `raw_report`, `read_mode`
-  2. บันทึกลง `qr_scans` ผ่าน `log_qr_scan()` ครบทั้ง 3 ระดับข้อมูล + `read_mode`
-  3. Publish ออก MQTT ผ่าน `publish_qr_scan_for_device("zkteco-qr500", ...)` — เลือก broker ตาม `device_integrations` ที่ตั้งไว้ในหน้า `/qr/devices/zkteco-qr500` (ดู `docs/networking/mqtt.md`)
+- **SSE Stream (`/api/qr/stream`)**: poll `reader.last_scan` / `reader.last_scan_seq` ทุก 0.2 วินาที ตรวจจับ "scan ใหม่" ด้วยการเทียบ **`last_scan_seq`** (ตัวนับที่เพิ่มทุกครั้งที่ scan เสร็จ แม้ค่าจะซ้ำกับครั้งก่อน) — **ไม่ใช่การเทียบค่า string** เหมือนเดิม เพื่อให้สแกน QR code เดิมซ้ำๆ ติดกันยัง log/publish ทุกครั้ง ไม่ถูกข้ามเพราะค่าไม่เปลี่ยน เมื่อมี scan ใหม่จะ:
+  1. บันทึกลง `qr_scans` ผ่าน `log_qr_scan()` ครบทั้ง 3 ระดับข้อมูล + `read_mode`
+  2. Publish ออก MQTT ผ่าน `publish_qr_scan_for_device("zkteco-qr500", ...)` — เลือก broker ตาม `device_integrations` ที่ตั้งไว้ในหน้า `/qr/devices/zkteco-qr500` (ดู `docs/networking/mqtt.md`) — คืนค่าเป็น status dict (`enabled`/`connected`/`published`/`error`)
+  3. ส่ง `event: scan` พร้อม `scan`, `device`, `ts`, `raw_keycode`, `raw_report`, `read_mode`, และ `mqtt` (ผลลัพธ์จากข้อ 2 — ใช้แสดงสีสถานะของ integration chip บนหน้าเว็บ)
   - มี auto-restart ถ้า reader ตาย
 
 ### MQTT (`features/mqtt/client.py`)
-เมื่อ SSE stream ตรวจพบ scan ใหม่ จะเรียก `publish_qr_scan_for_device()` ส่งข้อมูลออก MQTT broker ที่ผูกกับ device นั้นโดยอัตโนมัติ (ถ้า integration enabled) — รูปแบบ payload (`decoded`/`raw_keycode`/`raw_report`) ขึ้นกับ `payload_mode` ที่ตั้งไว้ที่ broker นั้น ดูรายละเอียดเต็มที่ `docs/networking/mqtt.md`
+เมื่อ SSE stream ตรวจพบ scan ใหม่ จะเรียก `publish_qr_scan_for_device()` ส่งข้อมูลออก MQTT broker ที่ผูกกับ device นั้นโดยอัตโนมัติ (ถ้า integration enabled) — รูปแบบ payload (`decoded`/`raw_keycode`/`raw_report`) ขึ้นกับ `payload_mode` ที่ตั้งไว้ที่ device หรือ broker (ดู `docs/networking/mqtt.md`) — payload ที่ publish ออกจริงใช้ key `data`/`device`/`mode`/`read_mode`/`timestamp` (คนละชุดกับ SSE event ภายในที่ยังใช้ `scan`/`ts` เดิม)
 
 ---
 
@@ -222,7 +222,8 @@ data: {
   "ts": "<ISO8601-UTC>",
   "raw_keycode": [39, 30, 30, ...] | null,
   "raw_report": ["a1000000...", "00000000..."] | null,
-  "read_mode": "hidraw" | "evdev" | null
+  "read_mode": "hidraw" | "evdev" | null,
+  "mqtt": {"enabled": <bool>, "connected": <bool>, "published": <bool>, "error": "<str>"|null}
 }
 
 event: status
@@ -231,6 +232,9 @@ data: {"running": <bool>, "device": "<path>"|null}
 event: heartbeat
 data: {}
 ```
+หมายเหตุ: นี่คือรูปแบบ **SSE event ภายใน** (ระหว่าง server กับหน้าเว็บ) เท่านั้น — key ยังใช้ `scan`/`ts`
+เหมือนเดิม ไม่เกี่ยวกับ payload ที่ publish ออก MQTT จริง (ซึ่งใช้ key `data`/`mode`/`timestamp`
+แทน ดู `docs/networking/mqtt.md`)
 
 ---
 
