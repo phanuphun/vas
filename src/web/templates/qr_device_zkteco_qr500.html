@@ -31,9 +31,10 @@
   @keyframes tabFade { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 
   /* ── History card-list rows (DB-backed) ────── */
+  .scan-row-wrap { border-bottom:1px solid rgb(var(--c-line)/0.06); }
+  .scan-row-wrap:last-child { border-bottom:none !important; }
   .scan-row { transition:background .1s; cursor:default; }
   .scan-row:hover { background:rgb(var(--c-surface)); }
-  .scan-row:last-child { border-bottom:none !important; }
   .scan-row-copy {
     padding:.3rem .65rem; font-size:.72rem; cursor:pointer;
     border:1px solid rgb(var(--c-line)/0.15); border-radius:6px;
@@ -41,6 +42,15 @@
     transition:background .15s,color .15s; font-weight:600;
   }
   .scan-row-copy:hover { background:rgb(var(--c-surface)); color:rgb(var(--c-ink)); }
+  /* แสดงทั้ง 3 version (decoded/raw_keycode/raw_report) พร้อมกันเสมอ ไม่มีปุ่ม toggle แล้ว */
+  .scan-row-detail { padding:0 1.25rem .75rem 3.75rem; display:flex; flex-direction:column; gap:.5rem; }
+  .scan-row-detail-block { display:flex; flex-direction:column; gap:.2rem; }
+  .scan-row-detail-label { font-size:.64rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:rgb(var(--c-faint)); }
+  .scan-row-detail-block code {
+    display:block; font-family:'Bai Jamjuree',monospace; font-size:.72rem; color:rgb(var(--c-muted));
+    background:rgb(var(--c-surface)); border:1px solid rgb(var(--c-line)/0.08); border-radius:.5rem;
+    padding:.5rem .7rem; white-space:pre-wrap; word-break:break-all; line-height:1.5;
+  }
   .hist-empty { padding:2.5rem 1.25rem; text-align:center; color:rgb(var(--c-faint)); font-size:.84rem; }
 
   /* ── Pagination bar ────────────────────────── */
@@ -1004,7 +1014,24 @@
         ? '<span class="zone zone-neutral" style="font-size:.62rem;padding:.05rem .4rem;">' + escHtml(item.read_mode) + '</span>'
         : '';
       var deviceStr = item.device ? '<span>·</span><code class="font-display">' + escHtml(item.device) + '</code>' : '';
-      html += '<div class="scan-row flex items-center gap-3 px-4 py-3 border-b border-line/6">'
+
+      var hasRawKeycode = !!(item.raw_keycode && item.raw_keycode.length);
+      var hasRawReport  = !!(item.raw_report  && item.raw_report.length);
+
+      /* แสดงทั้ง 3 version พร้อมกันเสมอ (decoded / raw_keycode / raw_report) — ข้อมูลถูกเก็บ
+         ไว้ใน DB ครบอยู่แล้วจาก log_qr_scan() ถ้า mode ไหนไม่มีข้อมูล (เช่น evdev ไม่มี
+         raw_report) จะโชว์ "ไม่มีข้อมูล" แทน ไม่ซ่อนแถวไปเฉยๆ */
+      var decodedBlock = '<div class="scan-row-detail-block"><span class="scan-row-detail-label">Decoded</span><code>' + escHtml(item.value) + '</code></div>';
+      var rawKeycodeBlock = hasRawKeycode
+        ? '<div class="scan-row-detail-block"><span class="scan-row-detail-label">Raw Keycode</span><code>' + escHtml(JSON.stringify(item.raw_keycode)) + '</code></div>'
+        : '<div class="scan-row-detail-block"><span class="scan-row-detail-label">Raw Keycode</span><code>ไม่มีข้อมูล</code></div>';
+      var rawReportBlock = hasRawReport
+        ? '<div class="scan-row-detail-block"><span class="scan-row-detail-label">Raw Report</span><code>' + escHtml(item.raw_report.map(function (r, i) { return '#' + (i + 1) + '  ' + formatHexReport(r); }).join('\n')) + '</code></div>'
+        : '<div class="scan-row-detail-block"><span class="scan-row-detail-label">Raw Report</span><code>ไม่มีข้อมูล' + (item.read_mode === 'evdev' ? ' — evdev ไม่มี raw byte report' : '') + '</code></div>';
+      var detailHtml = '<div class="scan-row-detail">' + decodedBlock + rawKeycodeBlock + rawReportBlock + '</div>';
+
+      html += '<div class="scan-row-wrap">'
+            + '<div class="scan-row flex items-center gap-3 px-4 py-3">'
             + '<div class="w-9 h-9 rounded-lg border border-line/10 bg-surface flex items-center justify-center flex-shrink-0 text-muted">'
             + '<iconify-icon icon="lucide:scan-line" width="15" height="15"></iconify-icon></div>'
             + '<div class="flex-1 min-w-0">'
@@ -1018,6 +1045,8 @@
             + deviceStr
             + '</div></div>'
             + '<button class="scan-row-copy flex-shrink-0" onclick="copyValue(\'' + escAttr(item.value) + '\')">copy</button>'
+            + '</div>'
+            + detailHtml
             + '</div>';
     });
     list.innerHTML = html;
