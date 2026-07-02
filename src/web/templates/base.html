@@ -73,6 +73,26 @@
       }
       .spin-white { border-color: rgba(255,255,255,0.3); border-top-color: #fff; }
 
+      /* ── SPA route-loading bar (top-of-viewport, indeterminate) ──
+         Scoped entirely to #vas-loading-bar — safe to touch in isolation. */
+      @keyframes vas-loading-slide {
+        0%   { left: -35%; width: 35%; }
+        55%  { left: 100%; width: 55%; }
+        100% { left: 100%; width: 55%; }
+      }
+      #vas-loading-bar {
+        position: fixed; top: 0; left: 0; width: 100%; height: 3px;
+        z-index: 9999; overflow: hidden; opacity: 0; pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      #vas-loading-bar.is-active { opacity: 1; }
+      #vas-loading-bar .vas-loading-bar-inner {
+        position: absolute; top: 0; height: 100%;
+        background: rgb(var(--c-accent)); border-radius: 0 2px 2px 0;
+        box-shadow: 0 0 8px rgb(var(--c-accent) / 0.6);
+        animation: vas-loading-slide 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+
       /* ── Sidebar cubic-bezier transition ── */
       .sidebar { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 
@@ -116,6 +136,9 @@
     </style>
   </head>
   <body class="bg-page text-ink">
+
+    <!-- SPA route-loading bar (infinite blue indeterminate progress) -->
+    <div id="vas-loading-bar" aria-hidden="true"><div class="vas-loading-bar-inner"></div></div>
 
     <!-- Mobile overlay -->
     <div id="overlay" onclick="closeSidebar()"
@@ -606,6 +629,17 @@
       //         scripts (extra_scripts block) ลงทะเบียนไว้ก่อน
       window.__vasCleanup = window.__vasCleanup || [];
 
+      // ── Route-loading bar ────────────────────────────────────────────
+      // Self-contained: only touches #vas-loading-bar, never other DOM.
+      function showLoadingBar() {
+        var bar = document.getElementById('vas-loading-bar');
+        if (bar) bar.classList.add('is-active');
+      }
+      function hideLoadingBar() {
+        var bar = document.getElementById('vas-loading-bar');
+        if (bar) bar.classList.remove('is-active');
+      }
+
       // ── Cleanup ────────────────────────────────────────────────────
       function runCleanup() {
         var fns = window.__vasCleanup;
@@ -669,6 +703,7 @@
         _ctrl = new AbortController();
         var sig = _ctrl.signal;
 
+        showLoadingBar();
         runCleanup();
 
         fetch(url, {
@@ -708,9 +743,12 @@
 
           // 5. Scroll content to top
           window.scrollTo(0, 0);
+
+          hideLoadingBar();
         })
         .catch(function (e) {
-          if (e.name === 'AbortError') return;
+          if (e.name === 'AbortError') return; // superseded by a newer navigate() — its own bar is already showing
+          hideLoadingBar();
           location.href = url; // hard fallback
         });
       }
