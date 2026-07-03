@@ -75,6 +75,28 @@ def _file_check(path: str):
     return _check
 
 
+def _which_any_check(cmds: tuple[str, ...]):
+    """คืน (installed, version_str|None) — ลองหาทีละ command ตามลำดับ
+    ใช้กับ package ที่ executable name ไม่แน่นอน (เช่น chromium / chromium-browser)"""
+    def _check() -> tuple[bool, str | None]:
+        if dev_fake_installed():
+            return True, "dev-mode"
+        for cmd in cmds:
+            path = shutil.which(cmd)
+            if path is None:
+                continue
+            try:
+                r = subprocess.run(
+                    [cmd, "--version"], capture_output=True, text=True, timeout=5
+                )
+                ver = (r.stdout or r.stderr).strip().splitlines()[0] if r.returncode == 0 else None
+            except Exception:
+                ver = None
+            return True, ver
+        return False, None
+    return _check
+
+
 # ---------------------------------------------------------------------------
 # Package manifest
 # ---------------------------------------------------------------------------
@@ -258,6 +280,43 @@ PACKAGES: list[dict[str, Any]] = [
         ],
         "uninstall_warning": "การถอน AnyDesk จะปิดการเข้าถึง remote desktop จากระยะไกล",
     },
+    # ── Kiosk Mode ────────────────────────────────────────────────
+    {
+        "id":          "openbox",
+        "name":        "Openbox",
+        "description": "Window manager แบบเบา — ใช้แสดงผล kiosk mode เต็มจอโดยไม่มี desktop UI",
+        "logo":        "openbox-logo.png",
+        "category":    "kiosk",
+        "depends":     [],
+        "children":    [],
+        "check":       _which_check("openbox", ("openbox", "--version")),
+        "install_cmds": [
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "openbox"],
+        ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "openbox"],
+        ],
+        "uninstall_warning": "การถอน Openbox จะทำให้ session แบบ kiosk (ถ้าตั้งค่าไว้ให้ใช้ openbox) ใช้งานไม่ได้",
+    },
+    {
+        "id":          "chromium",
+        "name":        "Chromium",
+        "description": "เว็บเบราว์เซอร์ — เปิดแบบ --kiosk เต็มจอเพื่อแสดง dashboard หรือหน้าเว็บที่กำหนด",
+        "logo":        "chromium-logo.png",
+        "category":    "kiosk",
+        "depends":     [],
+        "children":    [],
+        "check":       _which_any_check(("chromium-browser", "chromium")),
+        "install_cmds": [
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "chromium-browser"],
+        ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "chromium-browser", "chromium"],
+        ],
+        "uninstall_warning": "การถอน Chromium จะทำให้หน้าจอ kiosk mode (ถ้าตั้งค่าไว้) เปิดเบราว์เซอร์ไม่ได้อีก",
+    },
     # ── Hardware ──────────────────────────────────────────────────
     {
         "id":          "qr-udev",
@@ -302,6 +361,7 @@ CATEGORIES: dict[str, str] = {
     "runtime":  "Runtime",
     "network":  "Network",
     "remote":   "Remote Access",
+    "kiosk":    "Kiosk Mode",
     "display":  "Display & Simulation",
     "hardware": "Hardware",
 }
