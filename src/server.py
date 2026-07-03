@@ -1277,7 +1277,8 @@ def create_app() -> Flask:
             data: {"scan": "<value>", "device": "<path>", "ts": "<ISO8601-UTC>",
                    "raw_keycode": [<int>,...]|null, "raw_report": [<hex str>,...]|null,
                    "read_mode": "hidraw"|"evdev"|null,
-                   "mqtt": {"enabled": bool, "connected": bool, "published": bool, "error": str|null}}
+                   "mqtt": {"enabled": bool, "connected": bool, "published": bool, "error": str|null},
+                   "pipe": {"enabled": bool, "connected": bool, "published": bool, "error": str|null}}
 
             event: status
             data: {"running": <bool>, "device": "<path>"|null}
@@ -1397,7 +1398,22 @@ def create_app() -> Flask:
                                     "enabled": True, "connected": False, "published": False, "error": str(exc),
                                 }
 
-                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts, 'raw_keycode': scan_raw_keycode, 'raw_report': scan_raw_report, 'read_mode': read_mode, 'mqtt': mqtt_status})}\n\n"
+                            # เขียนออก Named Pipe (device-aware ตาม device_integrations เหมือน MQTT
+                            # ด้านบน) — เขียนก็ต่อเมื่อ toggle "Pipe I/O" enabled เท่านั้น เขียนแบบ
+                            # non-blocking (features/qr/pipe_io.py) จึงไม่ทำให้ SSE loop ค้างแม้ไม่มี
+                            # reader เปิด pipe รออยู่ฝั่งตรงข้าม
+                            pipe_status: dict[str, object] = {
+                                "enabled": False, "connected": False, "published": False, "error": None,
+                            }
+                            try:
+                                from features.qr.pipe_io import publish_qr_scan_to_pipe_for_device as _pipe_publish
+                                pipe_status = _pipe_publish("zkteco-qr500", scan)
+                            except Exception as exc:
+                                pipe_status = {
+                                    "enabled": True, "connected": False, "published": False, "error": str(exc),
+                                }
+
+                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts, 'raw_keycode': scan_raw_keycode, 'raw_report': scan_raw_report, 'read_mode': read_mode, 'mqtt': mqtt_status, 'pipe': pipe_status})}\n\n"
             except GeneratorExit:
                 # client disconnected
                 return
@@ -1532,6 +1548,115 @@ def create_app() -> Flask:
         except OSError as e:
             return {"status": "error", "error": str(e)}, 500
         return {"status": "ok", "path": path}
+
+    # ── Pipe Tester routes (หน้าแยกต่างหาก — ทดสอบอ่าน named pipe ใดๆ ในระบบ ไม่ว่าจะ
+    #    เขียนมาจาก VAS เอง (Pipe I/O integration ของ QR500 ด้านบน) หรือจาก third-party
+    #    process ภายนอก) ─────────────────────────────────────────
+
+    @app.get("/pipe-tester")
+    def pipe_tester_page() -> str:
+        from core.database import list_pipe_integrations
+        return render_template(
+            "pipe_tester.html",
+            known_pipes=list_pipe_integrations(),
+        )
+
+    @app.get("/api/pipes")
+    def pipes_list_api() -> dict[str, object]:
+        """รายการ pipe ที่ตั้งค่าไว้แล้วในระบบ (ทุก device) — ใช้เติม dropdown ในหน้า Pipe Tester"""
+        from core.database import list_pipe_integrations
+        return {"status": "ok", "pipes": list_pipe_integrations()}
+
+    @app.post("/api/pipe/start")
+    def pipe_start_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        from features.qr.pipe_io import start_pipe_reader
+        payload = request.get_json(silent=True) or {}
+        path = str(payload.get("path", "")).strip()
+        if not path:
+            return {"status": "error", "error": "path required"}, 400
+        try:
+            reader = start_pipe_reader(path)
+        except OSError as e:
+            return {"status": "error", "error": str(e)}, 500
+        return {"status": "ok", "path": reader.path}
+
+    @app.post("/api/pipe/stop")
+    def pipe_stop_api() -> dict[str, object]:
+        from features.qr.pipe_io import stop_pipe_reader
+        stop_pipe_reader()
+        return {"status": "ok"}
+
+    @app.get("/api/pipe/stream")
+    def pipe_stream_api():  # type: ignore[return]
+        """
+        Server-Sent Events stream ของหน้า Pipe Tester — poll PipeReaderThread ทุก 0.2s
+        (กลไกเดียวกับ /api/qr/stream ด้านบน: เทียบ last_seq แทนค่า string เพื่อให้บรรทัด
+        ซ้ำกันติดๆ กันยังถูกส่งออกทุกครั้ง ไม่ถูกข้ามเพราะค่าไม่เปลี่ยน)
+
+            event: line
+            data: {"line": "<str>", "ts": "<ISO8601-UTC>"}
+
+            event: status
+            data: {"running": bool, "path": "<str>"|null, "connected": bool, "error": str|null}
+
+            event: heartbeat
+            data: {}
+        """
+        from flask import stream_with_context, Response
+        import time
+        from datetime import datetime, timezone
+        from features.qr.pipe_io import get_pipe_reader
+
+        def _status_payload(reader: object) -> dict[str, object]:
+            return {
+                "running": reader is not None and reader.is_alive(),  # type: ignore[attr-defined]
+                "path": reader.path if reader else None,  # type: ignore[attr-defined]
+                "connected": reader.connected if reader else False,  # type: ignore[attr-defined]
+                "error": reader.error if reader else None,  # type: ignore[attr-defined]
+            }
+
+        def generate():
+            last_seq = -1
+            last_heartbeat = time.monotonic()
+            HEARTBEAT_INTERVAL = 5.0
+            POLL_INTERVAL = 0.2
+
+            reader = get_pipe_reader()
+            running = reader is not None and reader.is_alive()
+            yield f"event: status\ndata: {_json_dumps(_status_payload(reader))}\n\n"
+
+            try:
+                while True:
+                    time.sleep(POLL_INTERVAL)
+                    now = time.monotonic()
+
+                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        yield "event: heartbeat\ndata: {}\n\n"
+                        last_heartbeat = now
+
+                    reader = get_pipe_reader()
+                    currently_alive = reader is not None and reader.is_alive()
+                    if currently_alive != running:
+                        running = currently_alive
+                        yield f"event: status\ndata: {_json_dumps(_status_payload(reader))}\n\n"
+
+                    if reader is not None and reader.is_alive():
+                        seq = reader.last_seq
+                        if seq > 0 and seq != last_seq:
+                            last_seq = seq
+                            ts = datetime.now(timezone.utc).isoformat()
+                            yield f"event: line\ndata: {_json_dumps({'line': reader.last_line, 'ts': ts})}\n\n"
+            except GeneratorExit:
+                return
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # ── MQTT routes ─────────────────────────────────────────────
 

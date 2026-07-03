@@ -1,0 +1,254 @@
+{% extends base_template %}
+{% block page_title %}Pipe Tester — VAS{% endblock %}
+{% block header_title %}Pipe Tester{% endblock %}
+
+{% block header_actions %}
+<span class="cf-zone cf-zone-neutral" id="header-pipe-badge" style="font-size:0.72rem;">
+  <span class="pulse-dot" id="header-pulse" style="display:none;"></span>
+  <span id="header-badge-text">ยังไม่เริ่มอ่าน</span>
+</span>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;flex-direction:column;gap:1rem;max-width:100%;">
+<style>
+.pulse-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--c-safe));
+  margin-right: 5px;
+  animation: pulse-ring 1.6s ease-in-out infinite;
+  vertical-align: middle;
+}
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgb(var(--c-safe)/0.55); opacity:1; }
+  70%  { box-shadow: 0 0 0 6px rgb(var(--c-safe)/0); opacity:0.9; }
+  100% { box-shadow: 0 0 0 0 rgb(var(--c-safe)/0); opacity:1; }
+}
+@keyframes lineFadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+.pt-line-row { animation: lineFadeIn 0.25s ease-out; }
+.pt-line-row:not(:last-child) { border-bottom: 1px solid rgb(var(--c-line)/0.07); }
+.pt-empty { padding: 2.5rem 1.25rem; text-align: center; color: rgb(var(--c-faint)); font-size: 0.84rem; }
+</style>
+
+  <!-- ── คำอธิบาย ─────────────────────────────────────── -->
+  <div class="bg-accent/6 border border-accent/18 rounded-lg px-4 py-3 text-[0.8rem] text-ink flex items-start gap-2.5">
+    <svg width="15" height="15" class="flex-shrink-0 mt-0.5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+    <div>
+      <p class="font-semibold mb-1">หน้าทดสอบ Named Pipe</p>
+      <p class="text-muted leading-relaxed">
+        หน้านี้เปิดอ่าน named pipe (FIFO) ตาม path ที่เลือก แบบ real-time เพื่อทดสอบว่ามีข้อมูลถูกเขียนเข้ามาจริงหรือไม่ —
+        ใช้ได้ทั้งกับ pipe ที่ VAS เขียนเอง (เช่น integration "Pipe I/O" ของ QR500) และ pipe ที่มี third-party process
+        ภายนอกเขียนเข้ามา ไม่ผูกกับฟีเจอร์ใดฟีเจอร์หนึ่งโดยเฉพาะ
+      </p>
+    </div>
+  </div>
+
+  <!-- ── เลือก Pipe + Start/Stop ──────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">เลือก Pipe ที่จะทดสอบ</h2>
+    </div>
+    <div class="p-5 flex flex-col gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.75rem] font-semibold text-muted">Pipe ที่ตั้งค่าไว้แล้ว</label>
+          <select id="pt-known-select"
+                  class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-display">
+            <option value="">-- พิมพ์ path เอง --</option>
+            {% for p in known_pipes %}
+            <option value="{{ p.path or '/tmp/vas_qr_pipe' }}">{{ p.device_id }} ({{ p.path or '/tmp/vas_qr_pipe' }}){{ ' · enabled' if p.enabled else ' · disabled' }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[0.75rem] font-semibold text-muted">หรือพิมพ์ Pipe Path เอง</label>
+          <input type="text" id="pt-path-input" placeholder="/tmp/vas_qr_pipe" value="/tmp/vas_qr_pipe"
+                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition font-display">
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <button onclick="ptStart()" id="pt-btn-start"
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          เริ่มอ่าน
+        </button>
+        <button onclick="ptStop()" id="pt-btn-stop" disabled
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+          หยุด
+        </button>
+        <span class="text-[0.71rem] text-faint flex-1" id="pt-status-text">ยังไม่ได้เริ่มอ่าน pipe ใดๆ</span>
+      </div>
+
+      <div class="flex flex-col gap-1.5" id="pt-manual-hint" style="display:none;">
+        <label class="text-[0.75rem] font-semibold text-muted">ทดสอบเขียนค่าเข้า pipe นี้จาก terminal (ไม่ต้องรอ hardware จริง)</label>
+        <pre class="payload-box" id="pt-manual-cmd" style="white-space:pre-wrap;word-break:break-all;padding:0.6rem 0.75rem;border:1px solid rgb(var(--c-line)/0.12);border-radius:0.5rem;background:rgb(var(--c-surface));font-family:'Bai Jamjuree',monospace;font-size:0.76rem;color:rgb(var(--c-muted));"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ผลลัพธ์แบบ real-time ─────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
+      <h2 class="text-[0.9rem] font-semibold text-ink">ค่าที่อ่านได้ (real-time)</h2>
+      <div class="flex items-center gap-2">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-accent/10 border border-accent/20 text-accent font-display tabular-nums" id="pt-count-badge">0</span>
+        <button onclick="ptClear()" class="inline-flex items-center px-2.5 py-1 border border-line/15 rounded-md bg-card text-ink text-[0.75rem] font-semibold hover:bg-surface transition-colors">ล้าง</button>
+      </div>
+    </div>
+    <div id="pt-line-list">
+      <div class="pt-empty" id="pt-empty">ยังไม่มีข้อมูล — กด "เริ่มอ่าน" แล้วรอ writer เขียนเข้ามา</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  var ptEs = null;
+  var ptRunning = false;
+  var ptCount = 0;
+  var MAX_ROWS = 200;
+
+  var selectEl = document.getElementById('pt-known-select');
+  var pathEl   = document.getElementById('pt-path-input');
+  var btnStart = document.getElementById('pt-btn-start');
+  var btnStop  = document.getElementById('pt-btn-stop');
+  var statusEl = document.getElementById('pt-status-text');
+  var badgeWrap  = document.getElementById('header-pipe-badge');
+  var badgeText  = document.getElementById('header-badge-text');
+  var pulseDot   = document.getElementById('header-pulse');
+  var manualHint = document.getElementById('pt-manual-hint');
+  var manualCmd  = document.getElementById('pt-manual-cmd');
+
+  selectEl.addEventListener('change', function () {
+    if (selectEl.value) pathEl.value = selectEl.value;
+  });
+
+  function currentPath() {
+    return (pathEl.value || '').trim() || '/tmp/vas_qr_pipe';
+  }
+
+  function updateManualHint(path) {
+    manualCmd.textContent = 'echo "test-scan-$(date +%s)" > ' + path;
+    manualHint.style.display = '';
+  }
+
+  function setHeaderBadge(state, text) {
+    badgeText.textContent = text;
+    var cls = 'cf-zone ';
+    if (state === 'running')      { cls += 'cf-zone-safe';    pulseDot.style.display = 'inline-block'; }
+    else if (state === 'waiting') { cls += 'cf-zone-caution'; pulseDot.style.display = 'none'; }
+    else if (state === 'error')   { cls += 'cf-zone-danger';  pulseDot.style.display = 'none'; }
+    else                          { cls += 'cf-zone-neutral'; pulseDot.style.display = 'none'; }
+    badgeWrap.className = cls;
+    badgeWrap.style.fontSize = '0.72rem';
+  }
+
+  window.ptStart = function () {
+    var path = currentPath();
+    btnStart.disabled = true;
+    fetch('/api/pipe/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        btnStart.disabled = false;
+        if (data.status === 'ok') {
+          showToast('เริ่มอ่าน pipe ที่ ' + data.path + ' แล้ว', 'success');
+          updateManualHint(data.path);
+          connectStream();
+        } else {
+          showToast('Error: ' + (data.error || 'unknown'), 'error');
+        }
+      })
+      .catch(function (e) { btnStart.disabled = false; showToast('Error: ' + e, 'error'); });
+  };
+
+  window.ptStop = function () {
+    fetch('/api/pipe/stop', { method: 'POST' })
+      .then(function () { showToast('หยุดอ่าน pipe แล้ว', 'success'); })
+      .catch(function () {});
+  };
+
+  window.ptClear = function () {
+    document.getElementById('pt-line-list').innerHTML = '<div class="pt-empty" id="pt-empty">ยังไม่มีข้อมูล — กด "เริ่มอ่าน" แล้วรอ writer เขียนเข้ามา</div>';
+    ptCount = 0;
+    document.getElementById('pt-count-badge').textContent = '0';
+  };
+
+  function addLine(line, ts) {
+    var list = document.getElementById('pt-line-list');
+    var empty = document.getElementById('pt-empty');
+    if (empty) empty.remove();
+
+    var row = document.createElement('div');
+    row.className = 'pt-line-row px-5 py-2.5 flex items-center gap-3';
+    var timeStr = '';
+    try { timeStr = new Date(ts).toLocaleTimeString('th-TH', { hour12: false }); } catch (e) { timeStr = ts; }
+    row.innerHTML =
+      '<span class="text-[0.72rem] font-display text-faint flex-shrink-0" style="width:5.5rem;">' + timeStr + '</span>' +
+      '<span class="text-[0.85rem] font-display font-semibold text-ink flex-1" style="word-break:break-all;">' + escapeHtml(line) + '</span>';
+    list.insertBefore(row, list.firstChild);
+
+    ptCount++;
+    document.getElementById('pt-count-badge').textContent = ptCount;
+    while (list.children.length > MAX_ROWS) list.removeChild(list.lastChild);
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s == null ? '' : s;
+    return d.innerHTML;
+  }
+
+  function applyStatus(s) {
+    ptRunning = !!(s && s.running);
+    btnStop.disabled = !ptRunning;
+    if (!ptRunning) {
+      setHeaderBadge('idle', 'ยังไม่เริ่มอ่าน');
+      statusEl.textContent = 'ยังไม่ได้เริ่มอ่าน pipe ใดๆ';
+      return;
+    }
+    if (s.path) { pathEl.value = s.path; updateManualHint(s.path); }
+    if (s.error) {
+      setHeaderBadge('error', 'Error');
+      statusEl.textContent = 'เกิดข้อผิดพลาด: ' + s.error;
+    } else if (s.connected) {
+      setHeaderBadge('running', 'กำลังอ่าน · ' + s.path);
+      statusEl.textContent = 'เปิด pipe อยู่ที่ ' + s.path + ' — พร้อมรับข้อมูล';
+    } else {
+      setHeaderBadge('waiting', 'รอ writer · ' + s.path);
+      statusEl.textContent = 'เปิด pipe ที่ ' + s.path + ' แล้ว รอ process อื่นเขียนเข้ามา...';
+    }
+  }
+
+  function connectStream() {
+    if (ptEs) { ptEs.close(); }
+    ptEs = new EventSource('/api/pipe/stream');
+    ptEs.addEventListener('status', function (e) {
+      try { applyStatus(JSON.parse(e.data)); } catch (err) {}
+    });
+    ptEs.addEventListener('line', function (e) {
+      try {
+        var d = JSON.parse(e.data);
+        addLine(d.line, d.ts);
+      } catch (err) {}
+    });
+    ptEs.onerror = function () {
+      // browser จะ auto-reconnect ให้เอง (EventSource ค่า default) — ไม่ต้องทำอะไรเพิ่ม
+    };
+  }
+
+  // เชื่อม SSE ทันทีตอนโหลดหน้า เผื่อมี reader รันค้างอยู่แล้วจาก session อื่น
+  connectStream();
+})();
+</script>
+{% endblock %}

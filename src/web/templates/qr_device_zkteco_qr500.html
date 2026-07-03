@@ -837,12 +837,12 @@
       }, 1400);
     }
 
-    /* pipeline flash — mqtt ใช้สถานะจริงจาก data.mqtt (enabled/connected/published/error)
-       webhook/pipe ยังไม่มี backend ส่งสถานะจริงกลับมา เลย flash แบบ generic (ok) เหมือนเดิม */
+    /* pipeline flash — mqtt/pipe ใช้สถานะจริงจาก data.mqtt / data.pipe (enabled/connected/
+       published/error) ที่ backend ส่งมาจริงแล้ว (server.py qr_stream_api)
+       webhook ยังไม่มี backend เขียนจริง เลย flash แบบ generic (ok) เหมือนเดิม */
     if (integState.mqtt) { setTimeout(function () { updateMqttChipStatus(data.mqtt); }, 200); }
-    ['webhook', 'pipe'].forEach(function (t) {
-      if (integState[t]) { setTimeout(function () { flashPipelineChip(t, 'ok'); }, 200); }
-    });
+    if (integState.pipe) { setTimeout(function () { updatePipeChipStatus(data.pipe); }, 200); }
+    if (integState.webhook) { setTimeout(function () { flashPipelineChip('webhook', 'ok'); }, 200); }
 
     /* history — DB เป็น source of truth เสมอ ถ้ากำลังดูหน้าแรกอยู่ให้ refresh ทั้งสองตาราง
        (debounce กันยิง request รัวๆ ตอนสแกนถี่ๆ) */
@@ -928,6 +928,22 @@
     applyChipBaseline('mqtt');
     if (m.connected) {
       flashPipelineChip('mqtt', m.published ? 'ok' : 'error');
+    }
+  }
+
+  /* อัปเดตสถานะ Pipe I/O chip จาก data.pipe ที่แนบมากับ SSE 'scan' event ทุกครั้ง — เหมือน
+     updateMqttChipStatus() ด้านบนทุกประการ:
+       enabled=false   -> ไม่ต้องทำอะไร (ปกติไม่เกิดถ้า integState.pipe=true)
+       connected=false -> baseline = warn (เหลือง) หมายถึงไม่มี reader เปิด pipe รออยู่ตอนเขียน
+                           (ENXIO) ค้างไว้จนกว่าจะมี reader มาเปิด (เช่นหน้า Pipe Tester)
+       connected=true  -> baseline = idle (เทา), flash เขียว/แดงตาม published ของ scan นี้ */
+  function updatePipeChipStatus(status) {
+    var p = status || {};
+    if (!p.enabled) return;
+    integBaseline.pipe = p.connected ? 'idle' : 'warn';
+    applyChipBaseline('pipe');
+    if (p.connected) {
+      flashPipelineChip('pipe', p.published ? 'ok' : 'error');
     }
   }
 

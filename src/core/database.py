@@ -987,6 +987,22 @@ def list_device_integrations(device_id: str) -> dict[str, dict[str, object]]:
         return {}
 
 
+def list_pipe_integrations() -> list[dict[str, object]]:
+    """
+    คืน integration แบบ "pipe" ของทุก device ในระบบ (ไม่ใช่แค่ device เดียว) — ใช้กับหน้า
+    Pipe Tester (/pipe-tester) เป็นรายการ "pipe ที่ตั้งค่าไว้แล้ว" ให้เลือกทดสอบเร็วๆ แทน
+    การพิมพ์ path เอง ทุกครั้ง — ดึงมาทั้ง enabled และ disabled (frontend ไปกรอง/แสดงสถานะเอง)
+    """
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM device_integrations WHERE integration_type = 'pipe' ORDER BY device_id"
+        ).fetchall()
+        return [_device_integration_row_to_dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
 def upsert_device_integration(
     device_id: str,
     integration_type: str,
