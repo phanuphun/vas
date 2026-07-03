@@ -79,6 +79,17 @@ def uninstall_device(device_id: str) -> None:
         pass
 
 
+def is_installed(device_id: str) -> bool:
+    """
+    เช็คว่า device_id ถูกลงทะเบียนไว้ใน registry (~/.config/vas/qr_devices.json) หรือไม่
+
+    ใช้เป็น gate ก่อน auto-start/restart reader thread — ถ้า device ถูก "ถอนการติดตั้ง"
+    ไปแล้ว ไม่ควรมีอะไรมา auto-start reader กลับมาให้อีก (ดู server.py: boot auto-start,
+    /api/qr/stream auto-restart, /api/qr/start)
+    """
+    return device_id in {d["id"] for d in load_installed_devices()}
+
+
 # ── Integration config (เก็บใน SQLite: device_integrations) ──────────────────
 
 

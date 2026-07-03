@@ -192,48 +192,53 @@
             </div>
           </div>
 
-          {# ── อุปกรณ์เพิ่มเติม (conditional — แสดงเมื่อมีอุปกรณ์ติดตั้ง) ── #}
-          <div class="nav-section nav-section-devices px-2 pt-4 pb-1" id="nav-sec-devices" style="display:none;">
-            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">อุปกรณ์เพิ่มเติม</span>
+          {# ── อินทิเกรชัน (ฟีเจอร์เชื่อมต่อของ VAS เอง กับระบบภายนอก) ── #}
+          <div class="nav-section px-2 pt-4 pb-1">
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">อินทิเกรชัน</span>
+            <div class="flex flex-col gap-0.5">
+              {{ nav_link('mqtt_page',  'simple-icons:mqtt',      'MQTT',       'เชื่อมต่อระบบภายนอกผ่าน MQTT broker') }}
+            </div>
+          </div>
+
+          {# ── อุปกรณ์เสริม (ฮาร์ดแวร์เสริมที่ติดตั้งแล้ว) ── #}
+          <div class="nav-section px-2 pt-4 pb-1">
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">อุปกรณ์เสริม</span>
             <div class="flex flex-col gap-0.5">
               {{ nav_link('qr_device_zkteco_qr500_page','lucide:scan-barcode','QR500','อ่าน QR code ผ่าน USB HID','data-nav-device="zkteco-qr500" style="display:none;"') }}
             </div>
           </div>
 
-          {# ── เครือข่าย ──────────────────────────────── #}
+          {# ── เครือข่ายและรีโมท (โปรแกรมภายนอกที่ติดตั้งลงเครื่อง) ──────── #}
           <div class="nav-section px-2 pt-4 pb-1" id="nav-sec-network">
-            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">เครือข่าย</span>
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">เครือข่ายและรีโมท</span>
             <div class="flex flex-col gap-0.5">
-              {{ nav_link('mqtt_page',  'simple-icons:mqtt',      'MQTT',       'Broker และข้อความ MQTT') }}
               {{ nav_link('wireguard','simple-icons:wireguard','Wireguard','จัดการ VPN Wireguard','data-nav-pkg="wireguard" style="display:none;"') }}
               {{ nav_link('anydesk_page','simple-icons:anydesk','AnyDesk','จัดการ Remote Desktop','data-nav-pkg="anydesk" style="display:none;"') }}
               {{ nav_link('openssh_page','lucide:terminal-square','OpenSSH','Authentication และการเข้าถึง SSH','data-nav-pkg="openssh" style="display:none;"') }}
+            </div>
+          </div>
+
+          {# ── บริการ ──────────────────────────── #}
+          <div class="nav-section px-2 pt-4 pb-1">
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">บริการ</span>
+            <div class="flex flex-col gap-0.5">
               {{ nav_link('docker_page','simple-icons:docker','Docker','Containers, Images และ Swarm','data-nav-pkg="docker" style="display:none;"') }}
               {{ nav_link('pm2_page','simple-icons:pm2','PM2','Node.js process manager','data-nav-pkg="pm2" style="display:none;"') }}
             </div>
           </div>
 
-          {# ── ระบบ ───────────────────────────────────── #}
+          {# ── ระบบ (จัดการผู้ใช้ + คลังอุปกรณ์/ซอฟต์แวร์ที่ติดตั้งในระบบ) ── #}
           {# 'บันทึกระบบ' (logs) และ 'Database' ถูกปิดไว้ชั่วคราว — รอแก้ไข feature ทีหลัง #}
           {%- if current_user and current_user.role in ('root', 'admin') %}
           <div class="nav-section px-2 pt-4 pb-1">
             <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">ระบบ</span>
             <div class="flex flex-col gap-0.5">
               {{ nav_link('users_page',    'lucide:users',       'ผู้ใช้งาน',   'จัดการผู้ใช้และสิทธิ์') }}
+              {{ nav_link('qr_devices_page','lucide:cpu',          'ฮาร์ดแวร์ระบบ',     'จัดการอุปกรณ์ QR/Hardware') }}
+              {{ nav_link('apps_page',      'lucide:package-plus', 'ซอฟต์แวร์ระบบ',    'ติดตั้ง/ถอนแพ็กเกจเสริม') }}
             </div>
           </div>
           {%- endif %}
-
-          {# ── divider ────────────────────────────────── #}
-          <div class="mx-3 my-2 border-t border-line/8"></div>
-
-          {# ── โปรแกรมเพิ่มเติม + อุปกรณ์ ──────────────────────── #}
-          <div class="px-2 pb-1">
-            <div class="flex flex-col gap-0.5">
-              {{ nav_link('apps_page',      'lucide:package-plus', 'โปรแกรมเพิ่มเติม', 'ติดตั้ง/ถอนแพ็กเกจเสริม') }}
-              {{ nav_link('qr_devices_page','lucide:cpu',          'อุปกรณ์',           'จัดการอุปกรณ์ QR/Hardware') }}
-            </div>
-          </div>
 
         </nav>
 
@@ -254,13 +259,6 @@
                 .some(function(el){ return el.style.display !== 'none'; });
               sec.style.display = anyVisible ? '' : 'none';
             });
-            // อุปกรณ์เพิ่มเติม section — แสดงเมื่อมีอุปกรณ์ติดตั้ง
-            var devSec = document.getElementById('nav-sec-devices');
-            if (devSec) {
-              var anyDevice = Array.from(devSec.querySelectorAll('[data-nav-device]'))
-                .some(function(el){ return el.style.display !== 'none'; });
-              devSec.style.display = anyDevice ? '' : 'none';
-            }
           }
 
           function refreshNavStatus(){

@@ -1126,13 +1126,14 @@ def create_app() -> Flask:
     atexit.register(_stop_qr_reader)
     atexit.register(_stop_mqtt)
 
-    # Auto-start QR reader เมื่อ server boot (ถ้ามี device ต่ออยู่)
+    # Auto-start QR reader เมื่อ server boot (ถ้ามี device ต่ออยู่ และยังไม่ถูกถอนการติดตั้ง)
     try:
         from features.qr.reader import get_reader as _get_qr_reader, start_reader as _auto_start_qr
-        if _get_qr_reader() is None:
+        from features.qr.registry import is_installed as _qr_is_installed
+        if _get_qr_reader() is None and _qr_is_installed("zkteco-qr500"):
             _auto_start_qr()
     except Exception:
-        pass  # ยังไม่มี device — reader จะ start เมื่อกด restart หรือเสียบ USB ใหม่
+        pass  # ยังไม่มี device หรือถูกถอนการติดตั้งไว้ — reader จะ start เมื่อกด restart หรือเสียบ USB ใหม่
 
     # Auto-start ทุก MQTT broker ที่ enabled=1 ใน DB (แยก try/except ต่อ broker อยู่ภายใน)
     try:
@@ -1202,10 +1203,15 @@ def create_app() -> Flask:
         """
         Payload (optional): {"device": "/dev/hidraw0"}
         200: {"status":"ok","device":<path>,"running":true}
-        400: {"status":"error","errors":[...]}  -- device not found
+        400: {"status":"error","errors":[...]}  -- device not found / ยังไม่ได้ติดตั้ง
         500: {"status":"error","errors":[...]}  -- OS error
         """
         from features.qr.reader import start_reader
+        from features.qr.registry import is_installed as _qr_is_installed
+        # TODO: ตอนนี้ catalog มีแค่ zkteco-qr500 device เดียว — ถ้าเพิ่ม device อื่นในอนาคต
+        # endpoint นี้ต้องรับ device_id มาระบุด้วย แทนการ hardcode
+        if not _qr_is_installed("zkteco-qr500"):
+            return {"status": "error", "errors": ["อุปกรณ์ถูกถอนการติดตั้งแล้ว กรุณาติดตั้งก่อนเริ่มอ่าน"]}, 400
         payload = request.get_json(silent=True) or {}
         device = str(payload.get("device", "")).strip() or None
         try:
@@ -1289,12 +1295,19 @@ def create_app() -> Flask:
 
         def generate():
             from features.qr.reader import get_reader, start_reader
+            from features.qr.registry import is_installed as _qr_is_installed
 
             def _try_start():
-                """Auto-start reader ถ้ายังไม่ทำงาน — ไม่ raise"""
+                """
+                Auto-start reader ถ้ายังไม่ทำงาน — ไม่ raise
+                ไม่ start ถ้า device ถูกถอนการติดตั้งไปแล้ว (registry) — ป้องกัน SSE loop
+                นี้ resurrect reader กลับมาเองทุก RESTART_INTERVAL หลังกด "ถอน"
+                """
                 r = get_reader()
                 if r is not None and r.is_alive():
                     return r
+                if not _qr_is_installed("zkteco-qr500"):
+                    return None
                 try:
                     return start_reader()
                 except Exception:
@@ -1450,6 +1463,14 @@ def create_app() -> Flask:
             install_device(device_id)
         except Exception as e:
             return {"status": "error", "error": str(e)}, 500
+        # Auto-start reader ทันทีหลังติดตั้ง (ถ้ามี device ต่ออยู่จริง) — ไม่ raise ถ้าหาไม่เจอ
+        if device_id == "zkteco-qr500":
+            try:
+                from features.qr.reader import get_reader as _get_qr_reader, start_reader as _qr_start
+                if _get_qr_reader() is None:
+                    _qr_start()
+            except Exception:
+                pass
         return {"status": "ok", "device_id": device_id}
 
     @app.post("/api/qr/devices/<device_id>/uninstall")
@@ -1459,6 +1480,15 @@ def create_app() -> Flask:
             uninstall_device(device_id)
         except Exception as e:
             return {"status": "error", "error": str(e)}, 500
+        # หยุด reader thread ทันที — "ถอนการติดตั้ง" ต้องแปลว่าเลิกอ่าน/เลิก publish จริงๆ
+        # ไม่ใช่แค่ซ่อนเมนู (ก่อนหน้านี้ reader ยังทำงานต่อเพราะ auto-detect จาก USB ID
+        # ตรงๆ ไม่เคยเช็ค registry เลย)
+        if device_id == "zkteco-qr500":
+            try:
+                from features.qr.reader import stop_reader as _qr_stop
+                _qr_stop()
+            except Exception:
+                pass
         return {"status": "ok", "device_id": device_id}
 
     @app.get("/api/qr/integrations")
