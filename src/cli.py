@@ -215,6 +215,15 @@ def build_parser() -> argparse.ArgumentParser:
     kiosk_autostart.add_argument("--restart-delay", type=int, default=2)
     kiosk_autostart.add_argument("--no-restart", action="store_true", help="Open chromium once instead of a restart loop.")
 
+    kiosk_stop = kiosk_subcommands.add_parser(
+        "stop", help="Stop kiosk mode: disable GDM auto-login and remove autostart files."
+    )
+    kiosk_stop.add_argument(
+        "--username",
+        help="Kiosk user whose autostart files to remove. Defaults to the current auto-login user.",
+    )
+    kiosk_stop.add_argument("--home", type=Path, help="Defaults to the user's passwd home directory.")
+
     uninstall = subcommands.add_parser("uninstall", help="Uninstall selected installed components.")
     add_component_arguments(uninstall, (*INSTALL_COMPONENTS, "all"))
     add_lifecycle_arguments(uninstall)
@@ -603,7 +612,12 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
             return 0
 
     if args.command == "kiosk":
-        from features.kiosk.manager import KioskManager, list_kiosk_linux_users, print_kiosk_status
+        from features.kiosk.manager import (
+            KioskManager,
+            get_gdm_autologin_username,
+            list_kiosk_linux_users,
+            print_kiosk_status,
+        )
 
         if args.kiosk_command == "status":
             print_kiosk_status()
@@ -664,6 +678,28 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 restart_enabled=not args.no_restart,
                 restart_delay=args.restart_delay,
             )
+            return 0
+
+        if args.kiosk_command == "stop":
+            from features.kiosk.manager import stop_kiosk_mode
+
+            if not args.dry_run:
+                require_linux()
+                require_root()
+
+            home = args.home
+            username = args.username
+            if home is None:
+                if username is None:
+                    username = get_gdm_autologin_username()
+                match = next((u for u in list_kiosk_linux_users() if u.username == username), None) if username else None
+                if match is None:
+                    import sys as _sys
+                    print(f"Error: user not found in passwd: {username or '(no auto-login user set)'}", file=_sys.stderr)
+                    return 1
+                home = match.home
+
+            stop_kiosk_mode(runner, home)
             return 0
 
     if args.command in {"uninstall", "reset"}:

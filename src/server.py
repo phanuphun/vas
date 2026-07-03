@@ -89,6 +89,7 @@ from features.kiosk.manager import (
     kiosk_launch_script_path,
     kiosk_openbox_autostart_path,
     list_kiosk_linux_users,
+    stop_kiosk_mode,
 )
 from system.status import GDM_CUSTOM_CONFIG_PATH
 
@@ -1253,6 +1254,24 @@ def create_app() -> Flask:
             return {"exists": True, "content": content, "path": path.as_posix()}
         except OSError as e:
             return {"error": str(e)}, 500
+
+    @app.post("/api/kiosk/stop")
+    def kiosk_stop_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username", "")).strip() or None
+
+        users = list_kiosk_linux_users()
+        match = next((u for u in users if u.username == username), None) if username else None
+        if match is None:
+            match = next((u for u in users if u.is_autologin), None)
+        if match is None:
+            return {"status": "error", "errors": ["ไม่พบ user ที่จะหยุด kiosk mode ให้"]}, 404
+
+        try:
+            stop_kiosk_mode(CommandRunner(), match.home)
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        return {"status": "ok", "username": match.username}
 
     @app.get("/health")
     def health() -> dict[str, str]:

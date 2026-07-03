@@ -66,6 +66,7 @@ __all__ = [
     "kiosk_openbox_autostart_path",
     "list_kiosk_linux_users",
     "print_kiosk_status",
+    "stop_kiosk_mode",
 ]
 
 
@@ -230,6 +231,26 @@ class KioskManager:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+    def remove_autostart(self, home: Path) -> None:
+        """ลบไฟล์ autostart ที่ VAS อาจเคยเขียนไว้ทั้งหมด — ทั้ง GNOME (.desktop+script)
+        และ Openbox (autostart script) โดยไม่สนใจ session_type ปัจจุบัน เพื่อให้ผลลัพธ์
+        เป็น 'หยุดจริง' ไม่ว่าก่อนหน้านี้จะเคยตั้งค่าไว้แบบไหน"""
+        for path in (
+            kiosk_openbox_autostart_path(home),
+            kiosk_gnome_autostart_desktop_path(home),
+            kiosk_launch_script_path(home),
+        ):
+            self._remove_file(path)
+
+    def _remove_file(self, path: Path) -> None:
+        print(f"remove {path.as_posix()}")
+        if self.runner.dry_run:
+            return
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _chown_to_user(path: Path, username: str) -> None:
@@ -547,6 +568,15 @@ def collect_kiosk_readiness(
         autologin_ok=autologin.enabled and autologin_user_exists,
         autostart_ok=autostart.configured,
     )
+
+
+def stop_kiosk_mode(runner: CommandRunner, home: Path) -> None:
+    """หยุด kiosk mode ในคลิกเดียว: ปิด GDM auto-login และลบไฟล์ autostart ทั้งหมด
+    ของ user ที่ระบุ (ทั้ง GNOME และ Openbox variant) — ไม่ลบ Linux user หรือ
+    AccountsService session-type config, เผื่อผู้ใช้จะกลับมาเปิด kiosk mode ใหม่ทีหลัง"""
+    manager = KioskManager(runner)
+    manager.set_autologin(None, enabled=False)
+    manager.remove_autostart(home)
 
 
 def print_kiosk_status() -> None:

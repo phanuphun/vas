@@ -149,6 +149,22 @@
       </div>
       {% endif %}
 
+      {% if readiness.autologin_ok or readiness.autostart_ok %}
+      <div class="bg-card border border-danger/15 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-danger/10">
+          <h3 class="text-[0.88rem] font-semibold text-ink">หยุด Kiosk Mode</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">ปิด auto-login และลบไฟล์ autostart ทั้งหมดในคลิกเดียว — เครื่องจะกลับมาเข้า desktop ปกติตอนบูตครั้งถัดไป</p>
+        </div>
+        <div class="p-4">
+          <button type="button" onclick="confirmStopKiosk()"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.82rem] font-semibold hover:bg-danger/8 transition-colors">
+            <iconify-icon icon="lucide:power-off" width="14" height="14"></iconify-icon>
+            หยุด kiosk mode
+          </button>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-accent/5 border-accent/18 text-muted">
         <iconify-icon icon="lucide:info" width="14" height="14" class="flex-shrink-0 mt-0.5 text-accent"></iconify-icon>
         <span>ปรับความละเอียดหน้าจอหรือหมุนจอได้ที่หน้า <a href="{{ url_for('display_settings') }}" class="text-accent underline underline-offset-2">จอแสดงผล</a> — หน้านี้ตั้งค่าเฉพาะ session/user ของ kiosk เท่านั้น</span>
@@ -696,6 +712,28 @@ done</textarea>
       body:    "Home directory และไฟล์ที่เกี่ยวข้องทั้งหมดจะถูกลบ ไม่สามารถยกเลิกได้ — ต้องปิด auto-login ก่อนถ้า user นี้กำลังใช้งานอยู่",
       okLabel: "ลบ",
       onOk: function () { deleteKioskUserApi(); }
+    });
+  };
+
+  // ── หยุด kiosk mode ──────────────────────────────────────────────
+  window.stopKioskMode = function () {
+    var username = getSelectedKioskUsername();
+    apiRequest("POST", "/api/kiosk/stop", { username: username }).then(function (result) {
+      if (result.ok) {
+        showToast("หยุด kiosk mode แล้ว", "success");
+        setTimeout(function () { window.location.reload(); }, 600);
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
+
+  window.confirmStopKiosk = function () {
+    window.showConfirm({
+      title:   "หยุด kiosk mode?",
+      body:    "จะปิด auto-login และลบไฟล์ autostart (.desktop/script) ทั้งหมดของ user นี้ — ต้องตั้งค่าใหม่ทั้งหมดถ้าจะเปิดใช้งานอีกครั้ง",
+      okLabel: "หยุด kiosk mode",
+      onOk: function () { stopKioskMode(); }
     });
   };
 
