@@ -1123,8 +1123,10 @@ def create_app() -> Flask:
     import atexit
     from features.qr.reader import stop_reader as _stop_qr_reader
     from features.mqtt.client import stop_mqtt as _stop_mqtt
+    from features.qr.scan_publisher import stop_scan_publisher as _stop_scan_publisher
     atexit.register(_stop_qr_reader)
     atexit.register(_stop_mqtt)
+    atexit.register(_stop_scan_publisher)
 
     # Auto-start QR reader เมื่อ server boot (ถ้ามี device ต่ออยู่ และยังไม่ถูกถอนการติดตั้ง)
     try:
@@ -1134,6 +1136,12 @@ def create_app() -> Flask:
             _auto_start_qr()
     except Exception:
         pass  # ยังไม่มี device หรือถูกถอนการติดตั้งไว้ — reader จะ start เมื่อกด restart หรือเสียบ USB ใหม่
+
+    # Auto-start scan publisher เสมอ — log/publish (DB, MQTT, pipe) ต้องทำงานตลอดไม่ว่าจะมี
+    # browser เปิดหน้า QR500 อยู่หรือไม่ก็ตาม (ก่อนหน้านี้ logic นี้อยู่ใน SSE generator ของ
+    # /api/qr/stream เท่านั้น ทำให้ publish หยุดทำงานทันทีที่ปิดหน้าเว็บ — ดู scan_publisher.py)
+    from features.qr.scan_publisher import start_scan_publisher as _start_scan_publisher
+    _start_scan_publisher()
 
     # Auto-start ทุก MQTT broker ที่ enabled=1 ใน DB (แยก try/except ต่อ broker อยู่ภายใน)
     try:
@@ -1286,46 +1294,31 @@ def create_app() -> Flask:
             event: heartbeat
             data: {}
 
-        หมายเหตุ: การตรวจจับ "scan ใหม่" ใช้ reader.last_scan_seq (ตัวนับที่เพิ่มทุกครั้งที่
-        scan เสร็จ แม้ค่าจะซ้ำกับครั้งก่อน) แทนการเทียบค่า string เดิม — เพื่อให้สแกน QR code
-        เดิมซ้ำๆ ยังคง publish/log ทุกครั้ง ไม่ถูกข้ามเพราะค่าไม่เปลี่ยน
+        หมายเหตุ: การ log/publish (DB, MQTT, pipe) จริงๆ ไม่ได้เกิดขึ้นในนี้แล้ว — ย้ายไปทำใน
+        background thread ตัวเดียวที่ไม่ผูกกับ browser connection (features/qr/scan_publisher.py,
+        start ตอน server boot) เพื่อให้ยัง log/publish ต่อเนื่องแม้ไม่มีใครเปิดหน้า QR500 ค้างไว้
+        endpoint นี้แค่ "อ่าน" ผลลัพธ์ที่ publisher เก็บไว้ล่าสุดมาส่งต่อให้ browser แบบ real-time
+        (เทียบ publish_seq ของ publisher แทน reader.last_scan_seq — กันไม่ให้ log/publish ซ้ำ
+        ถ้ามีหลาย browser tab เปิด SSE พร้อมกัน)
         """
         from flask import stream_with_context, Response
         import time
-        from datetime import datetime, timezone
+        from features.qr.reader import get_reader
+        from features.qr.scan_publisher import get_scan_publisher
 
         def generate():
-            from features.qr.reader import get_reader, start_reader
-            from features.qr.registry import is_installed as _qr_is_installed
-
-            def _try_start():
-                """
-                Auto-start reader ถ้ายังไม่ทำงาน — ไม่ raise
-                ไม่ start ถ้า device ถูกถอนการติดตั้งไปแล้ว (registry) — ป้องกัน SSE loop
-                นี้ resurrect reader กลับมาเองทุก RESTART_INTERVAL หลังกด "ถอน"
-                """
-                r = get_reader()
-                if r is not None and r.is_alive():
-                    return r
-                if not _qr_is_installed("zkteco-qr500"):
-                    return None
-                try:
-                    return start_reader()
-                except Exception:
-                    return None
-
-            # Auto-start ทันทีที่ client เชื่อมต่อ
-            reader = _try_start()
+            reader = get_reader()
             running = reader is not None and reader.is_alive()
             device = reader.device_path if running else None
             yield f"event: status\ndata: {_json_dumps({'running': running, 'device': device})}\n\n"
 
-            last_seq = -1  # -1 = sentinel เพื่อให้ scan ล่าสุดที่มีอยู่แล้ว (ถ้ามี) ถูกส่งครั้งแรกตอน connect
+            # -1 = sentinel เพื่อให้ scan ล่าสุดที่ publisher มีอยู่แล้ว (ถ้ามี) ถูกส่งทันทีตอน
+            # client เพิ่งเชื่อมต่อ ไม่ต้องรอ scan ใหม่ครั้งถัดไป (เหมือนพฤติกรรมเดิม)
+            last_pub_seq = -1
+
             last_heartbeat = time.monotonic()
-            last_restart_try = 0.0  # ลอง restart ทันทีรอบแรกถ้า reader ตาย
             HEARTBEAT_INTERVAL = 5.0
             POLL_INTERVAL = 0.2
-            RESTART_INTERVAL = 8.0  # retry ทุก 8 วิถ้า reader ไม่ทำงาน
 
             try:
                 while True:
@@ -1338,82 +1331,17 @@ def create_app() -> Flask:
 
                     reader = get_reader()
                     currently_alive = reader is not None and reader.is_alive()
-
-                    # ลอง auto-restart ถ้า reader ตายและถึงเวลา retry
-                    if not currently_alive and now - last_restart_try >= RESTART_INTERVAL:
-                        last_restart_try = now
-                        restarted = _try_start()
-                        if restarted is not None and restarted.is_alive():
-                            reader = restarted
-                            currently_alive = True
-
-                    # ส่ง status event เมื่อ state เปลี่ยน
                     if currently_alive != running:
                         running = currently_alive
                         d = reader.device_path if running and reader else None
                         yield f"event: status\ndata: {_json_dumps({'running': running, 'device': d})}\n\n"
 
-                    if reader is not None and reader.is_alive():
-                        scan = reader.last_scan
-                        seq = getattr(reader, "last_scan_seq", None)
-                        # เทียบ seq (ไม่ใช่ค่า string) — scan ค่าเดิมซ้ำก็ต้องนับเป็น scan ใหม่
-                        # ทุกครั้งที่ seq เปลี่ยน ไม่ถูกข้ามเพราะค่าไม่เปลี่ยน (ตามที่ผู้ใช้ต้องการ)
-                        if scan is not None and seq is not None and seq != last_seq:
-                            last_seq = seq
-                            ts = datetime.now(timezone.utc).isoformat()
-                            scan_raw_keycode = getattr(reader, "last_scan_raw", None)
-                            scan_raw_report = getattr(reader, "last_scan_raw_report", None)
-                            read_mode = getattr(reader, "read_mode", None)
-
-                            # Log QR scan ลง DB (ทำก่อน publish เพื่อไม่ให้ log หายถ้า publish error)
-                            try:
-                                from core.database import log_qr_scan as _db_log_qr
-                                _db_log_qr(
-                                    scan, reader.device_path, ts,
-                                    raw_keycode=scan_raw_keycode,
-                                    raw_report=scan_raw_report,
-                                    read_mode=read_mode,
-                                )
-                            except Exception:
-                                pass
-
-                            # Publish ออก MQTT (device-aware routing ตาม device_integrations —
-                            # คนละ code path จาก publish_qr_scan() ที่ใช้กับ `vas mqtt test` /
-                            # `/api/mqtt/test`) — ทำก่อน yield event เพื่อแนบผลลัพธ์จริงไปกับ
-                            # SSE payload ให้ frontend โชว์สีสถานะ (เขียว/แดง/เหลือง) ได้ถูกต้อง
-                            mqtt_status: dict[str, object] = {
-                                "enabled": False, "connected": False, "published": False, "error": None,
-                            }
-                            try:
-                                from features.mqtt.client import publish_qr_scan_for_device as _mqtt_publish
-                                mqtt_status = _mqtt_publish(
-                                    "zkteco-qr500",
-                                    scan, reader.device_path, ts,
-                                    scan_raw_keycode=scan_raw_keycode,
-                                    scan_raw_report=scan_raw_report,
-                                    read_mode=read_mode,
-                                )
-                            except Exception as exc:
-                                mqtt_status = {
-                                    "enabled": True, "connected": False, "published": False, "error": str(exc),
-                                }
-
-                            # เขียนออก Named Pipe (device-aware ตาม device_integrations เหมือน MQTT
-                            # ด้านบน) — เขียนก็ต่อเมื่อ toggle "Pipe I/O" enabled เท่านั้น เขียนแบบ
-                            # non-blocking (features/qr/pipe_io.py) จึงไม่ทำให้ SSE loop ค้างแม้ไม่มี
-                            # reader เปิด pipe รออยู่ฝั่งตรงข้าม
-                            pipe_status: dict[str, object] = {
-                                "enabled": False, "connected": False, "published": False, "error": None,
-                            }
-                            try:
-                                from features.qr.pipe_io import publish_qr_scan_to_pipe_for_device as _pipe_publish
-                                pipe_status = _pipe_publish("zkteco-qr500", scan)
-                            except Exception as exc:
-                                pipe_status = {
-                                    "enabled": True, "connected": False, "published": False, "error": str(exc),
-                                }
-
-                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts, 'raw_keycode': scan_raw_keycode, 'raw_report': scan_raw_report, 'read_mode': read_mode, 'mqtt': mqtt_status, 'pipe': pipe_status})}\n\n"
+                    publisher = get_scan_publisher()
+                    if publisher is not None:
+                        event, seq = publisher.get_last_event()
+                        if event is not None and seq != last_pub_seq:
+                            last_pub_seq = seq
+                            yield f"event: scan\ndata: {_json_dumps(event)}\n\n"
             except GeneratorExit:
                 # client disconnected
                 return

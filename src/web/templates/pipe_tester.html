@@ -30,6 +30,20 @@
 .pt-line-row { animation: lineFadeIn 0.25s ease-out; }
 .pt-line-row:not(:last-child) { border-bottom: 1px solid rgb(var(--c-line)/0.07); }
 .pt-empty { padding: 2.5rem 1.25rem; text-align: center; color: rgb(var(--c-faint)); font-size: 0.84rem; }
+
+/* ── Mode button group (preset / custom path) ──────── */
+.pt-mode-btn { padding:.4rem .85rem; border-radius:.4rem; font-size:.78rem; font-weight:600; transition:all .15s; border:1px solid transparent; cursor:pointer; }
+.pt-mode-btn.is-active { background:rgb(var(--c-card)); border-color:rgb(var(--c-line)/0.1); color:rgb(var(--c-accent)); }
+.pt-mode-btn:not(.is-active) { color:rgb(var(--c-muted)); }
+.pt-mode-btn:not(.is-active):hover { color:rgb(var(--c-ink)); }
+
+/* ── Spinner (start button loading state) ──────────── */
+.pt-spin {
+  display:inline-block; width:12px; height:12px; border-radius:50%;
+  border:2px solid rgba(255,255,255,0.35); border-top-color:#fff;
+  animation:pt-spin .7s linear infinite; flex-shrink:0;
+}
+@keyframes pt-spin { to { transform:rotate(360deg); } }
 </style>
 
   <!-- ── คำอธิบาย ─────────────────────────────────────── -->
@@ -60,35 +74,46 @@
       <h2 class="text-[0.9rem] font-semibold text-ink">เลือก Pipe ที่จะทดสอบ</h2>
     </div>
     <div class="p-5 flex flex-col gap-4">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[0.75rem] font-semibold text-muted">Pipe ที่ตั้งค่าไว้แล้ว</label>
-          <select id="pt-known-select"
-                  class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-display">
-            <option value="">-- พิมพ์ path เอง --</option>
-            {% for p in known_pipes %}
-            <option value="{{ p.path or '/tmp/vas_qr_pipe' }}">{{ p.device_id }} ({{ p.path or '/tmp/vas_qr_pipe' }}){{ ' · enabled' if p.enabled else ' · disabled' }}</option>
-            {% endfor %}
-          </select>
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted">เลือก Pipe</label>
+        <div class="inline-flex items-center gap-1 p-1 bg-surface border border-line/10 rounded-lg w-fit">
+          <button type="button" id="pt-mode-btn-preset" onclick="ptSetMode('preset')" class="pt-mode-btn">Pipe ที่ตั้งค่าไว้แล้ว</button>
+          <button type="button" id="pt-mode-btn-custom" onclick="ptSetMode('custom')" class="pt-mode-btn">พิมพ์ path เอง</button>
         </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[0.75rem] font-semibold text-muted">หรือพิมพ์ Pipe Path เอง</label>
-          <input type="text" id="pt-path-input" placeholder="/tmp/vas_qr_pipe" value="/tmp/vas_qr_pipe"
-                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition font-display">
-        </div>
+      </div>
+
+      <div id="pt-mode-panel-preset" class="flex flex-col gap-1.5">
+        <select id="pt-known-select"
+                class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-display">
+          {% for p in known_pipes %}
+          <option value="{{ p.path or '/tmp/vas_qr_pipe' }}">{{ p.device_id }} ({{ p.path or '/tmp/vas_qr_pipe' }}){{ ' · enabled' if p.enabled else ' · disabled' }}</option>
+          {% endfor %}
+        </select>
+        {% if not known_pipes %}
+        <p class="text-[0.72rem] text-faint">ยังไม่มี pipe ที่ตั้งค่าไว้ในระบบ — สลับไปแท็บ "พิมพ์ path เอง" ด้านบน</p>
+        {% endif %}
+      </div>
+
+      <div id="pt-mode-panel-custom" class="flex flex-col gap-1.5" style="display:none;">
+        <input type="text" id="pt-path-input" placeholder="/tmp/vas_qr_pipe" value="/tmp/vas_qr_pipe"
+               class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition font-display">
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
         <button onclick="ptStart()" id="pt-btn-start"
-                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          เริ่มอ่าน
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="pt-btn-start-icon"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span id="pt-btn-start-label">เริ่มอ่าน</span>
         </button>
         <button onclick="ptStop()" id="pt-btn-stop" disabled
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
           หยุด
         </button>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.72rem] font-semibold border" id="pt-state-chip">
+          <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" id="pt-state-dot" style="background:rgb(var(--c-faint));"></span>
+          <span id="pt-state-chip-text">ยังไม่เริ่มอ่าน</span>
+        </span>
         <span class="text-[0.71rem] text-faint flex-1" id="pt-status-text">ยังไม่ได้เริ่มอ่าน pipe ใดๆ</span>
       </div>
 
@@ -119,6 +144,8 @@
 (function () {
   var ptEs = null;
   var ptRunning = false;
+  var ptStarting = false;   // true ระหว่างรอ response ของ /api/pipe/start (กันกดซ้ำ)
+  var ptMode = '{{ "preset" if known_pipes else "custom" }}';
   var ptCount = 0;
   var MAX_ROWS = 200;
 
@@ -126,19 +153,36 @@
   var pathEl   = document.getElementById('pt-path-input');
   var btnStart = document.getElementById('pt-btn-start');
   var btnStop  = document.getElementById('pt-btn-stop');
+  var startIcon  = document.getElementById('pt-btn-start-icon');
+  var startLabel = document.getElementById('pt-btn-start-label');
   var statusEl = document.getElementById('pt-status-text');
+  var stateChip     = document.getElementById('pt-state-chip');
+  var stateChipDot  = document.getElementById('pt-state-dot');
+  var stateChipText = document.getElementById('pt-state-chip-text');
   var badgeWrap  = document.getElementById('header-pipe-badge');
   var badgeText  = document.getElementById('header-badge-text');
   var pulseDot   = document.getElementById('header-pulse');
   var manualHint = document.getElementById('pt-manual-hint');
   var manualCmd  = document.getElementById('pt-manual-cmd');
+  var modeBtnPreset = document.getElementById('pt-mode-btn-preset');
+  var modeBtnCustom = document.getElementById('pt-mode-btn-custom');
+  var modePanelPreset = document.getElementById('pt-mode-panel-preset');
+  var modePanelCustom = document.getElementById('pt-mode-panel-custom');
 
-  selectEl.addEventListener('change', function () {
-    if (selectEl.value) pathEl.value = selectEl.value;
-  });
+  window.ptSetMode = function (mode) {
+    ptMode = mode;
+    modePanelPreset.style.display = mode === 'preset' ? '' : 'none';
+    modePanelCustom.style.display = mode === 'custom' ? '' : 'none';
+    modeBtnPreset.classList.toggle('is-active', mode === 'preset');
+    modeBtnCustom.classList.toggle('is-active', mode === 'custom');
+    // สลับมาโหมด custom ครั้งแรก — prefill ด้วยค่าที่เลือกไว้ใน preset ให้แก้ต่อได้เลย
+    if (mode === 'custom' && !pathEl.value && selectEl.value) pathEl.value = selectEl.value;
+  };
+  ptSetMode(ptMode);
 
   function currentPath() {
-    return (pathEl.value || '').trim() || '/tmp/vas_qr_pipe';
+    var raw = ptMode === 'preset' ? selectEl.value : pathEl.value;
+    return (raw || '').trim() || '/tmp/vas_qr_pipe';
   }
 
   function updateManualHint(path) {
@@ -157,9 +201,43 @@
     badgeWrap.style.fontSize = '0.72rem';
   }
 
+  /* state chip ข้างปุ่ม เริ่มอ่าน/หยุด — โชว์ชัดๆ ว่าตอนนี้ "เริ่มไปแล้วหรือยัง" แยกจาก
+     header badge เพราะอันนั้นอยู่ไกล อาจมองไม่เห็นตอนโฟกัสอยู่ที่ปุ่ม */
+  var STATE_CHIP_CLASS = {
+    idle:    'bg-surface border-line/15 text-muted',
+    waiting: 'bg-caution/10 border-caution/25 text-[#92660b]',
+    running: 'bg-safe/10 border-safe/25 text-safe',
+    error:   'bg-danger/10 border-danger/25 text-danger',
+  };
+  var STATE_CHIP_DOT = { idle: 'rgb(var(--c-faint))', waiting: '#eab308', running: '#10b981', error: '#ef4444' };
+  function setStateChip(state, text) {
+    stateChip.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.72rem] font-semibold border ' + (STATE_CHIP_CLASS[state] || STATE_CHIP_CLASS.idle);
+    stateChipDot.style.background = STATE_CHIP_DOT[state] || STATE_CHIP_DOT.idle;
+    stateChipText.textContent = text;
+  }
+
+  function setStartButtonBusy(busy) {
+    btnStart.disabled = busy || ptRunning;
+    startIcon.style.display = busy ? 'none' : '';
+    if (busy) {
+      if (!document.getElementById('pt-btn-start-spin')) {
+        var s = document.createElement('span');
+        s.id = 'pt-btn-start-spin';
+        s.className = 'pt-spin';
+        btnStart.insertBefore(s, startIcon);
+      }
+      startLabel.textContent = 'กำลังเริ่ม...';
+    } else {
+      var spin = document.getElementById('pt-btn-start-spin');
+      if (spin) spin.remove();
+      startLabel.textContent = ptRunning ? 'กำลังอ่านอยู่' : 'เริ่มอ่าน';
+    }
+  }
+
   window.ptStart = function () {
     var path = currentPath();
-    btnStart.disabled = true;
+    ptStarting = true;
+    setStartButtonBusy(true);
     fetch('/api/pipe/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -167,19 +245,21 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        btnStart.disabled = false;
+        ptStarting = false;
         if (data.status === 'ok') {
           showToast('เริ่มอ่าน pipe ที่ ' + data.path + ' แล้ว', 'success');
           updateManualHint(data.path);
           connectStream();
         } else {
+          setStartButtonBusy(false);
           showToast('Error: ' + (data.error || 'unknown'), 'error');
         }
       })
-      .catch(function (e) { btnStart.disabled = false; showToast('Error: ' + e, 'error'); });
+      .catch(function (e) { ptStarting = false; setStartButtonBusy(false); showToast('Error: ' + e, 'error'); });
   };
 
   window.ptStop = function () {
+    btnStop.disabled = true;
     fetch('/api/pipe/stop', { method: 'POST' })
       .then(function () { showToast('หยุดอ่าน pipe แล้ว', 'success'); })
       .catch(function () {});
@@ -219,20 +299,26 @@
   function applyStatus(s) {
     ptRunning = !!(s && s.running);
     btnStop.disabled = !ptRunning;
+    setStartButtonBusy(ptStarting);  // อัปเดต disabled ของปุ่มเริ่มตาม ptRunning ล่าสุดเสมอ
+
     if (!ptRunning) {
       setHeaderBadge('idle', 'ยังไม่เริ่มอ่าน');
+      setStateChip('idle', 'ยังไม่เริ่มอ่าน');
       statusEl.textContent = 'ยังไม่ได้เริ่มอ่าน pipe ใดๆ';
       return;
     }
     if (s.path) { pathEl.value = s.path; updateManualHint(s.path); }
     if (s.error) {
       setHeaderBadge('error', 'Error');
+      setStateChip('error', 'Error');
       statusEl.textContent = 'เกิดข้อผิดพลาด: ' + s.error;
     } else if (s.connected) {
       setHeaderBadge('running', 'กำลังอ่าน · ' + s.path);
+      setStateChip('running', 'กำลังอ่าน · เชื่อมต่อแล้ว');
       statusEl.textContent = 'เปิด pipe อยู่ที่ ' + s.path + ' — พร้อมรับข้อมูล';
     } else {
       setHeaderBadge('waiting', 'รอ writer · ' + s.path);
+      setStateChip('waiting', 'เริ่มแล้ว · รอ writer');
       statusEl.textContent = 'เปิด pipe ที่ ' + s.path + ' แล้ว รอ process อื่นเขียนเข้ามา...';
     }
   }
