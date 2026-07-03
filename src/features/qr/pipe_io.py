@@ -19,10 +19,26 @@ from __future__ import annotations
 
 import os
 import select
+import stat
 import threading
 from typing import Any
 
 _ENXIO = 6  # errno: "No such device or address" — ไม่มี reader เปิด pipe รออยู่ฝั่งตรงข้าม
+
+
+def is_fifo(path: str) -> bool:
+    """
+    เช็คว่า path เป็น named pipe (FIFO) จริงหรือไม่
+
+    หมายเหตุ: `os.path` **ไม่มี** ฟังก์ชัน `isfifo()` (คนละอย่างกับ `isfile()`/`isdir()` ที่มี) —
+    เข้าใจผิดกันมาตั้งแต่โค้ดเดิมก่อนหน้านี้ (`server.py: qr_pipe_create_api`) เรียก
+    `os.path.isfifo()` ตรงๆ ซึ่งไม่มีอยู่จริง โยน `AttributeError` ทุกครั้งที่เรียก (เห็นจาก
+    journalctl traceback จริง) ต้องเช็คผ่าน `stat.S_ISFIFO(os.stat(path).st_mode)` แทน
+    """
+    try:
+        return stat.S_ISFIFO(os.stat(path).st_mode)
+    except OSError:
+        return False
 
 
 # ── Write side ───────────────────────────────────────────────────────────────
@@ -48,7 +64,7 @@ def write_line_to_pipe(path: str, line: str) -> dict[str, Any]:
         if not os.path.exists(path):
             os.mkfifo(path, 0o666)
             os.chmod(path, 0o666)  # umask กรอง mode ที่ mkfifo() ขอไว้ — chmod ซ้ำให้ชัวร์
-        elif not os.path.isfifo(path):
+        elif not is_fifo(path):
             status["error"] = f"{path} มีอยู่แล้วแต่ไม่ใช่ pipe"
             return status
     except FileExistsError:
@@ -127,7 +143,7 @@ class PipeReaderThread(threading.Thread):
             if not os.path.exists(self.path):
                 os.mkfifo(self.path, 0o666)
                 os.chmod(self.path, 0o666)  # umask กรอง mode ที่ mkfifo() ขอไว้ — chmod ซ้ำให้ชัวร์
-            elif not os.path.isfifo(self.path):
+            elif not is_fifo(self.path):
                 with self._lock:
                     self._error = f"{self.path} มีอยู่แล้วแต่ไม่ใช่ pipe"
                 return

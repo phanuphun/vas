@@ -1536,6 +1536,7 @@ def create_app() -> Flask:
     @app.post("/api/qr/integrations/pipe/create")
     def qr_pipe_create_api() -> tuple[dict[str, object], int] | dict[str, object]:
         import os as _os
+        from features.qr.pipe_io import is_fifo as _is_fifo
         payload = request.get_json(silent=True) or {}
         path = str(payload.get("path", "/tmp/vas_qr_pipe")).strip()
         if not path:
@@ -1547,13 +1548,20 @@ def create_app() -> Flask:
                 # ไม่ใช่ 666 ตามที่ขอ) — chmod ซ้ำให้ชัวร์ว่า process อื่น (ไม่ว่า user ไหน)
                 # เปิดอ่าน/เขียน pipe นี้ได้จริง ไม่ติด permission แม้ VAS จะรันเป็น root ก็ตาม
                 _os.chmod(path, 0o666)
-            elif not _os.path.isfifo(path):
+            elif not _is_fifo(path):  # os.path.isfifo() ไม่มีอยู่จริง — ดู pipe_io.is_fifo()
                 return {"status": "error", "error": f"{path} exists but is not a pipe"}, 400
         except FileExistsError:
             # race: อีก request สร้างไปแล้วระหว่าง exists() เช็ค — ไม่ใช่ error จริง
             pass
         except OSError as e:
             return {"status": "error", "error": f"{type(e).__name__}: {e}"}, 400
+        except Exception as e:  # noqa: BLE001 — กัน exception ชนิดอื่นที่ไม่ใช่ OSError (เช่น
+            # ValueError จาก path ที่มี embedded null byte) ไม่ให้หลุดไปเป็นหน้า 500 HTML
+            # เปล่าๆ ของ Werkzeug ที่ debug ไม่ได้จาก response body — log traceback เต็มลง
+            # journalctl (stderr) ด้วย เผื่อ error message สั้นไม่พอจะ debug
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "error": f"{type(e).__name__}: {e}"}, 500
         return {"status": "ok", "path": path}
 
     # ── Pipe Tester routes (หน้าแยกต่างหาก — ทดสอบอ่าน named pipe ใดๆ ในระบบ ไม่ว่าจะ
@@ -1583,8 +1591,10 @@ def create_app() -> Flask:
             return {"status": "error", "error": "path required"}, 400
         try:
             reader = start_pipe_reader(path)
-        except OSError as e:
-            return {"status": "error", "error": str(e)}, 500
+        except Exception as e:  # noqa: BLE001 — กัน raw 500 HTML แบบเดียวกับ qr_pipe_create_api
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "error": f"{type(e).__name__}: {e}"}, 500
         return {"status": "ok", "path": reader.path}
 
     @app.post("/api/pipe/stop")
