@@ -75,6 +75,22 @@ from features.wireguard.manager import (
     validate_config_content,
 )
 from features.docker import manager as docker_manager
+from features.kiosk.manager import (
+    DEFAULT_EXTRA_GROUPS,
+    DEFAULT_RESTART_DELAY,
+    KioskManager,
+    accounts_service_path_for,
+    collect_accounts_service_status,
+    collect_gdm_autologin_status,
+    collect_kiosk_autostart_status,
+    collect_kiosk_readiness,
+    collect_kiosk_software_status,
+    kiosk_gnome_autostart_desktop_path,
+    kiosk_launch_script_path,
+    kiosk_openbox_autostart_path,
+    list_kiosk_linux_users,
+)
+from system.status import GDM_CUSTOM_CONFIG_PATH
 
 
 def _current_session_user() -> dict[str, Any] | None:
@@ -1107,6 +1123,136 @@ def create_app() -> Flask:
                 proc.kill()
             _sim_proc[0] = None
         return {"status": "ok"}
+
+    # ── Kiosk Mode ──────────────────────────────────────────────────
+    @app.get("/kiosk")
+    def kiosk_page() -> str:
+        return render_template("kiosk.html", **_kiosk_page_context())
+
+    @app.post("/api/kiosk/users")
+    def kiosk_create_user_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        import re as _re
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username", "")).strip()
+        add_groups = bool(payload.get("groups", True))
+        if not username or not _re.match(r"^[a-z_][a-z0-9_-]*$", username):
+            return {"status": "error", "errors": ["ชื่อ user ไม่ถูกต้อง — ใช้ตัวพิมพ์เล็ก ตัวเลข และ - เท่านั้น"]}, 400
+
+        manager = KioskManager(CommandRunner())
+        try:
+            manager.create_user(username, extra_groups=DEFAULT_EXTRA_GROUPS if add_groups else ())
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        return {"status": "ok", "username": username}
+
+    @app.delete("/api/kiosk/users/<username>")
+    def kiosk_delete_user_api(username: str) -> "tuple[dict[str, object], int] | dict[str, object]":
+        match = next((u for u in list_kiosk_linux_users() if u.username == username), None)
+        if match is None:
+            return {"status": "error", "errors": ["ไม่พบ user นี้"]}, 404
+        if match.is_autologin:
+            return {"status": "error", "errors": ["ต้องปิด auto-login หรือเปลี่ยน user ก่อนถึงจะลบได้"]}, 400
+
+        manager = KioskManager(CommandRunner())
+        try:
+            manager.delete_user(username)
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        return {"status": "ok"}
+
+    @app.post("/api/kiosk/autologin")
+    def kiosk_autologin_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username", "")).strip() or None
+        enabled = bool(payload.get("enabled", False))
+        if enabled and not username:
+            return {"status": "error", "errors": ["ต้องระบุ username เมื่อเปิด auto-login"]}, 400
+
+        manager = KioskManager(CommandRunner())
+        try:
+            manager.set_autologin(username, enabled=enabled)
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        status = collect_gdm_autologin_status()
+        return {"status": "ok", "enabled": status.enabled, "username": status.username}
+
+    @app.post("/api/kiosk/session-type")
+    def kiosk_session_type_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username", "")).strip()
+        session_type = str(payload.get("session_type", "")).strip()
+        if session_type not in ("gnome", "openbox"):
+            return {"status": "error", "errors": [f"Unknown session type: {session_type}"]}, 400
+        if not username:
+            return {"status": "error", "errors": ["ต้องระบุ username"]}, 400
+
+        manager = KioskManager(CommandRunner())
+        try:
+            manager.set_session_type(username, session_type)
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        return {"status": "ok", "username": username, "session_type": session_type}
+
+    @app.post("/api/kiosk/autostart")
+    def kiosk_autostart_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username", "")).strip()
+        session_type = str(payload.get("session_type", "gnome")).strip()
+        url = str(payload.get("url", "")).strip()
+        restart_enabled = bool(payload.get("restart_enabled", True))
+        try:
+            restart_delay = int(payload.get("restart_delay", DEFAULT_RESTART_DELAY))
+        except (TypeError, ValueError):
+            restart_delay = DEFAULT_RESTART_DELAY
+
+        if session_type not in ("gnome", "openbox"):
+            return {"status": "error", "errors": [f"Unknown session type: {session_type}"]}, 400
+        if not username:
+            return {"status": "error", "errors": ["ต้องระบุ username"]}, 400
+        if not url:
+            return {"status": "error", "errors": ["ต้องระบุ URL"]}, 400
+
+        match = next((u for u in list_kiosk_linux_users() if u.username == username), None)
+        if match is None:
+            return {"status": "error", "errors": [f"ไม่พบ user: {username}"]}, 404
+
+        manager = KioskManager(CommandRunner())
+        try:
+            manager.write_autostart(
+                session_type=session_type,
+                home=match.home,
+                username=username,
+                url=url,
+                restart_enabled=restart_enabled,
+                restart_delay=restart_delay,
+            )
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        status = collect_kiosk_autostart_status(session_type, match.home)
+        return {
+            "status": "ok",
+            "configured": status.configured,
+            "url": status.url,
+            "restart_enabled": status.restart_enabled,
+            "restart_delay": status.restart_delay,
+        }
+
+    @app.get("/api/kiosk/config-content")
+    def kiosk_config_content_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        key = request.args.get("key", "").strip()
+        allowed = _allowed_kiosk_config_paths()
+        if key not in allowed:
+            return {"error": f"Unknown config key: {key}"}, 400
+        path = allowed[key]
+        if not path.exists():
+            return {"exists": False, "content": None, "path": path.as_posix()}
+        try:
+            content = path.read_text(encoding="utf-8")
+            return {"exists": True, "content": content, "path": path.as_posix()}
+        except OSError as e:
+            return {"error": str(e)}, 500
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -2973,6 +3119,64 @@ def validate_display_apply(output: str, touch: str, rotate: str, devices: Displa
     elif touch not in (d.name for d in devices.touch_devices):
         errors.append(f"Touchscreen device is not available: {touch}")
     return errors
+
+
+def _kiosk_page_context() -> dict[str, object]:
+    users = list_kiosk_linux_users()
+    autologin = collect_gdm_autologin_status()
+    software = collect_kiosk_software_status()
+    autologin_user = next((u for u in users if u.is_autologin), None)
+
+    session_type = "gnome"
+    if autologin_user is not None:
+        session_type = collect_accounts_service_status(autologin_user.username).session_type
+    home = autologin_user.home if autologin_user is not None else Path("/home/kiosk-user")
+
+    autostart_status = collect_kiosk_autostart_status(session_type, home)
+    readiness = collect_kiosk_readiness(users, autologin, autostart_status, software)
+
+    return {
+        "kiosk_users": [
+            {
+                "username": u.username,
+                "uid": u.uid,
+                "home": u.home.as_posix(),
+                "is_autologin": u.is_autologin,
+                "managed_by_vas": u.managed_by_vas,
+            }
+            for u in users
+        ],
+        "autologin_enabled": autologin.enabled,
+        "autostart": {
+            "url": autostart_status.url,
+            "restart_enabled": autostart_status.restart_enabled,
+            "restart_delay": autostart_status.restart_delay,
+            "configured": autostart_status.configured,
+        },
+        "readiness": {
+            "software_ok": readiness.software_ok,
+            "user_ok": readiness.user_ok,
+            "autologin_ok": readiness.autologin_ok,
+            "autostart_ok": readiness.autostart_ok,
+        },
+        "session_type": session_type,
+        "openbox_installed": software.openbox_installed,
+    }
+
+
+def _allowed_kiosk_config_paths() -> dict[str, Path]:
+    """Allowlist ของ config files ที่อ่านได้ผ่าน API หน้า Kiosk"""
+    users = list_kiosk_linux_users()
+    autologin_user = next((u for u in users if u.is_autologin), None)
+    username = autologin_user.username if autologin_user is not None else "kiosk-user"
+    home = autologin_user.home if autologin_user is not None else Path("/home/kiosk-user")
+    return {
+        "gdm_custom": GDM_CUSTOM_CONFIG_PATH,
+        "accounts_service": accounts_service_path_for(username),
+        "openbox_autostart": kiosk_openbox_autostart_path(home),
+        "autostart_desktop": kiosk_gnome_autostart_desktop_path(home),
+        "kiosk_launch_script": kiosk_launch_script_path(home),
+    }
 
 
 def _allowed_config_paths() -> dict[str, Path]:

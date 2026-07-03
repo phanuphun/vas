@@ -1,0 +1,706 @@
+{% extends base_template %}
+{% block page_title %}คีออส — VAS{% endblock %}
+{% block header_title %}คีออส{% endblock %}
+
+{% block content %}
+<style>
+  .tab-panel { display: none; }
+  .tab-panel.is-active {
+    display: flex;
+    flex-direction: column;
+    animation: tabFade 0.15s ease forwards;
+  }
+  @keyframes tabFade {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .readiness-row { transition: background 0.1s; }
+  .readiness-row:hover { background: rgb(var(--c-surface)); }
+  .readiness-row:last-child { border-bottom: none !important; }
+
+  .kuser-row { transition: background 0.1s, border-color 0.15s; cursor: pointer; }
+  .kuser-row:hover { background: rgb(var(--c-surface)); }
+  .kuser-row.is-selected { border-color: rgb(var(--c-accent) / 0.4); background: rgb(var(--c-accent) / 0.04); }
+
+  /* ── Toggle switch ── */
+  .toggle-switch { position:relative; display:inline-flex; align-items:center; gap:0.5rem; cursor:pointer; flex-shrink:0; }
+  .toggle-switch input { position:absolute; opacity:0; width:0; height:0; }
+  .toggle-track { width:36px; height:20px; border-radius:10px; background:rgb(var(--c-faint)/0.4); transition:background 0.2s; border:1px solid rgb(var(--c-line)/0.14); position:relative; }
+  .toggle-switch input:checked + .toggle-track { background:rgb(var(--c-safe)); border-color:rgb(var(--c-safe)); }
+  .toggle-thumb { position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.15); transition:left 0.2s; }
+  .toggle-switch input:checked + .toggle-track .toggle-thumb { left:18px; }
+
+  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open { display:flex; }
+  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+</style>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── 1. Page Header ─────────────────────────────────────────── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · ระบบ</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">คีออส</h1>
+    <p class="text-[0.82rem] text-muted mt-1">ตั้งค่า user, auto-login และเบราว์เซอร์เต็มจอสำหรับ kiosk mode</p>
+  </div>
+
+  <!-- ── 2. Section Menu ────────────────────────────────────────── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      <button type="button" data-tab="overview" onclick="setTab('overview')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors bg-accent/8 text-accent font-semibold">
+        <iconify-icon icon="lucide:clipboard-check" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        ภาพรวม
+      </button>
+      <button type="button" data-tab="user" onclick="setTab('user')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+        <iconify-icon icon="lucide:user" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        ผู้ใช้ Kiosk
+      </button>
+      <button type="button" data-tab="autostart" onclick="setTab('autostart')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+        <iconify-icon icon="lucide:play" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        เปิดแอปอัตโนมัติ
+      </button>
+      <button type="button" data-tab="configs" onclick="setTab('configs')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+        <iconify-icon icon="lucide:file-text" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        Config Files
+      </button>
+    </div>
+  </nav>
+
+  <!-- ── 3. Content Section ─────────────────────────────────────── -->
+  <div>
+
+    {% set autologin_user = (kiosk_users | selectattr('is_autologin') | list | first) %}
+    {% set home = autologin_user.home if autologin_user else '/home/kiosk-user' %}
+
+    <!-- ════════════ TAB: ภาพรวม ════════════ -->
+    <div id="tab-overview" class="tab-panel is-active flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">ความพร้อมของ Kiosk Mode</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">
+            {{ readiness.values() | select | list | length }} จาก {{ readiness | length }} ขั้นตอนพร้อมแล้ว
+          </p>
+        </div>
+
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6">
+          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.software_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:package" width="15" height="15" class="{{ 'text-safe' if readiness.software_ok else 'text-caution' }}"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <span class="text-[0.85rem] font-semibold text-ink">ซอฟต์แวร์ (Openbox + Chromium)</span>
+            <p class="text-[0.72rem] text-muted mt-0.5">
+              {% if readiness.software_ok %}ติดตั้งแล้วทั้งคู่{% else %}ยังติดตั้งไม่ครบ{% endif %} — ดูที่หน้า <a href="{{ url_for('apps_page') }}" class="text-accent underline underline-offset-2">ซอฟต์แวร์ระบบ</a>
+            </p>
+          </div>
+          <span class="zone {{ 'zone-safe' if readiness.software_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.software_ok else 'ยังไม่ครบ' }}</span>
+        </div>
+
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6">
+          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.user_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:user" width="15" height="15" class="{{ 'text-safe' if readiness.user_ok else 'text-caution' }}"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <span class="text-[0.85rem] font-semibold text-ink">ผู้ใช้ Kiosk</span>
+            <p class="text-[0.72rem] text-muted mt-0.5">
+              {% if autologin_user %}สร้างแล้ว: {{ autologin_user.username }} (UID {{ autologin_user.uid }}){% else %}ยังไม่ได้สร้าง user{% endif %}
+            </p>
+          </div>
+          <span class="zone {{ 'zone-safe' if readiness.user_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.user_ok else 'ยังไม่ครบ' }}</span>
+        </div>
+
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6">
+          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.autologin_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:log-in" width="15" height="15" class="{{ 'text-safe' if readiness.autologin_ok else 'text-caution' }}"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <span class="text-[0.85rem] font-semibold text-ink">Auto-login</span>
+            <p class="text-[0.72rem] text-muted mt-0.5">
+              {% if readiness.autologin_ok and autologin_user %}เปิดใช้งาน ชี้ไปที่ {{ autologin_user.username }}{% else %}ยังไม่ได้เปิด{% endif %}
+            </p>
+          </div>
+          <span class="zone {{ 'zone-safe' if readiness.autologin_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autologin_ok else 'ยังไม่ครบ' }}</span>
+        </div>
+
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5">
+          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.autostart_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:app-window" width="15" height="15" class="{{ 'text-safe' if readiness.autostart_ok else 'text-caution' }}"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <span class="text-[0.85rem] font-semibold text-ink">Autostart เบราว์เซอร์</span>
+            <p class="text-[0.72rem] text-muted mt-0.5">
+              {% if readiness.autostart_ok %}ตั้งค่าแล้ว ({{ autostart.url }}){% else %}ยังไม่ได้ตั้งค่า URL และ restart loop{% endif %}
+            </p>
+          </div>
+          <span class="zone {{ 'zone-safe' if readiness.autostart_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autostart_ok else 'ยังไม่ครบ' }}</span>
+        </div>
+      </div>
+
+      {% if not readiness.autostart_ok %}
+      <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/8 border-caution/25 text-[#92660b]">
+        <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+        <span>ยังตั้งค่าไม่ครบ — ไปที่แท็บ <strong class="font-semibold">เปิดแอปอัตโนมัติ</strong> เพื่อกำหนด URL ที่ chromium จะเปิดตอน login</span>
+      </div>
+      {% endif %}
+
+      <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-accent/5 border-accent/18 text-muted">
+        <iconify-icon icon="lucide:info" width="14" height="14" class="flex-shrink-0 mt-0.5 text-accent"></iconify-icon>
+        <span>ปรับความละเอียดหน้าจอหรือหมุนจอได้ที่หน้า <a href="{{ url_for('display_settings') }}" class="text-accent underline underline-offset-2">จอแสดงผล</a> — หน้านี้ตั้งค่าเฉพาะ session/user ของ kiosk เท่านั้น</span>
+      </div>
+
+    </div>
+
+    <!-- ════════════ TAB: ผู้ใช้ Kiosk ════════════ -->
+    <div id="tab-user" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">เลือก user สำหรับ Kiosk</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">user ที่เลือกจะถูกใช้ auto-login เข้าเครื่องตอนบูต</p>
+        </div>
+        <div class="p-4 flex flex-col gap-2">
+          {% for u in kiosk_users %}
+          <label class="kuser-row flex items-center gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if u.is_autologin else '' }}">
+            <input type="radio" name="kiosk-user" value="{{ u.username }}" {{ 'checked' if u.is_autologin else '' }} class="accent-accent flex-shrink-0">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[0.84rem] font-semibold text-ink font-display">{{ u.username }}</span>
+                {% if u.is_autologin %}<span class="zone zone-safe">auto-login อยู่</span>{% endif %}
+                {% if u.managed_by_vas %}<span class="zone zone-mute">สร้างโดย VAS</span>{% endif %}
+              </div>
+              <p class="text-[0.72rem] text-faint mt-0.5">UID {{ u.uid }} · {{ u.home }}</p>
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">สร้าง user ใหม่</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">สร้าง Linux user แยกสำหรับ kiosk โดยเฉพาะ (แนะนำ — แยกสิทธิ์จาก admin)</p>
+        </div>
+        <div class="p-4 flex flex-col gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted" for="newKioskUsername">ชื่อ user</label>
+            <input id="newKioskUsername" type="text" placeholder="kiosk-user" autocomplete="off"
+                   class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            <p class="text-[0.7rem] text-faint">ตัวพิมพ์เล็ก ตัวเลข และ - เท่านั้น</p>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-ink select-none">
+            <input id="newKioskGroups" type="checkbox" checked class="rounded"> เพิ่มเข้ากลุ่ม video, input, plugdev (จำเป็นสำหรับจอ/touchscreen)
+          </label>
+          <button type="button" onclick="createKioskUser()"
+                  class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+            <iconify-icon icon="lucide:plus" width="14" height="14"></iconify-icon>
+            สร้าง user
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">Auto-login</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">เขียนที่ <code class="text-[0.68rem] bg-surface px-1 rounded">/etc/gdm3/custom.conf</code> — เข้า session ทันทีไม่ต้องพิมพ์รหัสผ่าน</p>
+        </div>
+        <div class="p-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <span class="text-[0.84rem] font-semibold text-ink">เปิด auto-login</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">สำหรับ user ที่เลือกไว้ด้านบน</p>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" {{ 'checked' if autologin_enabled else '' }} onchange="toggleAutologin(this)">
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">ประเภท Session</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">กำหนดว่าหลัง auto-login แล้วจะเข้า desktop แบบไหน — GDM auto-login ทำงานเหมือนกันทั้งสองแบบ ต่างกันแค่ session ที่เปิด</p>
+        </div>
+        <div class="p-4 flex flex-col gap-2">
+          <label id="session-row-gnome" class="kuser-row flex items-start gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if session_type == 'gnome' else '' }}">
+            <input type="radio" name="session-type" value="gnome" {{ 'checked' if session_type == 'gnome' else '' }} onchange="setSessionType('gnome')" class="accent-accent flex-shrink-0 mt-0.5">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[0.84rem] font-semibold text-ink font-display">GNOME</span>
+                <span class="zone zone-mute">ค่าเริ่มต้น</span>
+              </div>
+              <p class="text-[0.72rem] text-faint mt-0.5">ใช้ desktop เดิมของเครื่อง — รองรับทุกฟีเจอร์ของ vas (จอ/touchscreen) เต็มที่ ไม่ต้องติดตั้งอะไรเพิ่ม</p>
+            </div>
+          </label>
+          <label id="session-row-openbox" class="kuser-row flex items-start gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if session_type == 'openbox' else '' }}">
+            <input type="radio" name="session-type" value="openbox" {{ 'checked' if session_type == 'openbox' else '' }} onchange="setSessionType('openbox')" class="accent-accent flex-shrink-0 mt-0.5">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[0.84rem] font-semibold text-ink font-display">Openbox</span>
+                {% if openbox_installed %}<span class="zone zone-safe">ติดตั้งแล้ว</span>{% else %}<span class="zone zone-caution">ยังไม่ได้ติดตั้ง</span>{% endif %}
+              </div>
+              <p class="text-[0.72rem] text-faint mt-0.5">
+                เบาที่สุด ไม่มี desktop UI ให้ user หลุดออกไปเล่นได้เลย
+                {% if not openbox_installed %} — ต้องติดตั้งที่ <a href="{{ url_for('apps_page') }}" class="text-accent underline underline-offset-2">หน้าซอฟต์แวร์ระบบ</a> ก่อน{% endif %}
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-accent/5 border-accent/18 text-muted">
+        <iconify-icon icon="lucide:info" width="14" height="14" class="flex-shrink-0 mt-0.5 text-accent"></iconify-icon>
+        <span><strong class="text-ink font-semibold">GDM</strong> เป็นคนจัดการ auto-login เสมอไม่ว่าจะเลือก session แบบไหน — ตัวเลือกด้านบนกำหนดแค่ "หลัง login แล้วจะเจอ UI แบบไหน" เท่านั้น ไม่ใช่ตัวเลือกแทนที่ GDM</span>
+      </div>
+
+      <div class="bg-card border border-danger/15 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-danger/10">
+          <h3 class="text-[0.88rem] font-semibold text-danger">Danger zone</h3>
+        </div>
+        <div class="p-4 flex flex-col gap-3">
+          <div class="flex items-start gap-2.5 px-3.5 py-2.5 rounded-lg text-[0.78rem] border bg-caution/8 border-caution/25 text-[#92660b]">
+            <iconify-icon icon="lucide:alert-triangle" width="13" height="13" class="flex-shrink-0 mt-0.5"></iconify-icon>
+            <span>ลบ user ที่กำลัง auto-login อยู่ไม่ได้ — ต้องปิด auto-login หรือเปลี่ยน user ก่อน</span>
+          </div>
+          <button type="button" onclick="confirmDeleteKioskUser()"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/8 transition-colors self-start">
+            <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+            ลบ user นี้
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ════════════ TAB: เปิดแอปอัตโนมัติ ════════════ -->
+    <div id="tab-autostart" class="tab-panel flex flex-col gap-4">
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">เบราว์เซอร์ที่เปิดอัตโนมัติ</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">Chromium เปิดแบบ --kiosk เต็มจอทันทีหลัง login</p>
+        </div>
+        <div class="p-4 flex flex-col gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted" for="kioskUrl">URL ที่จะเปิด</label>
+            <input id="kioskUrl" type="url" value="{{ autostart.url }}" autocomplete="off"
+                   class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            <p class="text-[0.7rem] text-faint">ปกติคือ dashboard ของ VAS เอง — เปลี่ยนได้ถ้าต้องการเปิดหน้าอื่น</p>
+          </div>
+
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <span class="text-[0.84rem] font-semibold text-ink">รีสตาร์ทอัตโนมัติถ้าเบราว์เซอร์ปิด</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">กันหน้าจอค้างว่างเปล่าถ้า chromium crash</p>
+            </div>
+            <label class="toggle-switch">
+              <input id="kioskRestartEnabled" type="checkbox" {{ 'checked' if autostart.restart_enabled else '' }}>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+
+          <div class="flex flex-col gap-1.5" style="max-width:200px;">
+            <label class="text-[0.75rem] font-semibold text-muted" for="kioskRestartDelay">รอกี่วินาทีก่อนเปิดใหม่</label>
+            <input id="kioskRestartDelay" type="number" min="0" value="{{ autostart.restart_delay }}"
+                   class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">ตัวอย่าง script ที่จะสร้าง</h3>
+          <code id="autostart-preview-path" class="text-[0.68rem] text-faint font-mono block mt-0.5">{% if session_type == 'openbox' %}{{ home }}/.config/openbox/autostart{% else %}{{ home }}/.config/vending-auto-setup/kiosk-launch.sh{% endif %}</code>
+          <p id="autostart-preview-desc" class="text-[0.7rem] text-faint mt-1">{% if session_type == 'openbox' %}Openbox ไม่รองรับ autostart แบบ .desktop ของ GNOME — ไฟล์นี้เป็น shell script ที่รันตรงตอน session เริ่ม ไม่ต้องมีไฟล์ .desktop แยก{% else %}ถูกเรียกผ่าน .desktop entry แยกต่างหาก — ดูได้ที่แท็บ Config Files{% endif %}</p>
+        </div>
+        <div class="p-4">
+          <textarea readonly spellcheck="false"
+                    class="w-full px-3 py-2.5 border-0 bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[160px] outline-none resize-y cursor-default select-all rounded-lg">#!/usr/bin/env bash
+while true; do
+  chromium --kiosk --noerrdialogs \
+    --disable-infobars \
+    {{ autostart.url }}
+  sleep {{ autostart.restart_delay }}
+done</textarea>
+        </div>
+      </div>
+
+      <button type="button" onclick="saveAutostart()"
+              class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+        <iconify-icon icon="lucide:save" width="14" height="14"></iconify-icon>
+        บันทึกและเปิดใช้งาน
+      </button>
+
+    </div>
+
+    <!-- ════════════ TAB: Config Files ════════════ -->
+    <div id="tab-configs" class="tab-panel flex flex-col gap-4">
+
+      {% set gdm_card = (
+        "gdm_custom",
+        "lucide:shield",
+        "/etc/gdm3/custom.conf",
+        "GDM Configuration",
+        "ไฟล์เดียวกับที่หน้า <a href=\"" ~ url_for('display_settings') ~ "\" class=\"text-accent underline underline-offset-2\">จอแสดงผล</a> ใช้ควบคุม Wayland — ส่วนนี้เพิ่มแค่ <code class='text-[0.7rem] bg-surface px-1 py-px rounded font-mono'>AutomaticLoginEnable</code> และ <code class='text-[0.7rem] bg-surface px-1 py-px rounded font-mono'>AutomaticLogin</code> โดยไม่แตะ WaylandEnable — ใช้ร่วมกันไม่ว่าจะเลือก session แบบไหน",
+        readiness.autologin_ok,
+        ("AutomaticLogin=" ~ (autologin_user.username if autologin_user else '?') ~ " ตั้งค่าถูกต้อง") if readiness.autologin_ok else "ยังไม่ได้ตั้งค่า auto-login",
+        "[daemon]\nWaylandEnable=false\nAutomaticLoginEnable=true\nAutomaticLogin=" ~ (autologin_user.username if autologin_user else 'kiosk-user'),
+        "all"
+      ) %}
+
+      {% set accounts_service_card = (
+        "accounts_service",
+        "lucide:user-cog",
+        "/var/lib/AccountsService/users/" ~ (autologin_user.username if autologin_user else 'kiosk-user'),
+        "Session Selection (AccountsService)",
+        "บอก GDM ว่า user นี้ auto-login แล้วจะเข้า session ไหน — คนละไฟล์กับ custom.conf ด้านบน (custom.conf คุมแค่ \"ล็อกอินไหม\" ไฟล์นี้คุม \"ล็อกอินแล้วเจออะไร\")",
+        true,
+        "Session=" ~ session_type,
+        "[User]\nSession=" ~ ('openbox' if session_type == 'openbox' else 'ubuntu-xorg') ~ "\nXSession=" ~ ('openbox' if session_type == 'openbox' else 'ubuntu-xorg') ~ "\nSystemAccount=false",
+        "all"
+      ) %}
+
+      {% set openbox_autostart_card = (
+        "openbox_autostart",
+        "lucide:terminal",
+        home ~ "/.config/openbox/autostart",
+        "Openbox Autostart Script",
+        "Openbox ไม่รองรับ .desktop autostart แบบ GNOME — ไฟล์นี้เป็น shell script ที่รันตรงตอน session เริ่ม รวม restart-loop ไว้ในไฟล์เดียว",
+        readiness.autostart_ok,
+        "พบไฟล์และ executable แล้ว" if readiness.autostart_ok else "ยังไม่ถูกสร้าง",
+        "(ยังไม่ถูกสร้าง)" if not readiness.autostart_ok else ("#!/usr/bin/env bash\nwhile true; do\n  chromium --kiosk " ~ autostart.url ~ "\n  sleep " ~ autostart.restart_delay ~ "\ndone"),
+        "openbox"
+      ) %}
+
+      {% set autostart_desktop_card = (
+        "autostart_desktop",
+        "lucide:app-window",
+        home ~ "/.config/autostart/vas-kiosk.desktop",
+        "Autostart Entry",
+        "ไฟล์ .desktop ที่สั่งรัน <code class='text-[0.7rem] bg-surface px-1 py-px rounded font-mono'>kiosk-launch.sh</code> ทันทีตอน session เริ่ม (GNOME เท่านั้นที่อ่านไฟล์นี้)",
+        readiness.autostart_ok,
+        "พบไฟล์และ enabled แล้ว" if readiness.autostart_ok else "ยังไม่พบไฟล์ — บันทึกที่แท็บ \"เปิดแอปอัตโนมัติ\" ก่อน",
+        "[Desktop Entry]\nType=Application\nName=VAS Kiosk\nExec=" ~ home ~ "/.config/vending-auto-setup/kiosk-launch.sh\nX-GNOME-Autostart-enabled=true",
+        "gnome"
+      ) %}
+
+      {% set kiosk_launch_script_card = (
+        "kiosk_launch_script",
+        "lucide:terminal",
+        home ~ "/.config/vending-auto-setup/kiosk-launch.sh",
+        "Kiosk Launch Script",
+        "Restart-loop script ที่เปิด chromium เต็มจอ ถูกเรียกจากไฟล์ .desktop ด้านบน",
+        readiness.autostart_ok,
+        "Script พร้อมใช้งาน" if readiness.autostart_ok else "ยังไม่ถูกสร้าง",
+        "(ยังไม่ถูกสร้าง)" if not readiness.autostart_ok else ("#!/usr/bin/env bash\nwhile true; do\n  chromium --kiosk " ~ autostart.url ~ "\n  sleep " ~ autostart.restart_delay ~ "\ndone"),
+        "gnome"
+      ) %}
+
+      {% set cfg_files = [gdm_card, accounts_service_card, openbox_autostart_card, autostart_desktop_card, kiosk_launch_script_card] %}
+
+      <div class="flex flex-col gap-4">
+        {% for key, icon, path, title, desc, ok, status_text, mock_content, scope in cfg_files %}
+        <div class="bg-card border border-line/10 rounded-xl overflow-hidden {{ 'hidden' if (scope != 'all' and scope != session_type) else '' }}" id="cfg-card-{{ key }}" data-session-scope="{{ scope }}">
+          <button type="button" onclick="toggleCfg('{{ key }}')"
+                  class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors">
+            <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+              <iconify-icon icon="{{ icon }}" width="16" height="16" class="text-muted"></iconify-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[0.88rem] text-ink font-display">{{ title }}</span>
+                <span class="zone {{ 'zone-safe' if ok else 'zone-caution' }}">{{ 'OK' if ok else 'WARN' }}</span>
+              </div>
+              <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ path }}</code>
+              <p class="text-[0.73rem] text-muted mt-1 leading-snug">{{ desc | safe }}</p>
+              <div class="flex items-center gap-1 mt-1.5">
+                <iconify-icon icon="{{ 'lucide:check-circle' if ok else 'lucide:alert-circle' }}" width="11" height="11" class="{{ 'text-safe' if ok else 'text-caution' }}"></iconify-icon>
+                <span class="text-[0.68rem] {{ 'text-safe' if ok else 'text-caution' }}">{{ status_text }}</span>
+              </div>
+            </div>
+            <iconify-icon icon="lucide:chevron-down" width="15" height="15"
+                          class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-{{ key }}"></iconify-icon>
+          </button>
+
+          <div id="cfg-viewer-{{ key }}" class="hidden border-t border-line/10">
+            <div class="flex items-center justify-between px-4 py-3 bg-surface/40">
+              <span class="text-[0.72rem] font-semibold text-muted">เนื้อหาไฟล์ (mock)</span>
+              <button type="button" onclick="reloadConfigContent('{{ key }}')"
+                      class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+                <iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Reload
+              </button>
+            </div>
+            <div class="p-4">
+              <textarea id="cfg-content-{{ key }}" readonly spellcheck="false"
+                        class="w-full px-3 py-2.5 border-0 bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[160px] outline-none resize-y cursor-default select-all rounded-lg">{{ mock_content }}</textarea>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Confirm Modal (ลบ Kiosk user) ────────────────────────────── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:trash-2" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">
+        ยกเลิก
+      </button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        ลบ
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var kioskHome = "{{ home }}";
+  var currentSessionType = "{{ session_type }}";
+
+  function acctServiceContent(type) {
+    var s = type === "openbox" ? "openbox" : "ubuntu-xorg";
+    return "[User]\nSession=" + s + "\nXSession=" + s + "\nSystemAccount=false";
+  }
+
+  function getSelectedKioskUsername() {
+    var checked = document.querySelector('input[name="kiosk-user"]:checked');
+    return checked ? checked.value : null;
+  }
+
+  function apiRequest(method, url, body) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(url, opts).then(function (res) {
+      return res.json().then(function (data) {
+        return { ok: res.ok, data: data };
+      });
+    }).catch(function (err) {
+      return { ok: false, data: { errors: [String(err)] } };
+    });
+  }
+
+  function firstError(data) {
+    if (data && Array.isArray(data.errors) && data.errors.length) return data.errors[0];
+    if (data && data.error) return data.error;
+    return "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  }
+
+  // ── Session type switch (Config Files + Autostart preview ปรับตาม + บันทึกจริง) ──
+  window.setSessionType = function (type) {
+    currentSessionType = type;
+    var gnomeRow = document.getElementById("session-row-gnome");
+    var openboxRow = document.getElementById("session-row-openbox");
+    if (gnomeRow) gnomeRow.classList.toggle("is-selected", type === "gnome");
+    if (openboxRow) openboxRow.classList.toggle("is-selected", type === "openbox");
+
+    document.querySelectorAll("[data-session-scope]").forEach(function (el) {
+      var scope = el.getAttribute("data-session-scope");
+      el.classList.toggle("hidden", scope !== "all" && scope !== type);
+    });
+
+    var acctTextarea = document.getElementById("cfg-content-accounts_service");
+    if (acctTextarea) acctTextarea.value = acctServiceContent(type);
+
+    var pathEl = document.getElementById("autostart-preview-path");
+    var descEl = document.getElementById("autostart-preview-desc");
+    if (pathEl && descEl) {
+      if (type === "openbox") {
+        pathEl.textContent = kioskHome + "/.config/openbox/autostart";
+        descEl.textContent = "Openbox ไม่รองรับ autostart แบบ .desktop ของ GNOME — ไฟล์นี้เป็น shell script ที่รันตรงตอน session เริ่ม ไม่ต้องมีไฟล์ .desktop แยก";
+      } else {
+        pathEl.textContent = kioskHome + "/.config/vending-auto-setup/kiosk-launch.sh";
+        descEl.textContent = "ถูกเรียกผ่าน .desktop entry แยกต่างหาก — ดูได้ที่แท็บ Config Files";
+      }
+    }
+
+    var username = getSelectedKioskUsername();
+    if (!username) {
+      showToast("ยังไม่มี user ที่เลือกไว้ — ตั้งค่า session type ไม่ได้", "error");
+      return;
+    }
+    apiRequest("POST", "/api/kiosk/session-type", { username: username, session_type: type }).then(function (result) {
+      if (result.ok) {
+        showToast("บันทึก session เป็น " + (type === "openbox" ? "Openbox" : "GNOME") + " แล้ว", "success");
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
+
+  // ── สร้าง user ────────────────────────────────────────────────
+  window.createKioskUser = function () {
+    var usernameEl = document.getElementById("newKioskUsername");
+    var groupsEl = document.getElementById("newKioskGroups");
+    var username = usernameEl ? usernameEl.value.trim() : "";
+    if (!username) {
+      showToast("กรอกชื่อ user ก่อน", "error");
+      return;
+    }
+    apiRequest("POST", "/api/kiosk/users", { username: username, groups: groupsEl ? groupsEl.checked : true })
+      .then(function (result) {
+        if (result.ok) {
+          showToast("สร้าง user " + username + " สำเร็จ", "success");
+          setTimeout(function () { window.location.reload(); }, 600);
+        } else {
+          showToast(firstError(result.data), "error");
+        }
+      });
+  };
+
+  // ── ลบ user ──────────────────────────────────────────────────
+  window.deleteKioskUserApi = function () {
+    var username = getSelectedKioskUsername();
+    if (!username) {
+      showToast("ยังไม่มี user ที่เลือกไว้", "error");
+      return;
+    }
+    apiRequest("DELETE", "/api/kiosk/users/" + encodeURIComponent(username)).then(function (result) {
+      if (result.ok) {
+        showToast("ลบ user " + username + " สำเร็จ", "success");
+        setTimeout(function () { window.location.reload(); }, 600);
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
+
+  // ── Auto-login toggle ───────────────────────────────────────────
+  window.toggleAutologin = function (checkbox) {
+    var username = getSelectedKioskUsername();
+    var enabled = checkbox.checked;
+    if (enabled && !username) {
+      showToast("ยังไม่มี user ที่เลือกไว้", "error");
+      checkbox.checked = false;
+      return;
+    }
+    apiRequest("POST", "/api/kiosk/autologin", { username: username, enabled: enabled }).then(function (result) {
+      if (result.ok) {
+        showToast(enabled ? "เปิด auto-login แล้ว" : "ปิด auto-login แล้ว", "success");
+      } else {
+        showToast(firstError(result.data), "error");
+        checkbox.checked = !enabled;
+      }
+    });
+  };
+
+  // ── บันทึก autostart ─────────────────────────────────────────
+  window.saveAutostart = function () {
+    var username = getSelectedKioskUsername();
+    if (!username) {
+      showToast("ยังไม่มี user ที่เลือกไว้", "error");
+      return;
+    }
+    var urlEl = document.getElementById("kioskUrl");
+    var restartEl = document.getElementById("kioskRestartEnabled");
+    var delayEl = document.getElementById("kioskRestartDelay");
+    apiRequest("POST", "/api/kiosk/autostart", {
+      username: username,
+      session_type: currentSessionType,
+      url: urlEl ? urlEl.value.trim() : "",
+      restart_enabled: restartEl ? restartEl.checked : true,
+      restart_delay: delayEl ? parseInt(delayEl.value, 10) || 0 : 2,
+    }).then(function (result) {
+      if (result.ok) {
+        showToast("บันทึกและเปิดใช้งาน autostart แล้ว", "success");
+        setTimeout(function () { window.location.reload(); }, 600);
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
+
+  // ── Reload config file content จากเซิร์ฟเวอร์จริง ────────────────
+  window.reloadConfigContent = function (key) {
+    apiRequest("GET", "/api/kiosk/config-content?key=" + encodeURIComponent(key)).then(function (result) {
+      if (!result.ok) {
+        showToast(firstError(result.data), "error");
+        return;
+      }
+      var textarea = document.getElementById("cfg-content-" + key);
+      if (textarea) {
+        textarea.value = result.data.exists ? result.data.content : "(ยังไม่พบไฟล์นี้บนเครื่อง)";
+      }
+      showToast("Reload config สำเร็จ", "success");
+    });
+  };
+
+  // ── Tab switch ────────────────────────────────────────────────
+  window.setTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) {
+      el.classList.remove("is-active");
+    });
+    var panel = document.getElementById("tab-" + id);
+    if (panel) panel.classList.add("is-active");
+
+    document.querySelectorAll(".tab-btn").forEach(function (el) {
+      var active = el.dataset.tab === id;
+      el.className = el.className
+        .replace(/\bbg-accent\/8\b/g, "").replace(/\btext-accent\b/g, "")
+        .replace(/\bfont-semibold\b/g, "").replace(/\btext-muted\b/g, "")
+        .replace(/\bhover:bg-surface\b/g, "").replace(/\bhover:text-ink\b/g, "")
+        .replace(/\s{2,}/g, " ").trim();
+      el.className += active
+        ? " bg-accent/8 text-accent font-semibold"
+        : " text-muted hover:bg-surface hover:text-ink";
+    });
+  };
+
+  // ── Config file accordion ───────────────────────────────────────
+  window.toggleCfg = function (key) {
+    var viewer = document.getElementById("cfg-viewer-" + key);
+    var chev   = document.getElementById("chevron-" + key);
+    if (!viewer) return;
+    var nowHidden = viewer.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+  };
+
+  // ── Delete kiosk user (confirm modal) ───────────────────────────
+  window.confirmDeleteKioskUser = function () {
+    window.showConfirm({
+      title:   "ลบ kiosk user นี้?",
+      body:    "Home directory และไฟล์ที่เกี่ยวข้องทั้งหมดจะถูกลบ ไม่สามารถยกเลิกได้ — ต้องปิด auto-login ก่อนถ้า user นี้กำลังใช้งานอยู่",
+      okLabel: "ลบ",
+      onOk: function () { deleteKioskUserApi(); }
+    });
+  };
+
+  // ── Init — immediate call รองรับ SPA navigate ──────────────────
+  setTab("overview");
+})();
+</script>
+{% endblock %}

@@ -181,6 +181,40 @@ def build_parser() -> argparse.ArgumentParser:
     wireguard_unsync = wireguard_subcommands.add_parser("unsync", help="Disable service and remove the active config.")
     add_wireguard_name_argument(wireguard_unsync)
 
+    kiosk = subcommands.add_parser("kiosk", help="Manage kiosk mode: dedicated user, auto-login, session type, autostart.")
+    kiosk_subcommands = kiosk.add_subparsers(dest="kiosk_command", required=True)
+
+    kiosk_subcommands.add_parser("status", help="Show kiosk readiness status.")
+
+    kiosk_create_user = kiosk_subcommands.add_parser("create-user", help="Create a dedicated Linux user for kiosk mode.")
+    kiosk_create_user.add_argument("--username", required=True)
+    kiosk_create_user.add_argument(
+        "--groups",
+        default="video,input,plugdev",
+        help="Comma-separated extra groups to add the user to.",
+    )
+
+    kiosk_delete_user = kiosk_subcommands.add_parser("delete-user", help="Delete a kiosk Linux user and its home directory.")
+    kiosk_delete_user.add_argument("--username", required=True)
+
+    kiosk_autologin = kiosk_subcommands.add_parser("autologin", help="Enable or disable GDM auto-login.")
+    kiosk_autologin.add_argument("--username", help="Required with --enable.")
+    kiosk_autologin_group = kiosk_autologin.add_mutually_exclusive_group(required=True)
+    kiosk_autologin_group.add_argument("--enable", action="store_true")
+    kiosk_autologin_group.add_argument("--disable", action="store_true")
+
+    kiosk_session = kiosk_subcommands.add_parser("session-type", help="Set the session type (gnome/openbox) for a kiosk user.")
+    kiosk_session.add_argument("--username", required=True)
+    kiosk_session.add_argument("--type", choices=("gnome", "openbox"), required=True)
+
+    kiosk_autostart = kiosk_subcommands.add_parser("autostart", help="Write kiosk browser autostart files.")
+    kiosk_autostart.add_argument("--username", required=True)
+    kiosk_autostart.add_argument("--home", type=Path, help="Defaults to the user's passwd home directory.")
+    kiosk_autostart.add_argument("--session-type", choices=("gnome", "openbox"), required=True)
+    kiosk_autostart.add_argument("--url", default="http://localhost:8888")
+    kiosk_autostart.add_argument("--restart-delay", type=int, default=2)
+    kiosk_autostart.add_argument("--no-restart", action="store_true", help="Open chromium once instead of a restart loop.")
+
     uninstall = subcommands.add_parser("uninstall", help="Uninstall selected installed components.")
     add_component_arguments(uninstall, (*INSTALL_COMPONENTS, "all"))
     add_lifecycle_arguments(uninstall)
@@ -566,6 +600,70 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 require_linux()
                 require_root()
             manager.unsync(name=args.name)
+            return 0
+
+    if args.command == "kiosk":
+        from features.kiosk.manager import KioskManager, list_kiosk_linux_users, print_kiosk_status
+
+        if args.kiosk_command == "status":
+            print_kiosk_status()
+            return 0
+
+        kiosk_manager = KioskManager(runner)
+
+        if args.kiosk_command == "create-user":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            groups = tuple(g.strip() for g in args.groups.split(",") if g.strip())
+            kiosk_manager.create_user(args.username, extra_groups=groups)
+            return 0
+
+        if args.kiosk_command == "delete-user":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            kiosk_manager.delete_user(args.username)
+            return 0
+
+        if args.kiosk_command == "autologin":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            if args.enable and not args.username:
+                import sys as _sys
+                print("Error: --username is required with --enable", file=_sys.stderr)
+                return 1
+            kiosk_manager.set_autologin(args.username if args.enable else None, enabled=args.enable)
+            return 0
+
+        if args.kiosk_command == "session-type":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            kiosk_manager.set_session_type(args.username, args.type)
+            return 0
+
+        if args.kiosk_command == "autostart":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            home = args.home
+            if home is None:
+                match = next((u for u in list_kiosk_linux_users() if u.username == args.username), None)
+                if match is None:
+                    import sys as _sys
+                    print(f"Error: user not found in passwd: {args.username}", file=_sys.stderr)
+                    return 1
+                home = match.home
+            kiosk_manager.write_autostart(
+                session_type=args.session_type,
+                home=home,
+                username=args.username,
+                url=args.url,
+                restart_enabled=not args.no_restart,
+                restart_delay=args.restart_delay,
+            )
             return 0
 
     if args.command in {"uninstall", "reset"}:
