@@ -1,41 +1,24 @@
 {% extends base_template %}
-{% block page_title %}Pipe Tester — VAS{% endblock %}
-{% block header_title %}Pipe Tester{% endblock %}
-
-{% block header_actions %}
-<span class="cf-zone cf-zone-neutral" id="header-pipe-badge" style="font-size:0.72rem;">
-  <span class="pulse-dot" id="header-pulse" style="display:none;"></span>
-  <span id="header-badge-text">ยังไม่เริ่มอ่าน</span>
-</span>
-{% endblock %}
+{% block page_title %}Named Pipe — VAS{% endblock %}
+{% block header_title %}Named Pipe{% endblock %}
+{% block header_actions %}{% endblock %}
 
 {% block content %}
-<div style="display:flex;flex-direction:column;gap:1rem;max-width:100%;">
 <style>
-.pulse-dot {
-  display: inline-block;
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: rgb(var(--c-safe));
-  margin-right: 5px;
-  animation: pulse-ring 1.6s ease-in-out infinite;
-  vertical-align: middle;
-}
-@keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0 rgb(var(--c-safe)/0.55); opacity:1; }
-  70%  { box-shadow: 0 0 0 6px rgb(var(--c-safe)/0); opacity:0.9; }
-  100% { box-shadow: 0 0 0 0 rgb(var(--c-safe)/0); opacity:1; }
-}
-@keyframes lineFadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
-.pt-line-row { animation: lineFadeIn 0.25s ease-out; }
-.pt-line-row:not(:last-child) { border-bottom: 1px solid rgb(var(--c-line)/0.07); }
-.pt-empty { padding: 2.5rem 1.25rem; text-align: center; color: rgb(var(--c-faint)); font-size: 0.84rem; }
+/* ── Tab panels (Section Menu) ─────────────────────── */
+.tab-panel { display:none; }
+.tab-panel.is-active { display:flex; flex-direction:column; gap:1rem; animation:tabFade 0.15s ease forwards; }
+@keyframes tabFade { from { opacity:0; } to { opacity:1; } }
 
-/* ── Mode button group (preset / custom path) ──────── */
-.pt-mode-btn { padding:.4rem .85rem; border-radius:.4rem; font-size:.78rem; font-weight:600; transition:all .15s; border:1px solid transparent; cursor:pointer; }
-.pt-mode-btn.is-active { background:rgb(var(--c-card)); border-color:rgb(var(--c-line)/0.1); color:rgb(var(--c-accent)); }
-.pt-mode-btn:not(.is-active) { color:rgb(var(--c-muted)); }
-.pt-mode-btn:not(.is-active):hover { color:rgb(var(--c-ink)); }
+/* ── Mode button group (preset / custom path) — สไตล์เดียวกับ scan-mode-btn หน้าอ่าน QR ── */
+.pt-mode-btn {
+  padding:.32rem .7rem; font-size:.74rem; font-weight:600; border-radius:.5rem;
+  border:1px solid rgb(var(--c-line)/0.14); background:rgb(var(--c-card));
+  color:rgb(var(--c-muted)); cursor:pointer; transition:background .15s,color .15s,border-color .15s;
+  font-family:'Bai Jamjuree',sans-serif;
+}
+.pt-mode-btn:hover { background:rgb(var(--c-surface-2)); color:rgb(var(--c-ink)); }
+.pt-mode-btn.is-active { background:rgb(var(--c-accent)/0.08); border-color:rgb(var(--c-accent)/0.4); color:rgb(var(--c-accent)); }
 
 /* ── Spinner (start button loading state) ──────────── */
 .pt-spin {
@@ -44,39 +27,75 @@
   animation:pt-spin .7s linear infinite; flex-shrink:0;
 }
 @keyframes pt-spin { to { transform:rotate(360deg); } }
+
+/* ── Real-time output rows ─────────────────────────── */
+@keyframes pt-line-fade-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+.pt-line-row { animation: pt-line-fade-in 0.25s ease-out; }
+.pt-line-row:not(:last-child) { border-bottom: 1px solid rgb(var(--c-line)/0.07); }
+.pt-empty { padding: 2.5rem 1.25rem; text-align: center; color: rgb(var(--c-faint)); font-size: 0.84rem; }
 </style>
 
-  <!-- ── คำอธิบาย ─────────────────────────────────────── -->
-  <div class="bg-accent/6 border border-accent/18 rounded-lg px-4 py-3 text-[0.8rem] text-ink flex items-start gap-2.5">
-    <svg width="15" height="15" class="flex-shrink-0 mt-0.5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-    </svg>
-    <div>
-      <p class="font-semibold mb-1">หน้าทดสอบ Named Pipe</p>
-      <p class="text-muted leading-relaxed">
-        หน้านี้เปิดอ่าน named pipe (FIFO) ตาม path ที่เลือก แบบ real-time เพื่อทดสอบว่ามีข้อมูลถูกเขียนเข้ามาจริงหรือไม่ —
-        ใช้ได้ทั้งกับ pipe ที่ VAS เขียนเอง (เช่น integration "Pipe I/O" ของ QR500) และ pipe ที่มี third-party process
-        ภายนอกเขียนเข้ามา ไม่ผูกกับฟีเจอร์ใดฟีเจอร์หนึ่งโดยเฉพาะ
-      </p>
-      <p class="text-muted leading-relaxed mt-2">
-        <strong class="text-ink">ข้อควรระวัง:</strong> named pipe ส่งข้อมูลแต่ละบรรทัดให้ "ผู้อ่านคนแรกที่รออยู่" เพียงคนเดียว
-        ถ้ามี process อื่นเปิดอ่าน pipe เดียวกันค้างอยู่พร้อมกัน (เช่น terminal ที่ยังรัน <code class="font-display bg-surface px-1 rounded text-[0.72rem]">cat</code>
-        ค้างไว้จากการทดสอบครั้งก่อน) ข้อมูลอาจไปถึง process นั้นแทนหน้านี้แบบสุ่ม — เช็คได้ด้วย
-        <code class="font-display bg-surface px-1 rounded text-[0.72rem]">sudo lsof /tmp/vas_qr_pipe</code> หรือ
-        <code class="font-display bg-surface px-1 rounded text-[0.72rem]">sudo fuser -v /tmp/vas_qr_pipe</code> ก่อนทดสอบ
-      </p>
-    </div>
+<div class="flex flex-col gap-4">
+
+  <!-- ── Static page header ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · อินทิเกรชัน</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">Named Pipe</h1>
+    <p class="text-[0.82rem] text-muted mt-1">เปิดอ่าน named pipe (FIFO) ตาม path ที่เลือกแบบ real-time เพื่อทดสอบว่ามีข้อมูลถูกเขียนเข้ามาจริงหรือไม่</p>
   </div>
 
-  <!-- ── เลือก Pipe + Start/Stop ──────────────────────── -->
-  <div class="bg-card border border-line/10 rounded-xl">
-    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-      <h2 class="text-[0.9rem] font-semibold text-ink">เลือก Pipe ที่จะทดสอบ</h2>
+  <!-- ── Section menu ── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      <button type="button" data-tab="tab-test" onclick="switchTab('tab-test')"
+              class="tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 bg-accent/8 text-accent font-semibold">
+        <iconify-icon icon="lucide:play-circle" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>ทดสอบอ่าน</span>
+      </button>
+      <button type="button" data-tab="tab-list" onclick="switchTab('tab-list')"
+              class="tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+        <iconify-icon icon="lucide:list" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>รายการ Pipe</span>
+      </button>
+      <button type="button" data-tab="tab-guide" onclick="switchTab('tab-guide')"
+              class="tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+        <iconify-icon icon="lucide:info" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>คำแนะนำ</span>
+      </button>
     </div>
-    <div class="p-5 flex flex-col gap-4">
+  </nav>
+
+  <!-- ── Content ── -->
+
+  <!-- Tab: ทดสอบอ่าน -->
+  <div id="tab-test" class="tab-panel is-active">
+
+    <!-- สถานะปัจจุบัน — compact strip เหมือนหน้า WireGuard -->
+    <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4" id="pt-status-card">
+      <div class="flex items-center gap-2">
+        <iconify-icon icon="lucide:activity" width="14" height="14" class="text-faint"></iconify-icon>
+        <span class="text-[0.78rem] text-muted font-medium">สถานะ:</span>
+        <span class="text-[0.78rem] font-semibold text-muted" id="pt-state-title">ยังไม่เริ่มอ่าน</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <iconify-icon icon="lucide:git-branch" width="14" height="14" class="text-faint"></iconify-icon>
+        <span class="text-[0.78rem] text-muted font-medium">Path:</span>
+        <span class="text-[0.78rem] font-semibold text-ink font-display" id="pt-state-path">—</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <iconify-icon icon="lucide:plug" width="14" height="14" class="text-faint"></iconify-icon>
+        <span class="text-[0.78rem] text-muted font-medium">การเชื่อมต่อ:</span>
+        <span class="text-[0.78rem] font-semibold text-muted" id="pt-state-conn">ยังไม่เชื่อมต่อ</span>
+      </div>
+    </div>
+
+    <!-- เลือก Pipe + Start/Stop -->
+    <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-col gap-4">
+      <h2 class="text-[0.88rem] font-semibold text-ink">เลือก Pipe ที่จะทดสอบ</h2>
+
       <div class="flex flex-col gap-1.5">
-        <label class="text-[0.75rem] font-semibold text-muted">เลือก Pipe</label>
-        <div class="inline-flex items-center gap-1 p-1 bg-surface border border-line/10 rounded-lg w-fit">
+        <label class="text-[0.75rem] font-semibold text-muted">เลือกวิธีระบุ Pipe</label>
+        <div class="flex items-center gap-1.5">
           <button type="button" id="pt-mode-btn-preset" onclick="ptSetMode('preset')" class="pt-mode-btn">Pipe ที่ตั้งค่าไว้แล้ว</button>
           <button type="button" id="pt-mode-btn-custom" onclick="ptSetMode('custom')" class="pt-mode-btn">พิมพ์ path เอง</button>
         </div>
@@ -110,36 +129,101 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
           หยุด
         </button>
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.72rem] font-semibold border" id="pt-state-chip">
-          <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" id="pt-state-dot" style="background:rgb(var(--c-faint));"></span>
-          <span id="pt-state-chip-text">ยังไม่เริ่มอ่าน</span>
-        </span>
-        <span class="text-[0.71rem] text-faint flex-1" id="pt-status-text">ยังไม่ได้เริ่มอ่าน pipe ใดๆ</span>
       </div>
 
       <div class="flex flex-col gap-1.5" id="pt-manual-hint" style="display:none;">
         <label class="text-[0.75rem] font-semibold text-muted">ทดสอบเขียนค่าเข้า pipe นี้จาก terminal (ไม่ต้องรอ hardware จริง)</label>
-        <pre class="payload-box" id="pt-manual-cmd" style="white-space:pre-wrap;word-break:break-all;padding:0.6rem 0.75rem;border:1px solid rgb(var(--c-line)/0.12);border-radius:0.5rem;background:rgb(var(--c-surface));font-family:'Bai Jamjuree',monospace;font-size:0.76rem;color:rgb(var(--c-muted));"></pre>
+        <pre id="pt-manual-cmd" style="white-space:pre-wrap;word-break:break-all;padding:0.6rem 0.75rem;border:1px solid rgb(var(--c-line)/0.12);border-radius:0.5rem;background:rgb(var(--c-surface));font-family:'Bai Jamjuree',monospace;font-size:0.76rem;color:rgb(var(--c-muted));"></pre>
       </div>
     </div>
+
+    <!-- ผลลัพธ์แบบ real-time -->
+    <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-4">
+        <h2 class="text-[0.88rem] font-semibold text-ink">ค่าที่อ่านได้ (real-time)</h2>
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-accent/10 border border-accent/20 text-accent font-display tabular-nums" id="pt-count-badge">0</span>
+          <button onclick="ptClear()" class="inline-flex items-center px-2.5 py-1 border border-line/15 rounded-md bg-card text-ink text-[0.75rem] font-semibold hover:bg-surface transition-colors">ล้าง</button>
+        </div>
+      </div>
+      <div id="pt-line-list" class="border-t border-line/10">
+        <div class="pt-empty" id="pt-empty">ยังไม่มีข้อมูล — กด "เริ่มอ่าน" แล้วรอ writer เขียนเข้ามา</div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- ── ผลลัพธ์แบบ real-time ─────────────────────────── -->
-  <div class="bg-card border border-line/10 rounded-xl">
-    <div class="flex items-center justify-between px-5 py-3 border-b border-line/10">
-      <h2 class="text-[0.9rem] font-semibold text-ink">ค่าที่อ่านได้ (real-time)</h2>
-      <div class="flex items-center gap-2">
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold bg-accent/10 border border-accent/20 text-accent font-display tabular-nums" id="pt-count-badge">0</span>
-        <button onclick="ptClear()" class="inline-flex items-center px-2.5 py-1 border border-line/15 rounded-md bg-card text-ink text-[0.75rem] font-semibold hover:bg-surface transition-colors">ล้าง</button>
+  <!-- Tab: รายการ Pipe -->
+  <div id="tab-list" class="tab-panel">
+
+    <!-- Pipe ที่ VAS ตั้งค่าไว้ -->
+    <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-4">
+        <h2 class="text-[0.88rem] font-semibold text-ink">Pipe ที่ VAS ตั้งค่าไว้</h2>
+        <span class="text-[0.7rem] text-faint">จาก integration ในระบบ ({{ known_pipes | length }})</span>
+      </div>
+      <div class="border-t border-line/10 divide-y divide-line/7">
+        {% for p in known_pipes %}
+        <div class="flex items-center justify-between gap-3 px-4 py-2.5">
+          <div class="min-w-0 flex-1">
+            <p class="text-[0.82rem] font-semibold text-ink truncate">{{ p.device_id }}</p>
+            <p class="text-[0.72rem] text-faint font-display mt-0.5 truncate">{{ p.path or '/tmp/vas_qr_pipe' }}</p>
+          </div>
+          <span class="text-[0.7rem] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 {{ 'bg-safe/10 text-safe' if p.enabled else 'bg-line/8 text-faint' }}">
+            {{ 'enabled' if p.enabled else 'disabled' }}
+          </span>
+          <button type="button" onclick="ptTestPipe({{ (p.path or '/tmp/vas_qr_pipe') | tojson }})" class="pt-mode-btn flex-shrink-0">ทดสอบ</button>
+        </div>
+        {% else %}
+        <div class="pt-empty">ยังไม่มี pipe ที่ตั้งค่าไว้ในระบบ</div>
+        {% endfor %}
       </div>
     </div>
-    <div id="pt-line-list">
-      <div class="pt-empty" id="pt-empty">ยังไม่มีข้อมูล — กด "เริ่มอ่าน" แล้วรอ writer เขียนเข้ามา</div>
+
+    <!-- Pipe อื่นๆ ที่พบในระบบ (สแกนจาก /tmp, /var/run, /run) -->
+    <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-4">
+        <h2 class="text-[0.88rem] font-semibold text-ink">Pipe อื่นๆ ที่พบในระบบ</h2>
+        <button type="button" onclick="loadSystemPipes()" class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-line/15 rounded-md bg-card text-ink text-[0.75rem] font-semibold hover:bg-surface transition-colors">
+          <iconify-icon icon="lucide:refresh-cw" width="12" height="12"></iconify-icon>
+          สแกนใหม่
+        </button>
+      </div>
+      <div id="pt-scan-list" class="border-t border-line/10 divide-y divide-line/7">
+        <div class="pt-empty">กำลังสแกน...</div>
+      </div>
+      <p class="text-[0.7rem] text-faint px-4 pb-3">สแกนจาก /tmp, /var/run, /run — อาจไม่เจอ pipe ที่อยู่ใน path อื่นหรือไม่มีสิทธิ์อ่าน</p>
+    </div>
+
+  </div>
+
+  <!-- Tab: คำแนะนำ -->
+  <div id="tab-guide" class="tab-panel">
+    <div class="bg-caution/10 border border-caution/25 rounded-lg px-4 py-4 text-[0.8rem] text-ink flex items-start gap-2.5">
+      <svg width="15" height="15" class="flex-shrink-0 mt-0.5" style="color:#92660b;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+      </svg>
+      <div>
+        <p class="font-semibold mb-1">หน้าทดสอบ Named Pipe</p>
+        <p class="text-muted leading-relaxed">
+          ใช้ได้ทั้งกับ pipe ที่ VAS เขียนเอง (เช่น integration "Pipe I/O" ของ QR500) และ pipe ที่มี third-party process
+          ภายนอกเขียนเข้ามา ไม่ผูกกับฟีเจอร์ใดฟีเจอร์หนึ่งโดยเฉพาะ
+        </p>
+        <p class="text-muted leading-relaxed mt-2">
+          <strong class="text-ink">ข้อควรระวัง:</strong> named pipe ส่งข้อมูลแต่ละบรรทัดให้ "ผู้อ่านคนแรกที่รออยู่" เพียงคนเดียว
+          ถ้ามี process อื่นเปิดอ่าน pipe เดียวกันค้างอยู่พร้อมกัน (เช่น terminal ที่ยังรัน <code class="font-display bg-surface px-1 rounded text-[0.72rem]">cat</code>
+          ค้างไว้จากการทดสอบครั้งก่อน) ข้อมูลอาจไปถึง process นั้นแทนหน้านี้แบบสุ่ม — เช็คได้ด้วย
+          <code class="font-display bg-surface px-1 rounded text-[0.72rem]">sudo lsof /tmp/vas_qr_pipe</code> หรือ
+          <code class="font-display bg-surface px-1 rounded text-[0.72rem]">sudo fuser -v /tmp/vas_qr_pipe</code> ก่อนทดสอบ
+        </p>
+      </div>
     </div>
   </div>
 
 </div>
+{% endblock %}
 
+{% block extra_scripts %}
 <script>
 (function () {
   var ptEs = null;
@@ -149,19 +233,39 @@
   var ptCount = 0;
   var MAX_ROWS = 200;
 
+  var scanLoaded = false;
+
+  window.switchTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var panel = document.getElementById(id);
+    if (panel) panel.classList.add("is-active");
+
+    document.querySelectorAll(".tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent/8", on);
+      btn.classList.toggle("text-accent", on);
+      btn.classList.toggle("font-semibold", on);
+      btn.classList.toggle("text-muted", !on);
+      btn.classList.toggle("hover:bg-line/6", !on);
+      btn.classList.toggle("hover:text-ink", !on);
+    });
+
+    // โหลดรายการ pipe ที่สแกนจากระบบแบบ lazy — โหลดครั้งแรกที่เปิดแท็บนี้เท่านั้น
+    if (id === "tab-list" && !scanLoaded) {
+      scanLoaded = true;
+      loadSystemPipes();
+    }
+  };
+
   var selectEl = document.getElementById('pt-known-select');
   var pathEl   = document.getElementById('pt-path-input');
   var btnStart = document.getElementById('pt-btn-start');
   var btnStop  = document.getElementById('pt-btn-stop');
   var startIcon  = document.getElementById('pt-btn-start-icon');
   var startLabel = document.getElementById('pt-btn-start-label');
-  var statusEl = document.getElementById('pt-status-text');
-  var stateChip     = document.getElementById('pt-state-chip');
-  var stateChipDot  = document.getElementById('pt-state-dot');
-  var stateChipText = document.getElementById('pt-state-chip-text');
-  var badgeWrap  = document.getElementById('header-pipe-badge');
-  var badgeText  = document.getElementById('header-badge-text');
-  var pulseDot   = document.getElementById('header-pulse');
+  var stateTitle = document.getElementById('pt-state-title');
+  var statePath  = document.getElementById('pt-state-path');
+  var stateConn  = document.getElementById('pt-state-conn');
   var manualHint = document.getElementById('pt-manual-hint');
   var manualCmd  = document.getElementById('pt-manual-cmd');
   var modeBtnPreset = document.getElementById('pt-mode-btn-preset');
@@ -190,30 +294,15 @@
     manualHint.style.display = '';
   }
 
-  function setHeaderBadge(state, text) {
-    badgeText.textContent = text;
-    var cls = 'cf-zone ';
-    if (state === 'running')      { cls += 'cf-zone-safe';    pulseDot.style.display = 'inline-block'; }
-    else if (state === 'waiting') { cls += 'cf-zone-caution'; pulseDot.style.display = 'none'; }
-    else if (state === 'error')   { cls += 'cf-zone-danger';  pulseDot.style.display = 'none'; }
-    else                          { cls += 'cf-zone-neutral'; pulseDot.style.display = 'none'; }
-    badgeWrap.className = cls;
-    badgeWrap.style.fontSize = '0.72rem';
+  /* สถานะการอ่าน — แสดงเป็น status strip แบบเดียวกับหน้า WireGuard (ย้ายมาจาก header badge เดิม) */
+  var STATE_COLOR_CLASS = { idle: 'text-muted', waiting: 'text-caution', running: 'text-safe', error: 'text-danger' };
+  function setColorClass(el, state) {
+    el.classList.remove('text-muted', 'text-caution', 'text-safe', 'text-danger');
+    el.classList.add(STATE_COLOR_CLASS[state] || 'text-muted');
   }
-
-  /* state chip ข้างปุ่ม เริ่มอ่าน/หยุด — โชว์ชัดๆ ว่าตอนนี้ "เริ่มไปแล้วหรือยัง" แยกจาก
-     header badge เพราะอันนั้นอยู่ไกล อาจมองไม่เห็นตอนโฟกัสอยู่ที่ปุ่ม */
-  var STATE_CHIP_CLASS = {
-    idle:    'bg-surface border-line/15 text-muted',
-    waiting: 'bg-caution/10 border-caution/25 text-[#92660b]',
-    running: 'bg-safe/10 border-safe/25 text-safe',
-    error:   'bg-danger/10 border-danger/25 text-danger',
-  };
-  var STATE_CHIP_DOT = { idle: 'rgb(var(--c-faint))', waiting: '#eab308', running: '#10b981', error: '#ef4444' };
-  function setStateChip(state, text) {
-    stateChip.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.72rem] font-semibold border ' + (STATE_CHIP_CLASS[state] || STATE_CHIP_CLASS.idle);
-    stateChipDot.style.background = STATE_CHIP_DOT[state] || STATE_CHIP_DOT.idle;
-    stateChipText.textContent = text;
+  function setStatusCard(state, title) {
+    stateTitle.textContent = title;
+    setColorClass(stateTitle, state);
   }
 
   function setStartButtonBusy(busy) {
@@ -271,13 +360,59 @@
     document.getElementById('pt-count-badge').textContent = '0';
   };
 
+  // เลือก path จากแท็บ "รายการ Pipe" แล้วสลับไปเตรียมทดสอบที่แท็บ "ทดสอบอ่าน" ทันที
+  // (ไม่ auto-start ให้ — เผื่อ user อยากเช็ค lsof/fuser ก่อนตามคำแนะนำในแท็บ "คำแนะนำ")
+  window.ptTestPipe = function (path) {
+    window.ptSetMode('custom');
+    pathEl.value = path;
+    updateManualHint(path);
+    window.switchTab('tab-test');
+    showToast('เลือก path ' + path + ' แล้ว — กด "เริ่มอ่าน" เพื่อทดสอบ', 'success');
+  };
+
+  window.loadSystemPipes = function () {
+    var container = document.getElementById('pt-scan-list');
+    container.innerHTML = '<div class="pt-empty">กำลังสแกน...</div>';
+    fetch('/api/pipes/scan')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status !== 'ok') {
+          container.innerHTML = '<div class="pt-empty">สแกนไม่สำเร็จ: ' + escapeHtml(data.error || 'unknown') + '</div>';
+          return;
+        }
+        var pipes = data.pipes || [];
+        if (!pipes.length) {
+          container.innerHTML = '<div class="pt-empty">ไม่พบ named pipe อื่นในระบบ (นอกเหนือจากที่ตั้งค่าไว้ด้านบน)</div>';
+          return;
+        }
+        container.innerHTML = '';
+        pipes.forEach(function (p) {
+          var mtimeStr = '';
+          try { mtimeStr = new Date(p.mtime * 1000).toLocaleString('th-TH'); } catch (e) {}
+          var row = document.createElement('div');
+          row.className = 'flex items-center justify-between gap-3 px-4 py-2.5';
+          row.innerHTML =
+            '<div class="min-w-0 flex-1">' +
+              '<p class="text-[0.82rem] font-display font-semibold text-ink truncate">' + escapeHtml(p.path) + '</p>' +
+              '<p class="text-[0.72rem] text-faint mt-0.5">mode ' + escapeHtml(p.mode) + (mtimeStr ? ' · แก้ไขล่าสุด ' + mtimeStr : '') + '</p>' +
+            '</div>' +
+            '<button type="button" class="pt-mode-btn flex-shrink-0">ทดสอบ</button>';
+          row.querySelector('button').addEventListener('click', function () { window.ptTestPipe(p.path); });
+          container.appendChild(row);
+        });
+      })
+      .catch(function (e) {
+        container.innerHTML = '<div class="pt-empty">สแกนไม่สำเร็จ: ' + escapeHtml(String(e)) + '</div>';
+      });
+  };
+
   function addLine(line, ts) {
     var list = document.getElementById('pt-line-list');
     var empty = document.getElementById('pt-empty');
     if (empty) empty.remove();
 
     var row = document.createElement('div');
-    row.className = 'pt-line-row px-5 py-2.5 flex items-center gap-3';
+    row.className = 'pt-line-row px-4 py-2.5 flex items-center gap-3';
     var timeStr = '';
     try { timeStr = new Date(ts).toLocaleTimeString('th-TH', { hour12: false }); } catch (e) { timeStr = ts; }
     row.innerHTML =
@@ -302,24 +437,26 @@
     setStartButtonBusy(ptStarting);  // อัปเดต disabled ของปุ่มเริ่มตาม ptRunning ล่าสุดเสมอ
 
     if (!ptRunning) {
-      setHeaderBadge('idle', 'ยังไม่เริ่มอ่าน');
-      setStateChip('idle', 'ยังไม่เริ่มอ่าน');
-      statusEl.textContent = 'ยังไม่ได้เริ่มอ่าน pipe ใดๆ';
+      setStatusCard('idle', 'ยังไม่เริ่มอ่าน');
+      statePath.textContent = '—';
+      stateConn.textContent = 'ยังไม่เชื่อมต่อ';
+      setColorClass(stateConn, 'idle');
       return;
     }
     if (s.path) { pathEl.value = s.path; updateManualHint(s.path); }
+    statePath.textContent = s.path || '—';
     if (s.error) {
-      setHeaderBadge('error', 'Error');
-      setStateChip('error', 'Error');
-      statusEl.textContent = 'เกิดข้อผิดพลาด: ' + s.error;
+      setStatusCard('error', 'เกิดข้อผิดพลาด');
+      stateConn.textContent = s.error;
+      setColorClass(stateConn, 'error');
     } else if (s.connected) {
-      setHeaderBadge('running', 'กำลังอ่าน · ' + s.path);
-      setStateChip('running', 'กำลังอ่าน · เชื่อมต่อแล้ว');
-      statusEl.textContent = 'เปิด pipe อยู่ที่ ' + s.path + ' — พร้อมรับข้อมูล';
+      setStatusCard('running', 'กำลังอ่าน');
+      stateConn.textContent = 'เชื่อมต่อแล้ว';
+      setColorClass(stateConn, 'running');
     } else {
-      setHeaderBadge('waiting', 'รอ writer · ' + s.path);
-      setStateChip('waiting', 'เริ่มแล้ว · รอ writer');
-      statusEl.textContent = 'เปิด pipe ที่ ' + s.path + ' แล้ว รอ process อื่นเขียนเข้ามา...';
+      setStatusCard('waiting', 'เริ่มแล้ว · รอ writer');
+      stateConn.textContent = 'รอ writer เชื่อมต่อ';
+      setColorClass(stateConn, 'waiting');
     }
   }
 
@@ -342,6 +479,12 @@
 
   // เชื่อม SSE ทันทีตอนโหลดหน้า เผื่อมี reader รันค้างอยู่แล้วจาก session อื่น
   connectStream();
+
+  // ปิด SSE connection ตอนออกจากหน้า (SPA navigation ไม่ได้ reload หน้าเต็ม)
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () {
+    if (ptEs) { ptEs.close(); ptEs = null; }
+  });
 })();
 </script>
 {% endblock %}

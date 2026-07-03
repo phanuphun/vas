@@ -1506,9 +1506,23 @@ def create_app() -> Flask:
 
     @app.get("/api/pipes")
     def pipes_list_api() -> dict[str, object]:
-        """รายการ pipe ที่ตั้งค่าไว้แล้วในระบบ (ทุก device) — ใช้เติม dropdown ในหน้า Pipe Tester"""
+        """รายการ pipe ที่ตั้งค่าไว้แล้วในระบบ (ทุก device) — ใช้เติม dropdown ในหน้า Named Pipe"""
         from core.database import list_pipe_integrations
         return {"status": "ok", "pipes": list_pipe_integrations()}
+
+    @app.get("/api/pipes/scan")
+    def pipes_scan_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        """
+        สแกนหา FIFO ทั้งหมดในระบบ (/tmp, /var/run, /run) — ใช้กับแท็บ "รายการ Pipe"
+        เพื่อ debug ว่ามี pipe อะไรอยู่บ้างนอกเหนือจากที่ VAS ตั้งค่าไว้เอง (เช่น third-party เขียนเข้ามา)
+        """
+        from features.qr.pipe_io import scan_system_fifos
+        try:
+            return {"status": "ok", "pipes": scan_system_fifos()}
+        except Exception as e:  # noqa: BLE001 — กัน raw 500 HTML แบบเดียวกับ endpoint อื่นในหน้านี้
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "error": f"{type(e).__name__}: {e}"}, 500
 
     @app.post("/api/pipe/start")
     def pipe_start_api() -> tuple[dict[str, object], int] | dict[str, object]:

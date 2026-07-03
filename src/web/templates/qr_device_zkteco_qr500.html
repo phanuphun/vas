@@ -73,13 +73,15 @@
   /* ── Pipeline chip flash ───────────────────── */
   #pipeline-chips span { transition: background 0.2s, transform 0.2s; }
 
-  /* ── Toggle switch ─────────────────────────── */
-  .toggle-switch { position:relative; display:inline-flex; align-items:center; gap:.5rem; cursor:pointer; }
-  .toggle-switch input { position:absolute; opacity:0; width:0; height:0; }
-  .toggle-track { width:36px; height:20px; border-radius:10px; background:rgb(var(--c-faint)/0.4); transition:background .2s; border:1px solid rgb(var(--c-line)/0.14); position:relative; }
-  .toggle-switch input:checked + .toggle-track { background:rgb(var(--c-safe)); border-color:rgb(var(--c-safe)); }
-  .toggle-thumb { position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.15); transition:left .2s; }
-  .toggle-switch input:checked + .toggle-track .toggle-thumb { left:18px; }
+  /* ── Expand/collapse button (แยกออกจาก enabled/disabled แล้ว — ดู integ-header) ── */
+  .integ-expand-btn {
+    width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+    border:1px solid rgb(var(--c-line)/0.12); border-radius:.4rem; background:rgb(var(--c-card));
+    color:rgb(var(--c-muted)); cursor:pointer; transition:background .15s, color .15s; flex-shrink:0;
+  }
+  .integ-expand-btn:hover { background:rgb(var(--c-surface)); color:rgb(var(--c-ink)); }
+  .integ-expand-btn svg { transition:transform .2s; }
+  .integ-expand-btn.is-expanded svg { transform:rotate(180deg); }
 
   /* ── Integration cards ─────────────────────── */
   .integ-card { border:1px solid rgb(var(--c-line)/0.10); border-radius:.75rem; background:rgb(var(--c-card)); overflow:hidden; }
@@ -451,11 +453,16 @@
         <h3 class="text-[0.88rem] font-semibold text-ink">Webhook</h3>
         <p class="text-[0.72rem] text-faint mt-0.5">ส่ง HTTP request ไปยัง URL ที่กำหนด เมื่ออ่าน QR ได้</p>
       </div>
-      <label class="toggle-switch flex-shrink-0">
-        <input type="checkbox" id="toggle-webhook" onchange="toggleInteg('webhook', this.checked)"
-               {{ 'checked' if integrations.webhook.enabled else '' }}>
-        <div class="toggle-track"><div class="toggle-thumb"></div></div>
-      </label>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <span id="status-badge-webhook"
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-semibold border {{ 'bg-safe/10 border-safe/25 text-safe' if integrations.webhook.enabled else 'bg-surface border-line/15 text-muted' }}">
+          {{ 'เปิดใช้งาน' if integrations.webhook.enabled else 'ปิดใช้งาน' }}
+        </span>
+        <button type="button" id="expand-btn-webhook" onclick="toggleInteg('webhook')" aria-label="ขยาย/ย่อ"
+                class="integ-expand-btn {{ 'is-expanded' if integrations.webhook.enabled else '' }}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
     </div>
     <div class="integ-body {{ '' if integrations.webhook.enabled else 'is-hidden' }}" id="body-webhook">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -500,7 +507,12 @@
   "source": "zkteco-qr500"
 }</pre>
       </div>
-      <div class="flex justify-end">
+      <div class="flex items-center justify-end gap-2">
+        <button onclick="disableInteg('webhook')" type="button"
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          ปิดใช้งาน
+        </button>
         <button onclick="saveInteg('webhook')"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -525,11 +537,16 @@
         <h3 class="text-[0.88rem] font-semibold text-ink">MQTT Publish</h3>
         <p class="text-[0.72rem] text-faint mt-0.5">ส่งข้อมูลไปยัง MQTT Broker เมื่ออ่าน QR ได้</p>
       </div>
-      <label class="toggle-switch flex-shrink-0">
-        <input type="checkbox" id="toggle-mqtt" onchange="toggleInteg('mqtt', this.checked)"
-               {{ 'checked' if integrations.mqtt.enabled else '' }}>
-        <div class="toggle-track"><div class="toggle-thumb"></div></div>
-      </label>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <span id="status-badge-mqtt"
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-semibold border {{ 'bg-safe/10 border-safe/25 text-safe' if integrations.mqtt.enabled else 'bg-surface border-line/15 text-muted' }}">
+          {{ 'เปิดใช้งาน' if integrations.mqtt.enabled else 'ปิดใช้งาน' }}
+        </span>
+        <button type="button" id="expand-btn-mqtt" onclick="toggleInteg('mqtt')" aria-label="ขยาย/ย่อ"
+                class="integ-expand-btn {{ 'is-expanded' if integrations.mqtt.enabled else '' }}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
     </div>
     <div class="integ-body {{ '' if integrations.mqtt.enabled else 'is-hidden' }}" id="body-mqtt">
       <div class="flex flex-col gap-1.5">
@@ -587,7 +604,12 @@
                   class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.75rem] font-mono leading-relaxed outline-none resize-y cursor-default select-all"></textarea>
         <p class="text-[0.72rem] text-faint mt-0.5">รูปแบบ payload จริงมาจาก <code class="font-display bg-surface px-1 rounded text-[0.68rem]">publish_qr_scan()</code> — กดปุ่มด้านบนเพื่อดูตัวอย่างของแต่ละโหมด</p>
       </div>
-      <div class="flex justify-end">
+      <div class="flex items-center justify-end gap-2">
+        <button onclick="disableInteg('mqtt')" type="button"
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          ปิดใช้งาน
+        </button>
         <button onclick="saveInteg('mqtt')"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -613,11 +635,16 @@
         <h3 class="text-[0.88rem] font-semibold text-ink">Named Pipe (I/O)</h3>
         <p class="text-[0.72rem] text-faint mt-0.5">เขียนข้อมูลลง named pipe เพื่อให้ process อื่นอ่านได้</p>
       </div>
-      <label class="toggle-switch flex-shrink-0">
-        <input type="checkbox" id="toggle-pipe" onchange="toggleInteg('pipe', this.checked)"
-               {{ 'checked' if integrations.pipe.enabled else '' }}>
-        <div class="toggle-track"><div class="toggle-thumb"></div></div>
-      </label>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <span id="status-badge-pipe"
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-semibold border {{ 'bg-safe/10 border-safe/25 text-safe' if integrations.pipe.enabled else 'bg-surface border-line/15 text-muted' }}">
+          {{ 'เปิดใช้งาน' if integrations.pipe.enabled else 'ปิดใช้งาน' }}
+        </span>
+        <button type="button" id="expand-btn-pipe" onclick="toggleInteg('pipe')" aria-label="ขยาย/ย่อ"
+                class="integ-expand-btn {{ 'is-expanded' if integrations.pipe.enabled else '' }}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
     </div>
     <div class="integ-body {{ '' if integrations.pipe.enabled else 'is-hidden' }}" id="body-pipe">
       <div class="bg-accent/6 border border-accent/18 rounded-lg px-4 py-3 text-[0.8rem] text-ink">
@@ -645,6 +672,11 @@
           สร้าง Pipe ตอนนี้
         </button>
         <span class="text-[0.71rem] text-faint flex-1">VAS สร้าง pipe อัตโนมัติเมื่อ start reader</span>
+        <button onclick="disableInteg('pipe')" type="button"
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          ปิดใช้งาน
+        </button>
         <button onclick="saveInteg('pipe')"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1348,15 +1380,21 @@
     if (mqttEl)  mqttEl.style.display  = view === 'mqtt'  ? 'flex' : 'none';
   };
 
-  /* ══ Toggle integration ══════════════════════════════════════════════════ */
-  window.toggleInteg = function (type, enabled) {
+  /* ══ Expand/collapse (แยกออกจาก enabled/disabled แล้ว — แค่ show/hide panel เฉยๆ
+     ไม่แตะ server เลย ต่างจาก toggle-switch เดิมที่หน้าตาเหมือน enable/disable
+     แต่จริงๆ ไม่เคยส่งค่าไป save เลย ต้องกด "บันทึก"/"ปิดใช้งาน" ถึงจะมีผลจริง) ══ */
+  window.toggleInteg = function (type) {
     var body = document.getElementById('body-' + type);
-    if (body) body.classList.toggle('is-hidden', !enabled);
+    var btn  = document.getElementById('expand-btn-' + type);
+    if (!body) return;
+    var nowHidden = body.classList.toggle('is-hidden');
+    if (btn) btn.classList.toggle('is-expanded', !nowHidden);
   };
 
-  /* ══ Save integration ════════════════════════════════════════════════════ */
-  window.saveInteg = function (type) {
-    var payload = { type: type, enabled: true };
+  /* รวบ field เฉพาะประเภทของแต่ละ integration — ใช้ร่วมกันระหว่าง save (enabled=true)
+     กับ disable (enabled=false) ไม่ให้ค่าที่กรอกไว้ (path/topic/url ฯลฯ) หายตอนกด "ปิดใช้งาน" */
+  function buildIntegPayload(type) {
+    var payload = { type: type };
     if (type === 'webhook') {
       payload.url         = (document.getElementById('webhook-url')     || {}).value || '';
       payload.method      = (document.getElementById('webhook-method')  || {}).value || 'POST';
@@ -1370,6 +1408,20 @@
     } else if (type === 'pipe') {
       payload.path = (document.getElementById('pipe-path') || {}).value || '/tmp/vas_qr_pipe';
     }
+    return payload;
+  }
+
+  function updateStatusBadge(type, enabled) {
+    var el = document.getElementById('status-badge-' + type);
+    if (!el) return;
+    el.textContent = enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน';
+    el.className = 'inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-semibold border ' +
+      (enabled ? 'bg-safe/10 border-safe/25 text-safe' : 'bg-surface border-line/15 text-muted');
+  }
+
+  function postInteg(type, enabled, successMsg) {
+    var payload = buildIntegPayload(type);
+    payload.enabled = enabled;
     fetch('/api/qr/integrations/' + type, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1378,8 +1430,9 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.status === 'ok') {
-          showToast('บันทึก ' + type + ' เรียบร้อย', 'success');
-          integState[type] = true;
+          showToast(successMsg, 'success');
+          integState[type] = enabled;
+          updateStatusBadge(type, enabled);
           updateIntegBadge(data.integration_count);
           initFlowPipeline();
         } else {
@@ -1387,6 +1440,17 @@
         }
       })
       .catch(function (e) { showToast('Error: ' + e, 'error'); });
+  }
+
+  /* ══ Save (= บันทึกค่า + เปิดใช้งาน) ═════════════════════════════════════ */
+  window.saveInteg = function (type) {
+    postInteg(type, true, 'บันทึก ' + type + ' เรียบร้อย');
+  };
+
+  /* ══ Disable (= ปิดใช้งานจริง ผูกกับ server ตรงๆ ไม่ใช่แค่ย่อ panel เหมือน toggle
+     เดิม) — เก็บค่า field อื่นๆ ไว้เหมือนเดิม เปลี่ยนแค่ enabled=false ═══════════ */
+  window.disableInteg = function (type) {
+    postInteg(type, false, 'ปิดใช้งาน ' + type + ' แล้ว');
   };
 
   /* ══ Create named pipe ═══════════════════════════════════════════════════ */

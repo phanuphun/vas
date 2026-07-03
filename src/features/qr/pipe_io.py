@@ -274,3 +274,60 @@ def stop_pipe_reader() -> None:
     if r is not None:
         r.stop()
         r.join(timeout=2.0)
+
+
+# ── System-wide FIFO scan (หน้า "รายการ Pipe" ใน Named Pipe) ────────────────
+
+
+DEFAULT_SCAN_DIRS = ["/tmp", "/var/run", "/run"]
+
+
+def scan_system_fifos(
+    search_dirs: list[str] | None = None,
+    max_depth: int = 3,
+    max_results: int = 200,
+) -> list[dict[str, Any]]:
+    """
+    สแกนหา named pipe (FIFO) ทั้งหมดที่พบในระบบ ภายใต้ path ที่กำหนด
+    (default: /tmp, /var/run, /run) — ใช้สำหรับหน้า "รายการ Pipe" เพื่อ debug ว่ามี
+    pipe อะไรอยู่ในระบบบ้าง ไม่ว่าจะเป็นของ VAS เองหรือของ third-party process
+
+    ไม่รับประกันว่าจะเจอทุกตัว — ข้าม path ที่ไม่มีสิทธิ์อ่าน (root-owned dirs ฯลฯ)
+    เงียบๆ และจำกัดความลึก/จำนวนผลลัพธ์กันสแกนนานหรือกิน resource เกินจำเป็น
+    """
+    if search_dirs is None:
+        search_dirs = DEFAULT_SCAN_DIRS
+
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for base in search_dirs:
+        if not os.path.isdir(base):
+            continue
+        base_depth = base.rstrip("/").count("/")
+        for root, dirs, files in os.walk(base, topdown=True, onerror=lambda _e: None):
+            depth = root.rstrip("/").count("/") - base_depth
+            if depth >= max_depth:
+                dirs[:] = []  # ไม่ลงลึกไปกว่านี้
+
+            for name in files:
+                full = os.path.join(root, name)
+                # /var/run มักเป็น symlink ไป /run — resolve ก่อนกันเจอ pipe เดียวกันซ้ำสองแถว
+                real = os.path.realpath(full)
+                if real in seen:
+                    continue
+                seen.add(real)
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                if not stat.S_ISFIFO(st.st_mode):
+                    continue
+                results.append({
+                    "path": full,
+                    "mode": oct(stat.S_IMODE(st.st_mode)),
+                    "mtime": st.st_mtime,
+                })
+                if len(results) >= max_results:
+                    return results
+    return results
