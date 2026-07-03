@@ -20,7 +20,6 @@ from __future__ import annotations
 import os
 import select
 import threading
-import time
 from typing import Any
 
 _ENXIO = 6  # errno: "No such device or address" — ไม่มี reader เปิด pipe รออยู่ฝั่งตรงข้าม
@@ -48,11 +47,14 @@ def write_line_to_pipe(path: str, line: str) -> dict[str, Any]:
     try:
         if not os.path.exists(path):
             os.mkfifo(path, 0o666)
+            os.chmod(path, 0o666)  # umask กรอง mode ที่ mkfifo() ขอไว้ — chmod ซ้ำให้ชัวร์
         elif not os.path.isfifo(path):
             status["error"] = f"{path} มีอยู่แล้วแต่ไม่ใช่ pipe"
             return status
+    except FileExistsError:
+        pass  # race: อีก thread/request สร้างไปแล้ว — ไม่ใช่ error จริง
     except OSError as e:
-        status["error"] = str(e)
+        status["error"] = f"{type(e).__name__}: {e}"
         return status
 
     fd = None
@@ -124,13 +126,16 @@ class PipeReaderThread(threading.Thread):
         try:
             if not os.path.exists(self.path):
                 os.mkfifo(self.path, 0o666)
+                os.chmod(self.path, 0o666)  # umask กรอง mode ที่ mkfifo() ขอไว้ — chmod ซ้ำให้ชัวร์
             elif not os.path.isfifo(self.path):
                 with self._lock:
                     self._error = f"{self.path} มีอยู่แล้วแต่ไม่ใช่ pipe"
                 return
+        except FileExistsError:
+            pass  # race: ถูกสร้างไปแล้วโดย thread/request อื่น — ไม่ใช่ error จริง
         except OSError as e:
             with self._lock:
-                self._error = str(e)
+                self._error = f"{type(e).__name__}: {e}"
             return
 
         buf = b""
@@ -145,8 +150,9 @@ class PipeReaderThread(threading.Thread):
                             self._error = None
                     except OSError as e:
                         with self._lock:
-                            self._error = str(e)
-                        time.sleep(1.0)
+                            self._error = f"{type(e).__name__}: {e}"
+                        if self._stop_event.wait(1.0):
+                            break
                         continue
 
                 try:
@@ -162,17 +168,22 @@ class PipeReaderThread(threading.Thread):
                     continue
                 except OSError as e:
                     with self._lock:
-                        self._error = str(e)
+                        self._error = f"{type(e).__name__}: {e}"
                     os.close(fd)
                     fd = None
                     continue
 
                 if chunk == b"":
-                    # EOF — writer ฝั่งตรงข้ามปิด fd ไปแล้ว ปิด fd นี้แล้วเปิดใหม่รอ writer ถัดไป
+                    # EOF — คืนค่าทันทีทั้งตอน "เพิ่งมี writer ปิด fd ไป" และตอน "ยังไม่เคยมี
+                    # writer เลย" (สอง state นี้แยกไม่ออกจาก read() เฉยๆ) ปิด fd นี้แล้วเปิดใหม่
+                    # เพื่อรอ writer ถัดไป — หน่วงสั้นๆ ก่อน reopen กัน busy-loop กิน CPU 100%
+                    # ตอนยังไม่มี writer เลย (ไม่งั้น open→EOF→close จะวนรัวๆ ไม่มีการพัก)
                     os.close(fd)
                     fd = None
                     with self._lock:
                         self._connected = False
+                    if self._stop_event.wait(0.15):
+                        break
                     continue
 
                 buf += chunk

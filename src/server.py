@@ -1543,10 +1543,17 @@ def create_app() -> Flask:
         try:
             if not _os.path.exists(path):
                 _os.mkfifo(path, 0o666)
+                # mkfifo(mode) ถูก umask ของ process กรอง (ปกติ umask=022 ทำให้ได้ 644 จริง
+                # ไม่ใช่ 666 ตามที่ขอ) — chmod ซ้ำให้ชัวร์ว่า process อื่น (ไม่ว่า user ไหน)
+                # เปิดอ่าน/เขียน pipe นี้ได้จริง ไม่ติด permission แม้ VAS จะรันเป็น root ก็ตาม
+                _os.chmod(path, 0o666)
             elif not _os.path.isfifo(path):
                 return {"status": "error", "error": f"{path} exists but is not a pipe"}, 400
+        except FileExistsError:
+            # race: อีก request สร้างไปแล้วระหว่าง exists() เช็ค — ไม่ใช่ error จริง
+            pass
         except OSError as e:
-            return {"status": "error", "error": str(e)}, 500
+            return {"status": "error", "error": f"{type(e).__name__}: {e}"}, 400
         return {"status": "ok", "path": path}
 
     # ── Pipe Tester routes (หน้าแยกต่างหาก — ทดสอบอ่าน named pipe ใดๆ ในระบบ ไม่ว่าจะ

@@ -44,6 +44,13 @@
         ใช้ได้ทั้งกับ pipe ที่ VAS เขียนเอง (เช่น integration "Pipe I/O" ของ QR500) และ pipe ที่มี third-party process
         ภายนอกเขียนเข้ามา ไม่ผูกกับฟีเจอร์ใดฟีเจอร์หนึ่งโดยเฉพาะ
       </p>
+      <p class="text-muted leading-relaxed mt-2">
+        <strong class="text-ink">ข้อควรระวัง:</strong> named pipe ส่งข้อมูลแต่ละบรรทัดให้ "ผู้อ่านคนแรกที่รออยู่" เพียงคนเดียว
+        ถ้ามี process อื่นเปิดอ่าน pipe เดียวกันค้างอยู่พร้อมกัน (เช่น terminal ที่ยังรัน <code class="font-display bg-surface px-1 rounded text-[0.72rem]">cat</code>
+        ค้างไว้จากการทดสอบครั้งก่อน) ข้อมูลอาจไปถึง process นั้นแทนหน้านี้แบบสุ่ม — เช็คได้ด้วย
+        <code class="font-display bg-surface px-1 rounded text-[0.72rem]">sudo lsof /tmp/vas_qr_pipe</code> หรือ
+        <code class="font-display bg-surface px-1 rounded text-[0.72rem]">sudo fuser -v /tmp/vas_qr_pipe</code> ก่อนทดสอบ
+      </p>
     </div>
   </div>
 
