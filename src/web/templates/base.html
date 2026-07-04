@@ -323,6 +323,35 @@
               <iconify-icon icon="lucide:circle-alert" width="15" height="15"></iconify-icon>
             </a>
 
+            <!-- ── Power menu (shutdown / reboot) ────────────────
+                 เฉพาะ root/admin — สั่งงานระบบปฏิบัติการจริง -->
+            {%- if current_user and current_user.role in ('root', 'admin') %}
+            <div class="relative" id="power-dropdown-wrap">
+              <button id="power-dropdown-btn" onclick="togglePowerDropdown()"
+                      title="สั่งงานระบบปฏิบัติการ" aria-label="สั่งงานระบบปฏิบัติการ"
+                      class="w-8 h-8 border border-line/10 rounded-lg bg-card text-ink flex items-center justify-center hover:bg-surface transition-colors flex-shrink-0">
+                <iconify-icon icon="lucide:power" width="15" height="15"></iconify-icon>
+              </button>
+
+              <!-- Dropdown menu -->
+              <div id="power-dropdown-menu"
+                   class="hidden absolute right-0 top-[calc(100%+6px)] w-48 bg-card border border-line/10 rounded-xl shadow-md z-[150] overflow-hidden py-1">
+                <button onclick="openPowerConfirm('reboot'); closePowerDropdown();"
+                        class="flex items-center gap-2.5 w-full px-3.5 py-2 text-[0.8rem] text-muted hover:bg-surface hover:text-ink transition-colors">
+                  <iconify-icon icon="lucide:rotate-cw" width="13" height="13" class="text-faint flex-shrink-0"></iconify-icon>
+                  รีสตาร์ทเครื่อง
+                </button>
+                <div class="border-t border-line/8 my-1"></div>
+                <button onclick="openPowerConfirm('shutdown'); closePowerDropdown();"
+                        class="flex items-center gap-2.5 w-full px-3.5 py-2 text-[0.8rem] text-danger hover:bg-danger/6 transition-colors">
+                  <iconify-icon icon="lucide:power" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+                  ปิดเครื่อง
+                </button>
+              </div>
+            </div>
+            <!-- ── /Power menu ── -->
+            {%- endif %}
+
             <!-- ── User dropdown ─────────────────────────────── -->
             <div class="relative" id="user-dropdown-wrap">
               <button id="user-dropdown-btn" onclick="toggleUserDropdown()"
@@ -463,6 +492,35 @@
       </div>
     </div>
 
+    <!-- ════════════════════════════════════════════════════
+         MODAL: ยืนยันสั่งงานระบบปฏิบัติการ (shutdown / reboot)
+    ═══════════════════════════════════════════════════════ -->
+    <div id="modal-power" class="modal-backdrop">
+      <div class="modal-dialog">
+        <div class="modal-dialog-head mb-4">
+          <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+            <iconify-icon icon="lucide:power" width="16" height="16" class="text-danger"></iconify-icon>
+          </div>
+          <div class="modal-dialog-body">
+            <h2 class="modal-dialog-title" id="power-modal-title">ยืนยันการสั่งงาน</h2>
+            <p class="modal-dialog-message" id="power-modal-body"></p>
+          </div>
+        </div>
+        <div id="power-modal-error" class="text-[0.78rem] text-danger hidden px-3 py-2 rounded-lg bg-danger/8 border border-danger/20 mb-1"></div>
+        <div class="modal-dialog-actions">
+          <button type="button" onclick="closeBaseModal('modal-power')"
+                  class="inline-flex items-center px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+            ยกเลิก
+          </button>
+          <button type="button" id="power-modal-ok" onclick="executePowerAction()"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+            <iconify-icon icon="lucide:power" width="13" height="13"></iconify-icon>
+            ยืนยัน
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast container -->
     <div id="base-toast-wrap" class="toast-wrap"></div>
 
@@ -502,6 +560,59 @@
       var wrap = document.getElementById('user-dropdown-wrap');
       if (wrap && !wrap.contains(e.target)) closeUserDropdown();
     });
+
+    // ── Power dropdown (shutdown / reboot) ──────────────────────────
+    var _powerDropOpen = false;
+    function togglePowerDropdown() {
+      _powerDropOpen = !_powerDropOpen;
+      var menu = document.getElementById('power-dropdown-menu');
+      if (!menu) return;
+      menu.classList.toggle('hidden', !_powerDropOpen);
+    }
+    function closePowerDropdown() {
+      _powerDropOpen = false;
+      var menu = document.getElementById('power-dropdown-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+    document.addEventListener('click', function(e) {
+      var wrap = document.getElementById('power-dropdown-wrap');
+      if (wrap && !wrap.contains(e.target)) closePowerDropdown();
+    });
+
+    // ── Power confirm modal ──────────────────────────────────────────
+    var _powerAction = null; // 'reboot' | 'shutdown'
+    function openPowerConfirm(action) {
+      _powerAction = action;
+      var isShutdown = (action === 'shutdown');
+      document.getElementById('power-modal-title').textContent =
+        isShutdown ? 'ปิดเครื่อง?' : 'รีสตาร์ทเครื่อง?';
+      document.getElementById('power-modal-body').textContent = isShutdown
+        ? 'ระบบจะปิดเครื่องทันที การเชื่อมต่อทั้งหมดจะถูกตัด ต้องเปิดเครื่องด้วยตนเองจึงจะใช้งานต่อได้'
+        : 'ระบบจะรีสตาร์ททันที การเชื่อมต่อทั้งหมดจะถูกตัดชั่วคราวระหว่างรีสตาร์ท';
+      setBaseErr('power-modal-error', '');
+      openBaseModal('modal-power');
+    }
+    function executePowerAction() {
+      if (!_powerAction) return;
+      var action = _powerAction;
+      var okBtn = document.getElementById('power-modal-ok');
+      okBtn.disabled = true;
+      fetch('/api/system/' + action, { method: 'POST' })
+        .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, body: d }; }); })
+        .then(function(res) {
+          okBtn.disabled = false;
+          if (res.ok && res.body.status === 'ok') {
+            closeBaseModal('modal-power');
+            showBaseToast(action === 'shutdown' ? 'กำลังปิดเครื่อง…' : 'กำลังรีสตาร์ทเครื่อง…', 'ok');
+          } else {
+            setBaseErr('power-modal-error', (res.body.errors || ['เกิดข้อผิดพลาด']).join(', '));
+          }
+        })
+        .catch(function() {
+          okBtn.disabled = false;
+          setBaseErr('power-modal-error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ');
+        });
+    }
 
     // ── Base modal helpers ─────────────────────────────────────────
     function openBaseModal(id) {

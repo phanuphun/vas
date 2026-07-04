@@ -2380,6 +2380,37 @@ def create_app() -> Flask:
         except Exception as exc:
             return {"error": str(exc)}  # type: ignore[return-value]
 
+    # ── System power (shutdown / reboot) ─────────────────────────
+    # เฉพาะ root/admin — สั่งงานระบบปฏิบัติการจริงผ่าน systemctl
+
+    @app.post("/api/system/reboot")
+    def system_reboot_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        user = _require_admin_user()
+        if user is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        from core.database import log_audit as _db_audit
+        from system.power import reboot_system
+        try:
+            reboot_system()
+        except Exception as exc:
+            return {"status": "error", "errors": [str(exc)]}, 500
+        _db_audit("system_reboot", {"username": user["username"]})
+        return {"status": "ok"}
+
+    @app.post("/api/system/shutdown")
+    def system_shutdown_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        user = _require_admin_user()
+        if user is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        from core.database import log_audit as _db_audit
+        from system.power import shutdown_system
+        try:
+            shutdown_system()
+        except Exception as exc:
+            return {"status": "error", "errors": [str(exc)]}, 500
+        _db_audit("system_shutdown", {"username": user["username"]})
+        return {"status": "ok"}
+
     # ── Database routes ──────────────────────────────────────────
 
     @app.get("/database")
