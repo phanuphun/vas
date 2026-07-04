@@ -1,5 +1,12 @@
 # Changelog
 
+## [2026-07-04]
+
+### หน้า "Kiosk" — ปุ่ม "หยุด kiosk mode" กดไม่ทำงาน (error `Cannot set properties of null`)
+- **สาเหตุ**: `kiosk.html` มี modal HTML (`#confirm-modal`) และ CSS ครบตาม convention แต่ไม่เคย define `window.showConfirm` เองในหน้า (ต่างจากทุกหน้าอื่นที่มีปุ่มลบ/ปุ่มอันตราย เช่น `mqtt.html`, `docker.html`, `wireguard.html` ที่ define ไว้ในหน้าตัวเอง) เพราะแอปเป็น SPA ไม่ reload หน้าเวลาเปลี่ยนแท็บ ถ้าก่อนหน้านี้เคยเข้าหน้าอื่นที่ define `window.showConfirm` ไว้มาก่อน ฟังก์ชันนั้นจะค้างอยู่ใน `window` และถูกเรียกแทนตอนกดปุ่มในหน้า Kiosk ซึ่งไปอ้างอิง DOM element (`#confirm-title` ฯลฯ) ของหน้าเก่าที่ไม่มีอยู่แล้ว ทำให้ throw `TypeError: Cannot set properties of null (setting 'textContent')` ที่ `window.showConfirm` แล้วปุ่มไม่ทำงาน
+- แก้โดยเพิ่ม `window.showConfirm` ตาม convention ใน `INSTRUCTIONS.md` เข้าไปใน script block ของ `kiosk.html` ตรงๆ (`src/web/templates/kiosk.html:506-527`) — ใช้ `#confirm-modal`/`#confirm-title`/`#confirm-body`/`#confirm-ok`/`#confirm-cancel` ที่มีอยู่แล้วในไฟล์เดียวกัน แก้จุดเดียวจบ ไม่ต้องแตะ `confirmStopKiosk()`/`confirmDeleteKioskUser()` ที่เรียกอยู่แล้ว
+- ตรวจสอบ: syntax check ผ่าน `node --check` (แยก script block ออกมาทดสอบเพราะ bash sandbox mount ของ `kiosk.html` ในเซสชันนี้ค้าง — ยืนยันเนื้อหาไฟล์จริงผ่าน Read tool แทน) ยังไม่ได้ทดสอบ end-to-end บนเครื่องจริง (คลิกปุ่มแล้วเช็คว่า auto-login/autostart ถูกลบจริง) ควร verify อีกครั้งบนเครื่อง Ubuntu จริง
+
 ## [2026-07-02]
 
 ### หน้า "Docker" — ต่อ backend จริงเข้ากับ frontend ครบทุก action (แทนที่ mock ทั้งหมด)

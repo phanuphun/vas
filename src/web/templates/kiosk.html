@@ -502,6 +502,30 @@ done</textarea>
 (function () {
   "use strict";
 
+  // ── Confirm modal helper (มาตรฐานตาม INSTRUCTIONS.md) ──────────
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    if (!modal || !btnOk) return;
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) btnOk.childNodes[1].textContent = " " + opts.okLabel;
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
   var kioskHome = "{{ home }}";
   var currentSessionType = "{{ session_type }}";
 
