@@ -602,8 +602,45 @@
     .catch(function (e) { setResult("Fetch error: " + e, "error"); });
   }
 
-  var applyBtn = document.getElementById("applyBtn");
+  var applyBtn = document.getElementById("applyDisplayInline");
   if (applyBtn) applyBtn.addEventListener("click", doApply);
+
+  // ── Display Protocol switch (X11 / Wayland) ──────────────────────────────
+  var waylandResult = document.getElementById("waylandResult");
+
+  function setWaylandResult(msg, status) {
+    if (!waylandResult) return;
+    waylandResult.className = "text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+    waylandResult.textContent = msg;
+  }
+
+  document.querySelectorAll("[data-wayland-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var action = btn.getAttribute("data-wayland-action");
+      var label = action === "disable" ? "X11" : "Wayland";
+      btn.disabled = true;
+      setWaylandResult("กำลังเปลี่ยนเป็น " + label + " ...", "");
+      fetch("/api/display/wayland", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: action }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, body: d }; }); })
+        .then(function (res) {
+          if (res.ok && res.body.status === "ok") {
+            setWaylandResult("เปลี่ยนเป็น " + label + " แล้ว — ต้อง re-login หรือ reboot เพื่อให้มีผล", "ok");
+            setTimeout(function () { location.reload(); }, 1200);
+          } else {
+            btn.disabled = false;
+            setWaylandResult("Error: " + ((res.body && res.body.errors || []).join(", ") || "ไม่ทราบสาเหตุ"), "error");
+          }
+        })
+        .catch(function (e) {
+          btn.disabled = false;
+          setWaylandResult("Fetch error: " + e, "error");
+        });
+    });
+  });
 
   // ── Screen Blank (screensaver / DPMS) ────────────────────────────────────
   var screenBlankSelect  = document.getElementById("screenBlankSelect");
