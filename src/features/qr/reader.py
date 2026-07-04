@@ -352,7 +352,8 @@ class QrReaderThread(threading.Thread):
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
         self._last_scan_raw: list[int] | None = None  # raw HID keycodes ก่อน decode
-        self._scan_seq: int = 0  # เพิ่มทุกครั้งที่จบสแกน (แม้ค่าจะซ้ำเดิม) ใช้แทนการเทียบค่า string
+        self._last_scan_raw_report: list[str] | None = None  # raw HID byte report (hex) ทุก frame
+        self._scan_seq: int = 0  # เพิ่มทุกครั้งที่ scan เสร็จ (แม้ค่าเดิมซ้ำ) — ให้ caller แยกแยะ scan ใหม่ vs เดิมได้โดยไม่ต้องเทียบค่า
         self._lock = threading.Lock()
 
     @property
@@ -368,10 +369,21 @@ class QrReaderThread(threading.Thread):
             return self._last_scan_raw
 
     @property
-    def scan_seq(self) -> int:
+    def last_scan_raw_report(self) -> list[str] | None:
         """
-        ลำดับสแกน — เพิ่มขึ้นทุกครั้งที่จบสแกนใหม่ (กด Enter) ไม่ว่าค่าจะซ้ำของเดิมหรือไม่
-        ใช้แยกแยะ "สแกนรอบใหม่" ออกจาก "ค่าที่ค้างจากรอบก่อน" แทนการเทียบ string เท่ากัน
+        Raw HID byte report (hex string ต่อ frame) ของ scan ล่าสุด หรือ None
+        เก็บ**ทุก**report ที่อ่านได้ในรอบ scan รวมถึง key-up/all-zero frame ด้วย
+        (ไม่ filter เหมือน last_scan_raw) เพื่อให้เห็นข้อมูลดิบตรงตามที่อุปกรณ์ส่งมาจริง
+        """
+        with self._lock:
+            return self._last_scan_raw_report
+
+    @property
+    def last_scan_seq(self) -> int:
+        """
+        ตัวนับที่เพิ่มขึ้นทุกครั้งที่ scan เสร็จสมบูรณ์ (กด Enter) ไม่ว่าค่าที่ scan ได้จะซ้ำกับ
+        ครั้งก่อนหรือไม่ — ใช้แทนการเทียบ last_scan == last_seen ที่ทำให้สแกนค่าเดิมซ้ำแล้ว
+        ถูกข้าม (ไม่ publish/log) เพราะค่าไม่เปลี่ยน ผู้เรียกควรเทียบ seq แทนค่า string
         """
         with self._lock:
             return self._scan_seq
@@ -412,6 +424,7 @@ class QrReaderThread(threading.Thread):
                         with self._lock:
                             self._last_scan = buffer.strip()
                             self._last_scan_raw = list(raw_buf)
+                            self._last_scan_raw_report = list(raw_report_buf)
                             self._scan_seq += 1
                         buffer = ""
                         raw_buf = []
@@ -448,7 +461,7 @@ class EvdevQrReaderThread(threading.Thread):
         self._stop_event = threading.Event()
         self._last_scan: str | None = None
         self._last_scan_raw: list[int] | None = None  # raw evdev scancodes ก่อน decode
-        self._scan_seq: int = 0  # เพิ่มทุกครั้งที่จบสแกน (แม้ค่าจะซ้ำเดิม) ใช้แทนการเทียบค่า string
+        self._scan_seq: int = 0  # เพิ่มทุกครั้งที่ scan เสร็จ (แม้ค่าเดิมซ้ำ) — ดู QrReaderThread.last_scan_seq
         self._lock = threading.Lock()
 
     @property
@@ -463,8 +476,17 @@ class EvdevQrReaderThread(threading.Thread):
             return self._last_scan_raw
 
     @property
-    def scan_seq(self) -> int:
-        """ลำดับสแกน — เพิ่มขึ้นทุกครั้งที่จบสแกนใหม่ (Enter) ไม่ว่าค่าจะซ้ำของเดิมหรือไม่"""
+    def last_scan_raw_report(self) -> None:
+        """
+        Evdev mode ไม่มี raw HID byte report ให้เก็บ (ไม่ได้อ่านจาก /dev/hidraw โดยตรง)
+        Return None เสมอ เพื่อให้ caller เขียน code เดียวกันได้ทั้งสอง reader class
+        โดยไม่ต้อง isinstance check
+        """
+        return None
+
+    @property
+    def last_scan_seq(self) -> int:
+        """ตัวนับที่เพิ่มขึ้นทุกครั้งที่ scan เสร็จ แม้ค่าเดิมซ้ำ — ดู QrReaderThread.last_scan_seq"""
         with self._lock:
             return self._scan_seq
 
