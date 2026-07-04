@@ -1477,10 +1477,7 @@ def create_app() -> Flask:
             device = reader.device_path if running else None
             yield f"event: status\ndata: {_json_dumps({'running': running, 'device': device})}\n\n"
 
-            # -1 = sentinel เพื่อให้ scan ล่าสุดที่ publisher มีอยู่แล้ว (ถ้ามี) ถูกส่งทันทีตอน
-            # client เพิ่งเชื่อมต่อ ไม่ต้องรอ scan ใหม่ครั้งถัดไป (เหมือนพฤติกรรมเดิม)
-            last_pub_seq = -1
-
+            last_seen_seq: int = -1
             last_heartbeat = time.monotonic()
             HEARTBEAT_INTERVAL = 5.0
             POLL_INTERVAL = 0.2
@@ -1501,12 +1498,21 @@ def create_app() -> Flask:
                         d = reader.device_path if running and reader else None
                         yield f"event: status\ndata: {_json_dumps({'running': running, 'device': d})}\n\n"
 
-                    publisher = get_scan_publisher()
-                    if publisher is not None:
-                        event, seq = publisher.get_last_event()
-                        if event is not None and seq != last_pub_seq:
-                            last_pub_seq = seq
-                            yield f"event: scan\ndata: {_json_dumps(event)}\n\n"
+                    if reader is not None and reader.is_alive():
+                        scan = reader.last_scan
+                        seq = getattr(reader, "scan_seq", 0)
+                        # เทียบ seq (ไม่ใช่ค่า scan) เพื่อให้สแกนค่าเดิมซ้ำก็ trigger event/publish ได้
+                        if scan is not None and seq != last_seen_seq:
+                            last_seen_seq = seq
+                            ts = datetime.now(timezone.utc).isoformat()
+                            yield f"event: scan\ndata: {_json_dumps({'scan': scan, 'device': reader.device_path, 'ts': ts})}\n\n"
+                            # Publish ออก MQTT ถ้า client เชื่อมต่ออยู่
+                            try:
+                                from mqtt_client import publish_qr_scan as _mqtt_publish
+                                scan_raw = getattr(reader, "last_scan_raw", None)
+                                _mqtt_publish(scan, reader.device_path, ts, scan_raw=scan_raw)
+                            except Exception:
+                                pass
             except GeneratorExit:
                 # client disconnected
                 return
