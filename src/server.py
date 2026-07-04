@@ -3390,8 +3390,12 @@ def _allowed_kiosk_config_paths() -> dict[str, Path]:
 
 def _allowed_config_paths() -> dict[str, Path]:
     """Allowlist ของ config files ที่อ่านได้ผ่าน API"""
-    from display import _effective_home_config_path, _effective_home_script_path  # type: ignore[attr-defined]
-    from status import GDM_CUSTOM_CONFIG_PATH, XORG_TOUCHSCREEN_CONFIG_PATH
+    from system.status import (
+        GDM_CUSTOM_CONFIG_PATH,
+        XORG_TOUCHSCREEN_CONFIG_PATH,
+        _effective_home_config_path,
+        _effective_home_script_path,
+    )
     return {
         "gdm_custom": Path(GDM_CUSTOM_CONFIG_PATH),
         "xprofile": _effective_home_config_path(),
