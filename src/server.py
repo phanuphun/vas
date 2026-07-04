@@ -34,7 +34,9 @@ from system.audit import (
 from features.display.display import (
     DisplayConfigurator,
     ROTATION_MATRICES,
+    SCREEN_BLANK_OPTIONS,
     TouchDevice,
+    get_screen_blank_seconds,
     get_udevadm_touchscreen_names,
     parse_xinput_device_map,
 )
@@ -51,6 +53,7 @@ from system.status import (
     collect_openssh_status,
     collect_qr_reader_status,
     collect_remote_access_status,
+    collect_screen_blank_config_status,
     collect_vpn_status,
     collect_xorg_touchscreen_config_status,
 )
@@ -80,6 +83,7 @@ from features.kiosk.manager import (
     DEFAULT_RESTART_DELAY,
     KioskManager,
     accounts_service_path_for,
+    check_url_reachable,
     collect_accounts_service_status,
     collect_gdm_autologin_status,
     collect_kiosk_autostart_status,
@@ -89,6 +93,7 @@ from features.kiosk.manager import (
     kiosk_launch_script_path,
     kiosk_openbox_autostart_path,
     list_kiosk_linux_users,
+    resolve_kiosk_target_user,
     stop_kiosk_mode,
 )
 from system.status import GDM_CUSTOM_CONFIG_PATH
@@ -980,6 +985,7 @@ def create_app() -> Flask:
     def display_settings() -> str:
         default_display = _default_x_display()
         devices = collect_display_devices(x_display=default_display)
+        current_screen_blank = get_screen_blank_seconds(DisplayCommandRunner(), x_display=default_display)
         return render_template(
             "display.html",
             outputs=devices.outputs,
@@ -991,6 +997,10 @@ def create_app() -> Flask:
             display_config=collect_display_session_config_status(),
             display_script=collect_display_session_script_status(),
             xorg_touchscreen=collect_xorg_touchscreen_config_status(),
+            screen_blank_options=SCREEN_BLANK_OPTIONS,
+            screen_blank_config=collect_screen_blank_config_status(),
+            current_screen_blank=current_screen_blank,
+            current_screen_blank_label=screen_blank_label(current_screen_blank),
         )
 
     @app.get("/api/display/config-content")
@@ -1052,6 +1062,35 @@ def create_app() -> Flask:
             "display": x_display,
             "persistSession": persist_session,
             "persistXorg": persist_xorg,
+        }
+
+    @app.post("/api/display/screen-blank")
+    def display_screen_blank() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        try:
+            seconds = int(payload.get("seconds", 0))
+        except (TypeError, ValueError):
+            return {"status": "error", "errors": ["Invalid seconds value"]}, 400
+        if seconds < 0:
+            return {"status": "error", "errors": ["seconds must be >= 0"]}, 400
+
+        x_display = str(payload.get("display", "")).strip() or None
+        persist = bool(payload.get("persist", True))
+
+        runner = DisplayCommandRunner()
+        configurator = DisplayConfigurator(runner)
+        try:
+            configurator.apply_screen_blank(seconds, x_display=x_display)
+            if persist:
+                configurator.persist_screen_blank(seconds)
+        except (CommandExecutionError, OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        return {
+            "status": "ok",
+            "seconds": seconds,
+            "display": x_display,
+            "persist": persist,
         }
 
     @app.post("/api/display/wayland")
@@ -1144,7 +1183,21 @@ def create_app() -> Flask:
             manager.create_user(username, extra_groups=DEFAULT_EXTRA_GROUPS if add_groups else ())
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
-        return {"status": "ok", "username": username}
+
+        created = next((u for u in list_kiosk_linux_users() if u.username == username), None)
+        from core.database import log_audit as _db_audit
+        _db_audit("kiosk_user_created", {"username": username, "groups": add_groups})
+        return {
+            "status": "ok",
+            "username": username,
+            "user": {
+                "username": created.username if created else username,
+                "uid": created.uid if created else None,
+                "home": created.home.as_posix() if created else f"/home/{username}",
+                "is_autologin": created.is_autologin if created else False,
+                "managed_by_vas": created.managed_by_vas if created else True,
+            },
+        }
 
     @app.delete("/api/kiosk/users/<username>")
     def kiosk_delete_user_api(username: str) -> "tuple[dict[str, object], int] | dict[str, object]":
@@ -1159,6 +1212,8 @@ def create_app() -> Flask:
             manager.delete_user(username)
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
+        from core.database import log_audit as _db_audit
+        _db_audit("kiosk_user_deleted", {"username": username})
         return {"status": "ok"}
 
     @app.post("/api/kiosk/autologin")
@@ -1169,6 +1224,7 @@ def create_app() -> Flask:
         if enabled and not username:
             return {"status": "error", "errors": ["ต้องระบุ username เมื่อเปิด auto-login"]}, 400
 
+        old_status = collect_gdm_autologin_status()
         manager = KioskManager(CommandRunner())
         try:
             manager.set_autologin(username, enabled=enabled)
@@ -1176,6 +1232,13 @@ def create_app() -> Flask:
             return {"status": "error", "errors": [str(error)]}, 500
 
         status = collect_gdm_autologin_status()
+        from core.database import log_audit as _db_audit, log_config_change as _db_config
+        _db_audit("kiosk_autologin_changed", {"username": username, "enabled": enabled})
+        _db_config(
+            "kiosk", "autologin",
+            old_value={"enabled": old_status.enabled, "username": old_status.username},
+            new_value={"enabled": status.enabled, "username": status.username},
+        )
         return {"status": "ok", "enabled": status.enabled, "username": status.username}
 
     @app.post("/api/kiosk/session-type")
@@ -1188,11 +1251,15 @@ def create_app() -> Flask:
         if not username:
             return {"status": "error", "errors": ["ต้องระบุ username"]}, 400
 
+        old_session_type = collect_accounts_service_status(username).session_type
         manager = KioskManager(CommandRunner())
         try:
             manager.set_session_type(username, session_type)
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
+        from core.database import log_audit as _db_audit, log_config_change as _db_config
+        _db_audit("kiosk_session_type_changed", {"username": username, "session_type": session_type})
+        _db_config("kiosk", f"session_type:{username}", old_value=old_session_type, new_value=session_type)
         return {"status": "ok", "username": username, "session_type": session_type}
 
     @app.post("/api/kiosk/autostart")
@@ -1218,6 +1285,7 @@ def create_app() -> Flask:
         if match is None:
             return {"status": "error", "errors": [f"ไม่พบ user: {username}"]}, 404
 
+        old_status = collect_kiosk_autostart_status(session_type, match.home)
         manager = KioskManager(CommandRunner())
         try:
             manager.write_autostart(
@@ -1232,6 +1300,16 @@ def create_app() -> Flask:
             return {"status": "error", "errors": [str(error)]}, 500
 
         status = collect_kiosk_autostart_status(session_type, match.home)
+        from core.database import log_audit as _db_audit, log_config_change as _db_config
+        _db_audit("kiosk_autostart_saved", {
+            "username": username, "url": url,
+            "restart_enabled": restart_enabled, "restart_delay": restart_delay,
+        })
+        _db_config(
+            "kiosk", f"autostart:{username}",
+            old_value={"url": old_status.url, "restart_enabled": old_status.restart_enabled, "restart_delay": old_status.restart_delay},
+            new_value={"url": status.url, "restart_enabled": status.restart_enabled, "restart_delay": status.restart_delay},
+        )
         return {
             "status": "ok",
             "configured": status.configured,
@@ -1271,7 +1349,88 @@ def create_app() -> Flask:
             stop_kiosk_mode(CommandRunner(), match.home)
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
-        return {"status": "ok", "username": match.username}
+        from core.database import log_audit as _db_audit
+        _db_audit("kiosk_stopped", {"username": match.username})
+        # stop_kiosk_mode ปิด autologin และลบไฟล์ autostart เสมอ — ผลลัพธ์คงที่ ไม่ต้อง query ซ้ำ
+        return {"status": "ok", "username": match.username, "autologin_enabled": False, "autostart_configured": False}
+
+    @app.get("/api/kiosk/audit")
+    def kiosk_audit_api() -> dict[str, object]:
+        from core.database import list_kiosk_audit_log
+        try:
+            limit = int(request.args.get("limit", 50))
+            offset = int(request.args.get("offset", 0))
+        except (TypeError, ValueError):
+            limit, offset = 50, 0
+        return list_kiosk_audit_log(limit=limit, offset=offset)
+
+    @app.post("/api/kiosk/check-url")
+    def kiosk_check_url_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        payload = request.get_json(silent=True) or {}
+        url = str(payload.get("url", "")).strip()
+        if not url:
+            return {"ok": False, "status_code": None, "error": "ต้องระบุ URL"}, 400
+        return check_url_reachable(url)
+
+    @app.get("/api/kiosk/heartbeat")
+    def kiosk_heartbeat_get_api() -> dict[str, object]:
+        from core.database import list_device_integrations
+        from features.kiosk.heartbeat import get_heartbeat_thread
+        from features.kiosk.manager import collect_kiosk_heartbeat_payload
+        integ = list_device_integrations("kiosk").get("mqtt", {})
+        thread = get_heartbeat_thread()
+        try:
+            payload = collect_kiosk_heartbeat_payload()
+        except Exception:
+            payload = None
+        return {
+            "integration": integ,
+            "running": thread is not None and thread.is_alive(),
+            "last_result": thread.last_result if thread is not None else None,
+            "last_published_at": thread.last_published_at if thread is not None else None,
+            "payload": payload,
+        }
+
+    @app.post("/api/kiosk/heartbeat")
+    def kiosk_heartbeat_save_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        from core.database import log_audit as _db_audit, upsert_device_integration
+        from features.kiosk.heartbeat import (
+            DEFAULT_HEARTBEAT_INTERVAL,
+            MAX_HEARTBEAT_INTERVAL,
+            MIN_HEARTBEAT_INTERVAL,
+            start_heartbeat,
+            stop_heartbeat,
+        )
+        payload = request.get_json(silent=True) or {}
+        enabled = bool(payload.get("enabled", False))
+        broker_id = payload.get("broker_id")
+        topic = str(payload.get("topic") or "vas/kiosk/heartbeat").strip()
+        try:
+            interval = int(payload.get("interval_seconds", DEFAULT_HEARTBEAT_INTERVAL))
+        except (TypeError, ValueError):
+            interval = DEFAULT_HEARTBEAT_INTERVAL
+        interval = max(MIN_HEARTBEAT_INTERVAL, min(interval, MAX_HEARTBEAT_INTERVAL))
+
+        if enabled and not broker_id:
+            return {"status": "error", "errors": ["ต้องเลือก MQTT broker ก่อนเปิดใช้งาน heartbeat"]}, 400
+
+        ok = upsert_device_integration("kiosk", "mqtt", {
+            "enabled": enabled,
+            "broker_id": broker_id,
+            "topic": topic,
+            "qos": payload.get("qos", 1),
+            "interval_seconds": interval,
+        })
+        if not ok:
+            return {"status": "error", "errors": ["บันทึกการตั้งค่าไม่สำเร็จ"]}, 500
+
+        if enabled:
+            start_heartbeat(interval)
+        else:
+            stop_heartbeat()
+
+        _db_audit("kiosk_heartbeat_toggled", {"enabled": enabled, "broker_id": broker_id, "topic": topic, "interval_seconds": interval})
+        return {"status": "ok", "enabled": enabled, "broker_id": broker_id, "topic": topic, "interval_seconds": interval}
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -1312,6 +1471,18 @@ def create_app() -> Flask:
     try:
         from features.mqtt.client import start_all_enabled_brokers as _auto_start_brokers
         _auto_start_brokers()
+    except Exception:
+        pass
+
+    # Auto-resume kiosk MQTT heartbeat ถ้าเคยเปิดไว้ก่อน server restart — ต้องอยู่หลัง
+    # auto-start broker ด้านบนเสมอ เพื่อให้ broker connect เสร็จก่อน heartbeat publish รอบแรก
+    try:
+        from core.database import list_device_integrations as _list_kiosk_integ
+        from features.kiosk.heartbeat import DEFAULT_HEARTBEAT_INTERVAL as _hb_default, start_heartbeat as _auto_start_heartbeat
+        _kiosk_mqtt_integ = _list_kiosk_integ("kiosk").get("mqtt")
+        if _kiosk_mqtt_integ and _kiosk_mqtt_integ.get("enabled"):
+            _hb_interval = int(_kiosk_mqtt_integ.get("interval_seconds") or _hb_default)
+            _auto_start_heartbeat(_hb_interval)
     except Exception:
         pass
 
@@ -3145,14 +3316,24 @@ def _kiosk_page_context() -> dict[str, object]:
     autologin = collect_gdm_autologin_status()
     software = collect_kiosk_software_status()
     autologin_user = next((u for u in users if u.is_autologin), None)
+    # target_user = user ที่หน้านี้ "กำลังจัดการอยู่" (auto-login > สร้างโดย VAS > คนแรกในลิสต์)
+    # แยกจาก autologin_user ตรงๆ เพราะ session type/autostart ที่เคยตั้งไว้ยังอยู่บนดิสก์
+    # แม้ว่า auto-login จะถูกปิดอยู่ตอนนี้ก็ตาม — ไม่งั้นหน้าเว็บจะรีเซ็ตกลับไปที่ gnome/
+    # ค่า default ทุกครั้งที่ auto-login ไม่ได้เปิดอยู่ ทั้งที่ user + ไฟล์ config ยังอยู่ครบ
+    target_user = resolve_kiosk_target_user(users)
 
     session_type = "gnome"
-    if autologin_user is not None:
-        session_type = collect_accounts_service_status(autologin_user.username).session_type
-    home = autologin_user.home if autologin_user is not None else Path("/home/kiosk-user")
+    if target_user is not None:
+        session_type = collect_accounts_service_status(target_user.username).session_type
+    home = target_user.home if target_user is not None else Path("/home/kiosk-user")
 
     autostart_status = collect_kiosk_autostart_status(session_type, home)
     readiness = collect_kiosk_readiness(users, autologin, autostart_status, software)
+
+    from core.database import list_device_integrations, list_mqtt_brokers
+    from features.kiosk.heartbeat import get_heartbeat_thread
+    heartbeat_integ = list_device_integrations("kiosk").get("mqtt", {})
+    heartbeat_thread = get_heartbeat_thread()
 
     return {
         "kiosk_users": [
@@ -3165,6 +3346,7 @@ def _kiosk_page_context() -> dict[str, object]:
             }
             for u in users
         ],
+        "default_kiosk_username": target_user.username if target_user is not None else None,
         "autologin_enabled": autologin.enabled,
         "autostart": {
             "url": autostart_status.url,
@@ -3180,15 +3362,23 @@ def _kiosk_page_context() -> dict[str, object]:
         },
         "session_type": session_type,
         "openbox_installed": software.openbox_installed,
+        "mqtt_brokers": list_mqtt_brokers(),
+        "heartbeat": {
+            "enabled": bool(heartbeat_integ.get("enabled")),
+            "broker_id": heartbeat_integ.get("broker_id"),
+            "topic": heartbeat_integ.get("topic") or "vas/kiosk/heartbeat",
+            "interval_seconds": heartbeat_integ.get("interval_seconds") or 30,
+            "running": heartbeat_thread is not None and heartbeat_thread.is_alive(),
+        },
     }
 
 
 def _allowed_kiosk_config_paths() -> dict[str, Path]:
     """Allowlist ของ config files ที่อ่านได้ผ่าน API หน้า Kiosk"""
     users = list_kiosk_linux_users()
-    autologin_user = next((u for u in users if u.is_autologin), None)
-    username = autologin_user.username if autologin_user is not None else "kiosk-user"
-    home = autologin_user.home if autologin_user is not None else Path("/home/kiosk-user")
+    target_user = resolve_kiosk_target_user(users)
+    username = target_user.username if target_user is not None else "kiosk-user"
+    home = target_user.home if target_user is not None else Path("/home/kiosk-user")
     return {
         "gdm_custom": GDM_CUSTOM_CONFIG_PATH,
         "accounts_service": accounts_service_path_for(username),
@@ -3245,13 +3435,25 @@ class DisplayCommandRunner(CommandRunner):
 def _is_display_command(args) -> bool:  # type: ignore[no-untyped-def]
     if not args:
         return False
-    if args[0] in {"xrandr", "xinput"}:
+    if args[0] in {"xrandr", "xinput", "xset"}:
         return True
-    return args[0] == "env" and any(part in {"xrandr", "xinput"} for part in args)
+    return args[0] == "env" and any(part in {"xrandr", "xinput", "xset"} for part in args)
 
 
 def tool_marker(status: ToolStatus) -> str:
     return "OK" if status.installed else "MISSING"
+
+
+def screen_blank_label(seconds: "int | None") -> str:
+    """คืน label ภาษาไทยของค่า screen blank timeout ปัจจุบันสำหรับ Jinja2 templates"""
+    if seconds is None:
+        return "ไม่ทราบค่า"
+    for option_seconds, label in SCREEN_BLANK_OPTIONS:
+        if option_seconds == seconds:
+            return label
+    if seconds <= 0:
+        return "ไม่ปิดหน้าจอ (Never)"
+    return f"{seconds} วินาที"
 
 
 def vpn_connection_label(vpn: VpnStatus) -> str:

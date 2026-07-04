@@ -556,6 +556,37 @@ def log_config_change(
         pass
 
 
+def list_kiosk_audit_log(limit: int = 50, offset: int = 0) -> dict[str, object]:
+    """
+    ประวัติ audit log เฉพาะ action ที่ขึ้นต้นด้วย 'kiosk_' — ใช้กับแท็บ "ประวัติ" ของหน้า
+    Kiosk รองรับ pagination แบบเดียวกับ list_qr_scans() (offset paging ไม่ใช่ infinite scroll)
+    """
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    conn = _get_conn()
+    try:
+        total_row = conn.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE action LIKE 'kiosk_%'"
+        ).fetchone()
+        total = total_row[0] if total_row else 0
+        rows = conn.execute(
+            """SELECT id, ts, action, details FROM audit_log
+               WHERE action LIKE 'kiosk_%' ORDER BY id DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {"rows": [], "total": 0, "limit": limit, "offset": offset}
+
+    result_rows = []
+    for r in rows:
+        try:
+            details = json.loads(r["details"]) if r["details"] else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            details = {}
+        result_rows.append({"id": r["id"], "ts": r["ts"], "action": r["action"], "details": details})
+    return {"rows": result_rows, "total": total, "limit": limit, "offset": offset}
+
+
 def count_qr_scans_today(tz: str = "Asia/Bangkok") -> int:
     """
     นับจำนวน qr_scans ของ "วันนี้" ตาม timezone ที่กำหนด (default Asia/Bangkok)
