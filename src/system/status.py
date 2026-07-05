@@ -52,6 +52,13 @@ class DisplaySessionScriptStatus:
 
 
 @dataclass(frozen=True)
+class ScreenBlankConfigStatus:
+    path: Path
+    exists: bool
+    has_signature: bool
+
+
+@dataclass(frozen=True)
 class GdmWaylandStatus:
     path: Path
     exists: bool
@@ -123,6 +130,7 @@ GDM_CUSTOM_CONFIG_PATH = Path("/etc/gdm3/custom.conf")
 XORG_TOUCHSCREEN_SIGNATURE = "# vending-auto-config: touchscreen-xorg"
 DISPLAY_SESSION_SIGNATURE = "# vending-auto-config: display-session"
 DISPLAY_SESSION_SCRIPT_SIGNATURE = "# vending-auto-config: display-session-script"
+SCREEN_BLANK_SIGNATURE = "# vending-auto-config: screen-blank"
 
 # NOTE: อย่าใช้ Path.home() ใน module-level — ให้เรียก _effective_home() ที่ call time เสมอ
 # เพราะ Path.home() resolve เป็น /root เมื่อรัน sudo (env_reset ลบ HOME ออก)
@@ -332,6 +340,26 @@ def collect_display_session_script_status(
         exists=True,
         has_signature=DISPLAY_SESSION_SCRIPT_SIGNATURE in content,
         executable=os.access(path, os.X_OK),
+    )
+
+
+def collect_screen_blank_config_status(
+    path: Path | None = None,
+) -> ScreenBlankConfigStatus:
+    if path is None:
+        path = _effective_home_config_path()
+    if not _path_exists(path):
+        return ScreenBlankConfigStatus(path=path, exists=False, has_signature=False)
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return ScreenBlankConfigStatus(path=path, exists=True, has_signature=False)
+
+    return ScreenBlankConfigStatus(
+        path=path,
+        exists=True,
+        has_signature=SCREEN_BLANK_SIGNATURE in content,
     )
 
 

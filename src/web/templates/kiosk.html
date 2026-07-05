@@ -35,6 +35,16 @@
   #confirm-modal.is-open { display:flex; }
   #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
   #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+
+  /* ── Payload example button (สไตล์เดียวกับหน้า QR500) ── */
+  .scan-mode-btn {
+    padding:.32rem .7rem; font-size:.74rem; font-weight:600; border-radius:.5rem;
+    border:1px solid rgb(var(--c-line)/0.14); background:rgb(var(--c-card));
+    color:rgb(var(--c-muted)); cursor:pointer; transition:background .15s,color .15s,border-color .15s;
+    font-family:'Bai Jamjuree',sans-serif;
+  }
+  .scan-mode-btn:hover { background:rgb(var(--c-surface-2)); color:rgb(var(--c-ink)); }
+  .scan-mode-btn.is-active { background:rgb(var(--c-accent)/0.08); border-color:rgb(var(--c-accent)/0.4); color:rgb(var(--c-accent)); }
 </style>
 
 <div class="flex flex-col gap-4">
@@ -69,6 +79,11 @@
         <iconify-icon icon="lucide:file-text" width="13" height="13" class="flex-shrink-0"></iconify-icon>
         Config Files
       </button>
+      <button type="button" data-tab="history" onclick="setTab('history')"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+        <iconify-icon icon="lucide:history" width="13" height="13" class="flex-shrink-0"></iconify-icon>
+        ประวัติ
+      </button>
     </div>
   </nav>
 
@@ -84,73 +99,145 @@
       <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
         <div class="px-4 py-3 border-b border-line/8">
           <h3 class="text-[0.88rem] font-semibold text-ink">ความพร้อมของ Kiosk Mode</h3>
-          <p class="text-[0.72rem] text-faint mt-0.5">
+          <p id="readiness-count-text" class="text-[0.72rem] text-faint mt-0.5">
             {{ readiness.values() | select | list | length }} จาก {{ readiness | length }} ขั้นตอนพร้อมแล้ว
           </p>
         </div>
 
-        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6">
-          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.software_ok else 'bg-caution/10' }}">
-            <iconify-icon icon="lucide:package" width="15" height="15" class="{{ 'text-safe' if readiness.software_ok else 'text-caution' }}"></iconify-icon>
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" data-readiness="software">
+          <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.software_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:package" width="15" height="15" class="readiness-icon {{ 'text-safe' if readiness.software_ok else 'text-caution' }}"></iconify-icon>
           </div>
           <div class="flex-1 min-w-0">
             <span class="text-[0.85rem] font-semibold text-ink">ซอฟต์แวร์ (Openbox + Chromium)</span>
-            <p class="text-[0.72rem] text-muted mt-0.5">
+            <p class="readiness-desc text-[0.72rem] text-muted mt-0.5">
               {% if readiness.software_ok %}ติดตั้งแล้วทั้งคู่{% else %}ยังติดตั้งไม่ครบ{% endif %} — ดูที่หน้า <a href="{{ url_for('apps_page') }}" class="text-accent underline underline-offset-2">ซอฟต์แวร์ระบบ</a>
             </p>
           </div>
-          <span class="zone {{ 'zone-safe' if readiness.software_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.software_ok else 'ยังไม่ครบ' }}</span>
+          <span class="readiness-zone zone {{ 'zone-safe' if readiness.software_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.software_ok else 'ยังไม่ครบ' }}</span>
         </div>
 
-        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6">
-          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.user_ok else 'bg-caution/10' }}">
-            <iconify-icon icon="lucide:user" width="15" height="15" class="{{ 'text-safe' if readiness.user_ok else 'text-caution' }}"></iconify-icon>
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" data-readiness="user">
+          <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.user_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:user" width="15" height="15" class="readiness-icon {{ 'text-safe' if readiness.user_ok else 'text-caution' }}"></iconify-icon>
           </div>
           <div class="flex-1 min-w-0">
             <span class="text-[0.85rem] font-semibold text-ink">ผู้ใช้ Kiosk</span>
-            <p class="text-[0.72rem] text-muted mt-0.5">
+            <p class="readiness-desc text-[0.72rem] text-muted mt-0.5">
               {% if autologin_user %}สร้างแล้ว: {{ autologin_user.username }} (UID {{ autologin_user.uid }}){% else %}ยังไม่ได้สร้าง user{% endif %}
             </p>
           </div>
-          <span class="zone {{ 'zone-safe' if readiness.user_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.user_ok else 'ยังไม่ครบ' }}</span>
+          <span class="readiness-zone zone {{ 'zone-safe' if readiness.user_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.user_ok else 'ยังไม่ครบ' }}</span>
         </div>
 
-        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6">
-          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.autologin_ok else 'bg-caution/10' }}">
-            <iconify-icon icon="lucide:log-in" width="15" height="15" class="{{ 'text-safe' if readiness.autologin_ok else 'text-caution' }}"></iconify-icon>
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-b border-line/6" data-readiness="autologin">
+          <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.autologin_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:log-in" width="15" height="15" class="readiness-icon {{ 'text-safe' if readiness.autologin_ok else 'text-caution' }}"></iconify-icon>
           </div>
           <div class="flex-1 min-w-0">
             <span class="text-[0.85rem] font-semibold text-ink">Auto-login</span>
-            <p class="text-[0.72rem] text-muted mt-0.5">
+            <p class="readiness-desc text-[0.72rem] text-muted mt-0.5">
               {% if readiness.autologin_ok and autologin_user %}เปิดใช้งาน ชี้ไปที่ {{ autologin_user.username }}{% else %}ยังไม่ได้เปิด{% endif %}
             </p>
           </div>
-          <span class="zone {{ 'zone-safe' if readiness.autologin_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autologin_ok else 'ยังไม่ครบ' }}</span>
+          <span class="readiness-zone zone {{ 'zone-safe' if readiness.autologin_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autologin_ok else 'ยังไม่ครบ' }}</span>
         </div>
 
-        <div class="readiness-row flex items-center gap-4 px-4 py-3.5">
-          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.autostart_ok else 'bg-caution/10' }}">
-            <iconify-icon icon="lucide:app-window" width="15" height="15" class="{{ 'text-safe' if readiness.autostart_ok else 'text-caution' }}"></iconify-icon>
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5" data-readiness="autostart">
+          <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if readiness.autostart_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:app-window" width="15" height="15" class="readiness-icon {{ 'text-safe' if readiness.autostart_ok else 'text-caution' }}"></iconify-icon>
           </div>
           <div class="flex-1 min-w-0">
             <span class="text-[0.85rem] font-semibold text-ink">Autostart เบราว์เซอร์</span>
-            <p class="text-[0.72rem] text-muted mt-0.5">
+            <p class="readiness-desc text-[0.72rem] text-muted mt-0.5">
               {% if readiness.autostart_ok %}ตั้งค่าแล้ว ({{ autostart.url }}){% else %}ยังไม่ได้ตั้งค่า URL และ restart loop{% endif %}
             </p>
           </div>
-          <span class="zone {{ 'zone-safe' if readiness.autostart_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autostart_ok else 'ยังไม่ครบ' }}</span>
+          <span class="readiness-zone zone {{ 'zone-safe' if readiness.autostart_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autostart_ok else 'ยังไม่ครบ' }}</span>
         </div>
       </div>
 
-      {% if not readiness.autostart_ok %}
-      <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/8 border-caution/25 text-[#92660b]">
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <button type="button" onclick="toggleHeartbeatCard()"
+                class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface/50 transition-colors">
+          <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0">
+            <iconify-icon icon="lucide:radio" width="15" height="15" class="text-muted"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-[0.88rem] font-semibold text-ink">MQTT Heartbeat</h3>
+            <p class="text-[0.72rem] text-faint mt-0.5">ส่งสถานะ kiosk ไปยัง MQTT broker เป็นระยะ ใช้เช็คจากระยะไกลว่าเครื่องยังออนไลน์อยู่</p>
+          </div>
+          <span id="heartbeat-status-badge" class="zone {{ 'zone-safe' if heartbeat.running else 'zone-mute' }} flex-shrink-0">{{ 'ทำงานอยู่' if heartbeat.running else 'ปิดอยู่' }}</span>
+          <iconify-icon icon="lucide:chevron-down" width="15" height="15"
+                        class="text-faint flex-shrink-0 transition-transform" id="heartbeat-chevron"
+                        style="{{ 'transform:rotate(180deg)' if heartbeat.enabled else '' }}"></iconify-icon>
+        </button>
+        <div id="heartbeat-body" class="{{ '' if heartbeat.enabled else 'hidden' }} border-t border-line/10 p-4 flex flex-col gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-muted">MQTT Broker</label>
+            {% if mqtt_brokers %}
+            <select id="heartbeat-broker-id"
+                    class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+              <option value="">— เลือก Broker —</option>
+              {% for b in mqtt_brokers %}
+              <option value="{{ b.id }}" {{ 'selected' if heartbeat.broker_id == b.id else '' }}>{{ b.name }} — {{ b.broker_url }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <div class="flex items-center gap-2 px-3 py-2 border border-caution/20 rounded-lg bg-caution/5 text-[0.78rem] text-caution">
+              <iconify-icon icon="lucide:alert-triangle" width="13" height="13"></iconify-icon>
+              ยังไม่มี Broker — <a href="{{ url_for('mqtt_page') }}" class="underline underline-offset-2 ml-1">เพิ่ม Broker</a>
+            </div>
+            {% endif %}
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">Topic</label>
+              <input type="text" id="heartbeat-topic" value="{{ heartbeat.topic }}" placeholder="vas/kiosk/heartbeat" autocomplete="off"
+                     class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-mono">
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted">ส่งทุกกี่วินาที</label>
+              <input type="number" id="heartbeat-interval" min="5" max="3600" value="{{ heartbeat.interval_seconds }}"
+                     class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            </div>
+          </div>
+          <p id="heartbeat-last-status" class="text-[0.7rem] text-faint">{% if heartbeat.running %}กำลังทำงาน — ส่ง heartbeat ทุก {{ heartbeat.interval_seconds }} วินาที{% else %}ยังไม่ได้เปิดใช้งาน{% endif %}</p>
+
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <label class="text-[0.75rem] font-semibold text-muted">Payload (ตัวอย่าง)</label>
+              <button type="button" onclick="refreshHeartbeatStatus()"
+                      class="scan-mode-btn inline-flex items-center gap-1">
+                <iconify-icon icon="lucide:refresh-cw" width="10" height="10"></iconify-icon>Reload
+              </button>
+            </div>
+            <textarea id="heartbeat-payload-preview" readonly spellcheck="false" rows="7"
+                      class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.75rem] font-mono leading-relaxed outline-none resize-y cursor-default select-all">กำลังโหลด...</textarea>
+            <p class="text-[0.72rem] text-faint mt-0.5">รูปแบบ payload จริงมาจาก <code class="font-display bg-surface px-1 rounded text-[0.68rem]">collect_kiosk_heartbeat_payload()</code> — อัปเดตอัตโนมัติทุกครั้งที่เปิดการ์ดนี้ หรือกด Reload</p>
+          </div>
+
+          <div class="flex items-center justify-end gap-2">
+            <button type="button" onclick="disableHeartbeat()"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+              <iconify-icon icon="lucide:power-off" width="13" height="13"></iconify-icon>
+              ปิดใช้งาน
+            </button>
+            <button type="button" onclick="saveHeartbeat()"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
+              <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>
+              บันทึกและเปิดใช้งาน
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="autostart-caution-banner" class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/8 border-caution/25 text-[#92660b] {{ 'hidden' if readiness.autostart_ok else '' }}">
         <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
         <span>ยังตั้งค่าไม่ครบ — ไปที่แท็บ <strong class="font-semibold">เปิดแอปอัตโนมัติ</strong> เพื่อกำหนด URL ที่ chromium จะเปิดตอน login</span>
       </div>
-      {% endif %}
 
-      {% if readiness.autologin_ok or readiness.autostart_ok %}
-      <div class="bg-card border border-danger/15 rounded-xl overflow-hidden">
+      <div id="stop-kiosk-card" class="bg-card border border-danger/15 rounded-xl overflow-hidden {{ 'hidden' if not (readiness.autologin_ok or readiness.autostart_ok) else '' }}">
         <div class="px-4 py-3 border-b border-danger/10">
           <h3 class="text-[0.88rem] font-semibold text-ink">หยุด Kiosk Mode</h3>
           <p class="text-[0.72rem] text-faint mt-0.5">ปิด auto-login และลบไฟล์ autostart ทั้งหมดในคลิกเดียว — เครื่องจะกลับมาเข้า desktop ปกติตอนบูตครั้งถัดไป</p>
@@ -163,7 +250,6 @@
           </button>
         </div>
       </div>
-      {% endif %}
 
       <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-accent/5 border-accent/18 text-muted">
         <iconify-icon icon="lucide:info" width="14" height="14" class="flex-shrink-0 mt-0.5 text-accent"></iconify-icon>
@@ -180,10 +266,10 @@
           <h3 class="text-[0.88rem] font-semibold text-ink">เลือก user สำหรับ Kiosk</h3>
           <p class="text-[0.72rem] text-faint mt-0.5">user ที่เลือกจะถูกใช้ auto-login เข้าเครื่องตอนบูต</p>
         </div>
-        <div class="p-4 flex flex-col gap-2">
+        <div id="kiosk-user-list" class="p-4 flex flex-col gap-2">
           {% for u in kiosk_users %}
-          <label class="kuser-row flex items-center gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if u.is_autologin else '' }}">
-            <input type="radio" name="kiosk-user" value="{{ u.username }}" {{ 'checked' if u.is_autologin else '' }} class="accent-accent flex-shrink-0">
+          <label id="kuser-row-{{ u.username }}" data-username="{{ u.username }}" class="kuser-row flex items-center gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if u.username == default_kiosk_username else '' }}">
+            <input type="radio" name="kiosk-user" value="{{ u.username }}" {{ 'checked' if u.username == default_kiosk_username else '' }} class="accent-accent flex-shrink-0">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-[0.84rem] font-semibold text-ink font-display">{{ u.username }}</span>
@@ -194,6 +280,14 @@
             </div>
           </label>
           {% endfor %}
+        </div>
+        <div class="flex items-center justify-between gap-3 px-4 py-3 border-t border-line/8 bg-surface/30">
+          <p class="text-[0.7rem] text-faint leading-snug">ลบ user ที่กำลัง auto-login อยู่ไม่ได้ — ต้องปิด auto-login หรือเปลี่ยน user ก่อน</p>
+          <button type="button" onclick="confirmDeleteKioskUser()"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.78rem] font-semibold text-danger hover:bg-danger/8 transition-colors flex-shrink-0">
+            <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+            ลบ user นี้
+          </button>
         </div>
       </div>
 
@@ -209,9 +303,16 @@
                    class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
             <p class="text-[0.7rem] text-faint">ตัวพิมพ์เล็ก ตัวเลข และ - เท่านั้น</p>
           </div>
-          <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-ink select-none">
-            <input id="newKioskGroups" type="checkbox" checked class="rounded"> เพิ่มเข้ากลุ่ม video, input, plugdev (จำเป็นสำหรับจอ/touchscreen)
-          </label>
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <span class="text-[0.84rem] font-semibold text-ink">เพิ่มเข้ากลุ่ม video, input, plugdev</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">จำเป็นสำหรับจอ/touchscreen</p>
+            </div>
+            <label class="toggle-switch">
+              <input id="newKioskGroups" type="checkbox" checked>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
           <button type="button" onclick="createKioskUser()"
                   class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
             <iconify-icon icon="lucide:plus" width="14" height="14"></iconify-icon>
@@ -232,7 +333,7 @@
               <p class="text-[0.72rem] text-muted mt-0.5">สำหรับ user ที่เลือกไว้ด้านบน</p>
             </div>
             <label class="toggle-switch">
-              <input type="checkbox" {{ 'checked' if autologin_enabled else '' }} onchange="toggleAutologin(this)">
+              <input id="kioskAutologinToggle" type="checkbox" {{ 'checked' if autologin_enabled else '' }} onchange="toggleAutologin(this)">
               <div class="toggle-track"><div class="toggle-thumb"></div></div>
             </label>
           </div>
@@ -247,6 +348,7 @@
         <div class="p-4 flex flex-col gap-2">
           <label id="session-row-gnome" class="kuser-row flex items-start gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if session_type == 'gnome' else '' }}">
             <input type="radio" name="session-type" value="gnome" {{ 'checked' if session_type == 'gnome' else '' }} onchange="setSessionType('gnome')" class="accent-accent flex-shrink-0 mt-0.5">
+            <img src="/public/images/logo/gnome-logo.jpg" alt="GNOME" class="w-9 h-9 object-contain rounded-lg flex-shrink-0">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-[0.84rem] font-semibold text-ink font-display">GNOME</span>
@@ -257,6 +359,7 @@
           </label>
           <label id="session-row-openbox" class="kuser-row flex items-start gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if session_type == 'openbox' else '' }}">
             <input type="radio" name="session-type" value="openbox" {{ 'checked' if session_type == 'openbox' else '' }} onchange="setSessionType('openbox')" class="accent-accent flex-shrink-0 mt-0.5">
+            <img src="/public/images/logo/openbox-logo.png" alt="Openbox" class="w-9 h-9 object-contain rounded-lg flex-shrink-0">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-[0.84rem] font-semibold text-ink font-display">Openbox</span>
@@ -276,23 +379,6 @@
         <span><strong class="text-ink font-semibold">GDM</strong> เป็นคนจัดการ auto-login เสมอไม่ว่าจะเลือก session แบบไหน — ตัวเลือกด้านบนกำหนดแค่ "หลัง login แล้วจะเจอ UI แบบไหน" เท่านั้น ไม่ใช่ตัวเลือกแทนที่ GDM</span>
       </div>
 
-      <div class="bg-card border border-danger/15 rounded-xl overflow-hidden">
-        <div class="px-4 py-3 border-b border-danger/10">
-          <h3 class="text-[0.88rem] font-semibold text-danger">Danger zone</h3>
-        </div>
-        <div class="p-4 flex flex-col gap-3">
-          <div class="flex items-start gap-2.5 px-3.5 py-2.5 rounded-lg text-[0.78rem] border bg-caution/8 border-caution/25 text-[#92660b]">
-            <iconify-icon icon="lucide:alert-triangle" width="13" height="13" class="flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>ลบ user ที่กำลัง auto-login อยู่ไม่ได้ — ต้องปิด auto-login หรือเปลี่ยน user ก่อน</span>
-          </div>
-          <button type="button" onclick="confirmDeleteKioskUser()"
-                  class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/8 transition-colors self-start">
-            <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
-            ลบ user นี้
-          </button>
-        </div>
-      </div>
-
     </div>
 
     <!-- ════════════ TAB: เปิดแอปอัตโนมัติ ════════════ -->
@@ -306,9 +392,16 @@
         <div class="p-4 flex flex-col gap-4">
           <div class="flex flex-col gap-1.5">
             <label class="text-[0.75rem] font-semibold text-muted" for="kioskUrl">URL ที่จะเปิด</label>
-            <input id="kioskUrl" type="url" value="{{ autostart.url }}" autocomplete="off"
-                   class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
-            <p class="text-[0.7rem] text-faint">ปกติคือ dashboard ของ VAS เอง — เปลี่ยนได้ถ้าต้องการเปิดหน้าอื่น</p>
+            <div class="flex items-center gap-2">
+              <input id="kioskUrl" type="url" value="{{ autostart.url }}" autocomplete="off"
+                     class="flex-1 min-w-0 px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+              <button type="button" onclick="checkKioskUrl()" id="kioskUrlCheckBtn"
+                      class="inline-flex items-center gap-1.5 px-3 py-2 border border-line/15 rounded-lg bg-card text-muted text-[0.8rem] font-semibold hover:bg-surface hover:text-ink transition-colors flex-shrink-0">
+                <iconify-icon icon="lucide:plug-zap" width="13" height="13"></iconify-icon>
+                ทดสอบ URL
+              </button>
+            </div>
+            <p id="kioskUrlCheckResult" class="text-[0.7rem] text-faint">ปกติคือ dashboard ของ VAS เอง — เปลี่ยนได้ถ้าต้องการเปิดหน้าอื่น</p>
           </div>
 
           <div class="flex items-center justify-between gap-4">
@@ -432,13 +525,13 @@ done</textarea>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-semibold text-[0.88rem] text-ink font-display">{{ title }}</span>
-                <span class="zone {{ 'zone-safe' if ok else 'zone-caution' }}">{{ 'OK' if ok else 'WARN' }}</span>
+                <span id="cfg-zone-{{ key }}" class="zone {{ 'zone-safe' if ok else 'zone-caution' }}">{{ 'OK' if ok else 'WARN' }}</span>
               </div>
               <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ path }}</code>
               <p class="text-[0.73rem] text-muted mt-1 leading-snug">{{ desc | safe }}</p>
               <div class="flex items-center gap-1 mt-1.5">
-                <iconify-icon icon="{{ 'lucide:check-circle' if ok else 'lucide:alert-circle' }}" width="11" height="11" class="{{ 'text-safe' if ok else 'text-caution' }}"></iconify-icon>
-                <span class="text-[0.68rem] {{ 'text-safe' if ok else 'text-caution' }}">{{ status_text }}</span>
+                <iconify-icon id="cfg-status-icon-{{ key }}" icon="{{ 'lucide:check-circle' if ok else 'lucide:alert-circle' }}" width="11" height="11" class="{{ 'text-safe' if ok else 'text-caution' }}"></iconify-icon>
+                <span id="cfg-status-text-{{ key }}" class="text-[0.68rem] {{ 'text-safe' if ok else 'text-caution' }}">{{ status_text }}</span>
               </div>
             </div>
             <iconify-icon icon="lucide:chevron-down" width="15" height="15"
@@ -455,13 +548,41 @@ done</textarea>
             </div>
             <div class="p-4">
               <textarea id="cfg-content-{{ key }}" readonly spellcheck="false"
-                        class="w-full px-3 py-2.5 border-0 bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[160px] outline-none resize-y cursor-default select-all rounded-lg">{{ mock_content }}</textarea>
+                        class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[200px] outline-none resize-y cursor-default select-all">{{ mock_content }}</textarea>
             </div>
           </div>
         </div>
         {% endfor %}
       </div>
 
+    </div>
+
+    <!-- ════════════ TAB: ประวัติ ════════════ -->
+    <div id="tab-history" class="tab-panel flex flex-col gap-4">
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-[0.88rem] font-semibold text-ink">ประวัติการเปลี่ยนแปลง</h3>
+            <p class="text-[0.72rem] text-faint mt-0.5">บันทึกทุกครั้งที่สร้าง/ลบ user, เปิดปิด auto-login, เปลี่ยน session type, บันทึก autostart หรือหยุด kiosk mode</p>
+          </div>
+          <button type="button" onclick="loadKioskAudit()"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors flex-shrink-0">
+            <iconify-icon icon="lucide:refresh-cw" width="11" height="11"></iconify-icon>Reload
+          </button>
+        </div>
+        <div id="kiosk-audit-list" class="flex flex-col">
+          <div class="px-4 py-6 text-center text-[0.78rem] text-faint">กำลังโหลด...</div>
+        </div>
+        <div class="flex items-center justify-between px-4 py-3 border-t border-line/8">
+          <span id="kiosk-audit-range" class="text-[0.72rem] text-faint">—</span>
+          <div class="flex items-center gap-2">
+            <button type="button" id="kiosk-audit-prev" onclick="kioskAuditPage(-1)"
+                    class="px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled>ก่อนหน้า</button>
+            <button type="button" id="kiosk-audit-next" onclick="kioskAuditPage(1)"
+                    class="px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled>ถัดไป</button>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -502,8 +623,117 @@ done</textarea>
 (function () {
   "use strict";
 
+  // ── Confirm modal helper (มาตรฐานตาม INSTRUCTIONS.md) ──────────
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    if (!modal || !btnOk) return;
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) btnOk.childNodes[1].textContent = " " + opts.okLabel;
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
   var kioskHome = "{{ home }}";
   var currentSessionType = "{{ session_type }}";
+
+  // ── Readiness state (reactive — อัปเดตแบบ in-place ไม่ reload หน้า) ──
+  var readinessState = {
+    software_ok: {{ readiness.software_ok | tojson }},
+    user_ok: {{ readiness.user_ok | tojson }},
+    autologin_ok: {{ readiness.autologin_ok | tojson }},
+    autostart_ok: {{ readiness.autostart_ok | tojson }}
+  };
+
+  function updateReadinessRow(key, ok, descText) {
+    var row = document.querySelector('[data-readiness="' + key + '"]');
+    if (!row) return;
+    var iconBox = row.querySelector(".readiness-icon-box");
+    var icon = row.querySelector(".readiness-icon");
+    var zone = row.querySelector(".readiness-zone");
+    var desc = row.querySelector(".readiness-desc");
+    if (iconBox) { iconBox.classList.toggle("bg-safe/8", ok); iconBox.classList.toggle("bg-caution/10", !ok); }
+    if (icon) { icon.classList.toggle("text-safe", ok); icon.classList.toggle("text-caution", !ok); }
+    if (zone) {
+      zone.classList.toggle("zone-safe", ok);
+      zone.classList.toggle("zone-caution", !ok);
+      zone.textContent = ok ? "พร้อม" : "ยังไม่ครบ";
+    }
+    if (desc && descText !== undefined) desc.textContent = descText;
+  }
+
+  function updateReadinessSummary() {
+    var count = 0;
+    ["software_ok", "user_ok", "autologin_ok", "autostart_ok"].forEach(function (k) {
+      if (readinessState[k]) count++;
+    });
+    var countEl = document.getElementById("readiness-count-text");
+    if (countEl) countEl.textContent = count + " จาก 4 ขั้นตอนพร้อมแล้ว";
+
+    var banner = document.getElementById("autostart-caution-banner");
+    if (banner) banner.classList.toggle("hidden", readinessState.autostart_ok);
+
+    var stopCard = document.getElementById("stop-kiosk-card");
+    if (stopCard) stopCard.classList.toggle("hidden", !(readinessState.autologin_ok || readinessState.autostart_ok));
+  }
+
+  function updateCfgCardStatus(key, ok, statusText) {
+    var zone = document.getElementById("cfg-zone-" + key);
+    if (zone) {
+      zone.classList.toggle("zone-safe", ok);
+      zone.classList.toggle("zone-caution", !ok);
+      zone.textContent = ok ? "OK" : "WARN";
+    }
+    var icon = document.getElementById("cfg-status-icon-" + key);
+    if (icon) {
+      icon.setAttribute("icon", ok ? "lucide:check-circle" : "lucide:alert-circle");
+      icon.classList.toggle("text-safe", ok);
+      icon.classList.toggle("text-caution", !ok);
+    }
+    var text = document.getElementById("cfg-status-text-" + key);
+    if (text) {
+      if (statusText !== undefined) text.textContent = statusText;
+      text.classList.toggle("text-safe", ok);
+      text.classList.toggle("text-caution", !ok);
+    }
+  }
+
+  function kioskUserRowHtml(u) {
+    var badges = "";
+    if (u.managed_by_vas) badges += '<span class="zone zone-mute">สร้างโดย VAS</span>';
+    return (
+      '<label id="kuser-row-' + u.username + '" data-username="' + u.username + '" ' +
+      'class="kuser-row flex items-center gap-3 px-3.5 py-3 border border-line/10 rounded-lg">' +
+      '<input type="radio" name="kiosk-user" value="' + u.username + '" class="accent-accent flex-shrink-0">' +
+      '<div class="flex-1 min-w-0">' +
+      '<div class="flex items-center gap-2 flex-wrap">' +
+      '<span class="text-[0.84rem] font-semibold text-ink font-display">' + u.username + '</span>' +
+      badges +
+      "</div>" +
+      '<p class="text-[0.72rem] text-faint mt-0.5">UID ' + u.uid + " · " + u.home + "</p>" +
+      "</div>" +
+      "</label>"
+    );
+  }
+
+  function addKioskUserRow(u) {
+    var list = document.getElementById("kiosk-user-list");
+    if (!list || !u) return;
+    list.insertAdjacentHTML("beforeend", kioskUserRowHtml(u));
+  }
 
   function acctServiceContent(type) {
     var s = type === "openbox" ? "openbox" : "ubuntu-xorg";
@@ -535,6 +765,121 @@ done</textarea>
     if (data && data.error) return data.error;
     return "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
   }
+
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // ── รูปแบบเวลาเดียวกับหน้าประวัติการสแกน QR500 (พ.ศ. + ซ่อนวันที่ถ้าเป็นวันนี้) ──
+  function formatTs(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    var now = new Date();
+    var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    var timeStr = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    if (sameDay) return timeStr;
+    return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + (d.getFullYear() + 543) + " " + timeStr;
+  }
+
+  // ── ประวัติการเปลี่ยนแปลง (audit log) ───────────────────────────
+  var KIOSK_AUDIT_META = {
+    kiosk_user_created:        { icon: "lucide:user-plus",   label: "สร้าง user" },
+    kiosk_user_deleted:        { icon: "lucide:user-minus",  label: "ลบ user" },
+    kiosk_autologin_changed:   { icon: "lucide:log-in",      label: "เปลี่ยนสถานะ auto-login" },
+    kiosk_session_type_changed:{ icon: "lucide:layout",      label: "เปลี่ยน session type" },
+    kiosk_autostart_saved:     { icon: "lucide:save",        label: "บันทึก autostart" },
+    kiosk_stopped:             { icon: "lucide:power-off",   label: "หยุด kiosk mode" },
+    kiosk_heartbeat_toggled:   { icon: "lucide:radio",       label: "ตั้งค่า MQTT heartbeat" }
+  };
+
+  function describeAuditEntry(action, details) {
+    details = details || {};
+    switch (action) {
+      case "kiosk_user_created":
+        return "user: " + details.username + (details.groups ? " (เพิ่มเข้ากลุ่ม video/input/plugdev)" : "");
+      case "kiosk_user_deleted":
+        return "user: " + details.username;
+      case "kiosk_autologin_changed":
+        return (details.enabled ? "เปิด" : "ปิด") + " สำหรับ " + details.username;
+      case "kiosk_session_type_changed":
+        return details.username + " → " + (details.session_type === "openbox" ? "Openbox" : "GNOME");
+      case "kiosk_autostart_saved":
+        return details.url + " (restart " + (details.restart_enabled ? "เปิด" : "ปิด") + ", รอ " + details.restart_delay + " วิ)";
+      case "kiosk_stopped":
+        return "user: " + details.username;
+      case "kiosk_heartbeat_toggled":
+        return (details.enabled ? "เปิดใช้งาน" : "ปิดใช้งาน") + (details.topic ? " — topic: " + details.topic : "");
+      default:
+        return JSON.stringify(details);
+    }
+  }
+
+  var kioskAuditState = { limit: 20, offset: 0, total: 0, loading: false };
+
+  window.loadKioskAudit = function () {
+    if (kioskAuditState.loading) return;
+    kioskAuditState.loading = true;
+    var list = document.getElementById("kiosk-audit-list");
+    fetch("/api/kiosk/audit?limit=" + kioskAuditState.limit + "&offset=" + kioskAuditState.offset)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        kioskAuditState.total = data.total || 0;
+        renderKioskAudit(data.rows || []);
+        renderKioskAuditPagination();
+      })
+      .catch(function () {
+        if (list) list.innerHTML = '<div class="px-4 py-6 text-center text-[0.78rem] text-danger">โหลดประวัติไม่สำเร็จ</div>';
+      })
+      .finally(function () { kioskAuditState.loading = false; });
+  };
+
+  function renderKioskAudit(rows) {
+    var list = document.getElementById("kiosk-audit-list");
+    if (!list) return;
+    if (!rows.length) {
+      list.innerHTML = '<div class="px-4 py-6 text-center text-[0.78rem] text-faint">ยังไม่มีประวัติ</div>';
+      return;
+    }
+    var html = "";
+    rows.forEach(function (row) {
+      var meta = KIOSK_AUDIT_META[row.action] || { icon: "lucide:activity", label: row.action };
+      html +=
+        '<div class="flex items-start gap-3 px-4 py-3 border-b border-line/6 last:border-b-0">' +
+        '<div class="w-8 h-8 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">' +
+        '<iconify-icon icon="' + meta.icon + '" width="14" height="14" class="text-muted"></iconify-icon>' +
+        "</div>" +
+        '<div class="flex-1 min-w-0">' +
+        '<span class="text-[0.82rem] font-semibold text-ink">' + escHtml(meta.label) + "</span>" +
+        '<p class="text-[0.72rem] text-muted mt-0.5">' + escHtml(describeAuditEntry(row.action, row.details)) + "</p>" +
+        '<p class="text-[0.68rem] text-faint mt-0.5">' + formatTs(row.ts) + "</p>" +
+        "</div>" +
+        "</div>";
+    });
+    list.innerHTML = html;
+  }
+
+  function renderKioskAuditPagination() {
+    var label = document.getElementById("kiosk-audit-range");
+    var prevBtn = document.getElementById("kiosk-audit-prev");
+    var nextBtn = document.getElementById("kiosk-audit-next");
+    var total = kioskAuditState.total;
+    var from = total === 0 ? 0 : kioskAuditState.offset + 1;
+    var to = Math.min(kioskAuditState.offset + kioskAuditState.limit, total);
+    if (label) label.textContent = total === 0 ? "ไม่มีข้อมูล" : ("แสดง " + from + "–" + to + " จาก " + total + " รายการ");
+    if (prevBtn) prevBtn.disabled = kioskAuditState.offset <= 0;
+    if (nextBtn) nextBtn.disabled = kioskAuditState.offset + kioskAuditState.limit >= total;
+  }
+
+  window.kioskAuditPage = function (delta) {
+    var next = kioskAuditState.offset + delta * kioskAuditState.limit;
+    kioskAuditState.offset = Math.max(0, next);
+    loadKioskAudit();
+  };
 
   // ── Session type switch (Config Files + Autostart preview ปรับตาม + บันทึกจริง) ──
   window.setSessionType = function (type) {
@@ -591,7 +936,11 @@ done</textarea>
       .then(function (result) {
         if (result.ok) {
           showToast("สร้าง user " + username + " สำเร็จ", "success");
-          setTimeout(function () { window.location.reload(); }, 600);
+          if (usernameEl) usernameEl.value = "";
+          addKioskUserRow(result.data.user);
+          readinessState.user_ok = true;
+          updateReadinessRow("user", true);
+          updateReadinessSummary();
         } else {
           showToast(firstError(result.data), "error");
         }
@@ -608,7 +957,12 @@ done</textarea>
     apiRequest("DELETE", "/api/kiosk/users/" + encodeURIComponent(username)).then(function (result) {
       if (result.ok) {
         showToast("ลบ user " + username + " สำเร็จ", "success");
-        setTimeout(function () { window.location.reload(); }, 600);
+        var row = document.getElementById("kuser-row-" + username);
+        if (row) row.remove();
+        var remaining = document.querySelectorAll("#kiosk-user-list .kuser-row").length;
+        readinessState.user_ok = remaining > 0;
+        updateReadinessRow("user", readinessState.user_ok, remaining > 0 ? undefined : "ยังไม่ได้สร้าง user");
+        updateReadinessSummary();
       } else {
         showToast(firstError(result.data), "error");
       }
@@ -627,6 +981,16 @@ done</textarea>
     apiRequest("POST", "/api/kiosk/autologin", { username: username, enabled: enabled }).then(function (result) {
       if (result.ok) {
         showToast(enabled ? "เปิด auto-login แล้ว" : "ปิด auto-login แล้ว", "success");
+        var status = result.data;
+        readinessState.autologin_ok = !!(status.enabled && status.username);
+        var descText = readinessState.autologin_ok ? ("เปิดใช้งาน ชี้ไปที่ " + status.username) : "ยังไม่ได้เปิด";
+        updateReadinessRow("autologin", readinessState.autologin_ok, descText);
+        updateCfgCardStatus(
+          "gdm_custom",
+          readinessState.autologin_ok,
+          readinessState.autologin_ok ? ("AutomaticLogin=" + status.username + " ตั้งค่าถูกต้อง") : "ยังไม่ได้ตั้งค่า auto-login"
+        );
+        updateReadinessSummary();
       } else {
         showToast(firstError(result.data), "error");
         checkbox.checked = !enabled;
@@ -653,7 +1017,120 @@ done</textarea>
     }).then(function (result) {
       if (result.ok) {
         showToast("บันทึกและเปิดใช้งาน autostart แล้ว", "success");
-        setTimeout(function () { window.location.reload(); }, 600);
+        var status = result.data;
+        readinessState.autostart_ok = !!status.configured;
+        var descText = readinessState.autostart_ok ? ("ตั้งค่าแล้ว (" + status.url + ")") : "ยังไม่ได้ตั้งค่า URL และ restart loop";
+        updateReadinessRow("autostart", readinessState.autostart_ok, descText);
+        updateReadinessSummary();
+
+        var cfgKeys = currentSessionType === "openbox"
+          ? ["openbox_autostart"]
+          : ["autostart_desktop", "kiosk_launch_script"];
+        cfgKeys.forEach(function (key) {
+          updateCfgCardStatus(key, readinessState.autostart_ok, readinessState.autostart_ok ? undefined : "ยังไม่ถูกสร้าง");
+          reloadConfigContent(key);
+        });
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
+
+  // ── ทดสอบ URL ก่อนบันทึก (กัน URL พิมพ์ผิด/เข้าไม่ถึง แล้วจอ kiosk ขาวตอน boot) ──
+  window.checkKioskUrl = function () {
+    var urlEl = document.getElementById("kioskUrl");
+    var resultEl = document.getElementById("kioskUrlCheckResult");
+    var btn = document.getElementById("kioskUrlCheckBtn");
+    var url = urlEl ? urlEl.value.trim() : "";
+    if (!url) {
+      showToast("กรอก URL ก่อน", "error");
+      return;
+    }
+    if (btn) { btn.disabled = true; }
+    if (resultEl) { resultEl.textContent = "กำลังทดสอบ..."; resultEl.className = "text-[0.7rem] text-faint"; }
+    apiRequest("POST", "/api/kiosk/check-url", { url: url }).then(function (result) {
+      if (btn) { btn.disabled = false; }
+      var data = result.data || {};
+      if (!resultEl) return;
+      if (data.ok) {
+        resultEl.textContent = "เข้าถึงได้ (HTTP " + data.status_code + ")";
+        resultEl.className = "text-[0.7rem] text-safe";
+      } else {
+        resultEl.textContent = "เข้าถึงไม่ได้ — " + (data.error || "ไม่ทราบสาเหตุ");
+        resultEl.className = "text-[0.7rem] text-danger";
+      }
+    });
+  };
+
+  // ── MQTT Heartbeat ────────────────────────────────────────────
+  window.toggleHeartbeatCard = function () {
+    var body = document.getElementById("heartbeat-body");
+    var chev = document.getElementById("heartbeat-chevron");
+    if (!body) return;
+    var nowHidden = body.classList.toggle("hidden");
+    if (chev) chev.style.transform = nowHidden ? "" : "rotate(180deg)";
+    if (!nowHidden) refreshHeartbeatStatus();
+  };
+
+  function refreshHeartbeatStatus() {
+    var statusEl = document.getElementById("heartbeat-last-status");
+    var badge = document.getElementById("heartbeat-status-badge");
+    var payloadEl = document.getElementById("heartbeat-payload-preview");
+    apiRequest("GET", "/api/kiosk/heartbeat").then(function (result) {
+      if (!result.ok || !statusEl) return;
+      var data = result.data;
+      if (badge) {
+        badge.textContent = data.running ? "ทำงานอยู่" : "ปิดอยู่";
+        badge.classList.toggle("zone-safe", !!data.running);
+        badge.classList.toggle("zone-mute", !data.running);
+      }
+      if (payloadEl) {
+        payloadEl.value = data.payload ? JSON.stringify(data.payload, null, 2) : "โหลด payload ไม่สำเร็จ";
+      }
+      if (!data.running) {
+        statusEl.textContent = "ยังไม่ได้เปิดใช้งาน";
+        return;
+      }
+      var last = data.last_result;
+      if (last && last.published) {
+        statusEl.textContent = "ส่งสำเร็จล่าสุด: " + formatTs(data.last_published_at);
+      } else if (last && last.error) {
+        statusEl.textContent = "กำลังทำงาน แต่ publish ล่าสุดไม่สำเร็จ: " + last.error;
+      } else {
+        statusEl.textContent = "กำลังทำงาน...";
+      }
+    });
+  }
+
+  window.saveHeartbeat = function () {
+    var brokerEl = document.getElementById("heartbeat-broker-id");
+    var topicEl = document.getElementById("heartbeat-topic");
+    var intervalEl = document.getElementById("heartbeat-interval");
+    var brokerId = brokerEl ? brokerEl.value : "";
+    if (!brokerId) {
+      showToast("เลือก MQTT broker ก่อน", "error");
+      return;
+    }
+    apiRequest("POST", "/api/kiosk/heartbeat", {
+      enabled: true,
+      broker_id: parseInt(brokerId, 10),
+      topic: topicEl ? topicEl.value.trim() : "vas/kiosk/heartbeat",
+      interval_seconds: intervalEl ? parseInt(intervalEl.value, 10) || 30 : 30,
+    }).then(function (result) {
+      if (result.ok) {
+        showToast("เปิดใช้งาน MQTT heartbeat แล้ว", "success");
+        refreshHeartbeatStatus();
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
+
+  window.disableHeartbeat = function () {
+    apiRequest("POST", "/api/kiosk/heartbeat", { enabled: false }).then(function (result) {
+      if (result.ok) {
+        showToast("ปิดใช้งาน MQTT heartbeat แล้ว", "success");
+        refreshHeartbeatStatus();
       } else {
         showToast(firstError(result.data), "error");
       }
@@ -694,6 +1171,11 @@ done</textarea>
         ? " bg-accent/8 text-accent font-semibold"
         : " text-muted hover:bg-surface hover:text-ink";
     });
+
+    if (id === "history" && !kioskAuditState.loaded) {
+      kioskAuditState.loaded = true;
+      loadKioskAudit();
+    }
   };
 
   // ── Config file accordion ───────────────────────────────────────
@@ -721,7 +1203,21 @@ done</textarea>
     apiRequest("POST", "/api/kiosk/stop", { username: username }).then(function (result) {
       if (result.ok) {
         showToast("หยุด kiosk mode แล้ว", "success");
-        setTimeout(function () { window.location.reload(); }, 600);
+
+        var autologinToggle = document.getElementById("kioskAutologinToggle");
+        if (autologinToggle) autologinToggle.checked = false;
+
+        readinessState.autologin_ok = false;
+        readinessState.autostart_ok = false;
+        updateReadinessRow("autologin", false, "ยังไม่ได้เปิด");
+        updateReadinessRow("autostart", false, "ยังไม่ได้ตั้งค่า URL และ restart loop");
+        updateReadinessSummary();
+
+        updateCfgCardStatus("gdm_custom", false, "ยังไม่ได้ตั้งค่า auto-login");
+        updateCfgCardStatus("autostart_desktop", false, 'ยังไม่พบไฟล์ — บันทึกที่แท็บ "เปิดแอปอัตโนมัติ" ก่อน');
+        updateCfgCardStatus("kiosk_launch_script", false, "ยังไม่ถูกสร้าง");
+        updateCfgCardStatus("openbox_autostart", false, "ยังไม่ถูกสร้าง");
+        ["gdm_custom", "autostart_desktop", "kiosk_launch_script", "openbox_autostart"].forEach(reloadConfigContent);
       } else {
         showToast(firstError(result.data), "error");
       }

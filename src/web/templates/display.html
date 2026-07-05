@@ -43,6 +43,14 @@
   .tab-panel.is-active { display:flex; flex-direction:column; animation:tabFade 0.15s ease forwards; }
   @keyframes tabFade { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 
+  /* ── Toggle switch ── */
+  .toggle-switch { position:relative; display:inline-flex; align-items:center; gap:0.5rem; cursor:pointer; flex-shrink:0; }
+  .toggle-switch input { position:absolute; opacity:0; width:0; height:0; }
+  .toggle-track { width:36px; height:20px; border-radius:10px; background:rgb(var(--c-faint)/0.4); transition:background 0.2s; border:1px solid rgb(var(--c-line)/0.14); position:relative; }
+  .toggle-switch input:checked + .toggle-track { background:rgb(var(--c-safe)); border-color:rgb(var(--c-safe)); }
+  .toggle-thumb { position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.15); transition:left 0.2s; }
+  .toggle-switch input:checked + .toggle-track .toggle-thumb { left:18px; }
+
 </style>
 
 <div class="flex flex-col gap-4">
@@ -155,13 +163,21 @@
               </div>
               <p class="text-[0.7rem] text-faint">Usually :0. Display output is the monitor name from xrandr.</p>
             </div>
-            <div class="flex flex-col gap-2">
-              <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-ink select-none">
-                <input id="persistSession" type="checkbox" checked class="rounded"> Persist at login
-              </label>
-              <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-ink select-none">
-                <input id="persistXorg" type="checkbox" class="rounded"> Persist touch in Xorg
-              </label>
+            <div class="flex flex-col gap-3">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-[0.82rem] text-ink">Persist at login</span>
+                <label class="toggle-switch">
+                  <input id="persistSession" type="checkbox" checked>
+                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-[0.82rem] text-ink">Persist touch in Xorg</span>
+                <label class="toggle-switch">
+                  <input id="persistXorg" type="checkbox">
+                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -170,6 +186,42 @@
         <div class="px-4 py-4 flex items-center justify-between gap-4">
           <div class="msg text-[0.82rem]" id="applyResult" aria-live="polite"></div>
           <button id="applyDisplayInline" type="button"
+                  class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+            <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
+          </button>
+        </div>
+      </div>
+
+      <!-- Screen Blank Setting card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-2">
+            <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+            <h2 class="text-[0.9rem] font-semibold text-ink">การปิดหน้าจออัตโนมัติ (Screen Blank)</h2>
+          </div>
+          <span id="screenBlankStatus" class="zone {{ 'zone-mute' if current_screen_blank is none else 'zone-info' }}">{{ current_screen_blank_label }}</span>
+        </div>
+        <div class="flex flex-col gap-4 p-4">
+          <div class="flex flex-col gap-1.5 max-w-sm">
+            <label class="text-[0.75rem] font-semibold text-muted" for="screenBlankSelect">ปิดหน้าจอเมื่อไม่ใช้งานเกิน</label>
+            <select id="screenBlankSelect" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+              {% for seconds, label in screen_blank_options %}
+              <option value="{{ seconds }}" {{ 'selected' if seconds == current_screen_blank else '' }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <p class="text-[0.7rem] text-faint">ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> (screensaver + DPMS) — เทียบเท่า Ubuntu Settings &gt; Power &gt; Screen Blank</p>
+          </div>
+          <div class="flex items-center justify-between gap-4">
+            <span class="text-[0.82rem] text-ink">จำค่านี้ไว้หลัง reboot (บันทึกลง .xprofile)</span>
+            <label class="toggle-switch">
+              <input id="persistScreenBlank" type="checkbox" checked>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+        </div>
+        <div class="px-4 py-4 flex items-center justify-between gap-4 border-t border-line/10">
+          <div class="msg text-[0.82rem]" id="screenBlankResult" aria-live="polite"></div>
+          <button id="applyScreenBlank" type="button"
                   class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
             <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
           </button>
@@ -550,8 +602,97 @@
     .catch(function (e) { setResult("Fetch error: " + e, "error"); });
   }
 
-  var applyBtn = document.getElementById("applyBtn");
+  var applyBtn = document.getElementById("applyDisplayInline");
   if (applyBtn) applyBtn.addEventListener("click", doApply);
+
+  // ── Display Protocol switch (X11 / Wayland) ──────────────────────────────
+  var waylandResult = document.getElementById("waylandResult");
+
+  function setWaylandResult(msg, status) {
+    if (!waylandResult) return;
+    waylandResult.className = "text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+    waylandResult.textContent = msg;
+  }
+
+  document.querySelectorAll("[data-wayland-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var action = btn.getAttribute("data-wayland-action");
+      var label = action === "disable" ? "X11" : "Wayland";
+      btn.disabled = true;
+      setWaylandResult("กำลังเปลี่ยนเป็น " + label + " ...", "");
+      fetch("/api/display/wayland", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: action }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, body: d }; }); })
+        .then(function (res) {
+          if (res.ok && res.body.status === "ok") {
+            setWaylandResult("เปลี่ยนเป็น " + label + " แล้ว — ต้อง re-login หรือ reboot เพื่อให้มีผล", "ok");
+            setTimeout(function () { location.reload(); }, 1200);
+          } else {
+            btn.disabled = false;
+            setWaylandResult("Error: " + ((res.body && res.body.errors || []).join(", ") || "ไม่ทราบสาเหตุ"), "error");
+          }
+        })
+        .catch(function (e) {
+          btn.disabled = false;
+          setWaylandResult("Fetch error: " + e, "error");
+        });
+    });
+  });
+
+  // ── Screen Blank (screensaver / DPMS) ────────────────────────────────────
+  var screenBlankSelect  = document.getElementById("screenBlankSelect");
+  var persistScreenBlank = document.getElementById("persistScreenBlank");
+  var screenBlankResult  = document.getElementById("screenBlankResult");
+  var screenBlankStatus  = document.getElementById("screenBlankStatus");
+  var screenBlankLabels  = {};
+  if (screenBlankSelect) {
+    Array.prototype.forEach.call(screenBlankSelect.options, function (opt) {
+      screenBlankLabels[opt.value] = opt.textContent;
+    });
+  }
+
+  function setScreenBlankResult(msg, status) {
+    if (!screenBlankResult) return;
+    screenBlankResult.className = "msg text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+    screenBlankResult.textContent = msg;
+  }
+
+  var applyScreenBlankBtn = document.getElementById("applyScreenBlank");
+  if (applyScreenBlankBtn) applyScreenBlankBtn.addEventListener("click", function () {
+    if (!screenBlankSelect) return;
+    var seconds = parseInt(screenBlankSelect.value, 10) || 0;
+    setScreenBlankResult("Applying...", "");
+    applyScreenBlankBtn.disabled = true;
+    fetch("{{ url_for('display_screen_blank') }}", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        seconds: seconds,
+        display: (xDisplayInput ? xDisplayInput.value.trim() : ":0") || ":0",
+        persist: persistScreenBlank ? persistScreenBlank.checked : true,
+      }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      applyScreenBlankBtn.disabled = false;
+      if (d.status === "ok") {
+        setScreenBlankResult("Applied successfully", "ok");
+        if (screenBlankStatus) {
+          screenBlankStatus.textContent = screenBlankLabels[String(seconds)] || (seconds + " วินาที");
+          screenBlankStatus.className = "zone zone-info";
+        }
+        setTimeout(function () { setScreenBlankResult("", ""); }, 3000);
+      } else {
+        setScreenBlankResult("Error: " + (d.errors || []).join(", "), "error");
+      }
+    })
+    .catch(function (e) {
+      applyScreenBlankBtn.disabled = false;
+      setScreenBlankResult("Fetch error: " + e, "error");
+    });
+  });
 
   // ── Config file loading ──────────────────────────────────────
   window.toggleConfig = function (key) {

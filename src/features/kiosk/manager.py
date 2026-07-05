@@ -19,8 +19,10 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import socket
 import stat
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence, cast
 
@@ -55,9 +57,11 @@ __all__ = [
     "build_gdm_autologin_config",
     "build_gnome_autostart_desktop",
     "build_kiosk_launch_script",
+    "check_url_reachable",
     "collect_accounts_service_status",
     "collect_gdm_autologin_status",
     "collect_kiosk_autostart_status",
+    "collect_kiosk_heartbeat_payload",
     "collect_kiosk_readiness",
     "collect_kiosk_software_status",
     "get_gdm_autologin_username",
@@ -66,6 +70,7 @@ __all__ = [
     "kiosk_openbox_autostart_path",
     "list_kiosk_linux_users",
     "print_kiosk_status",
+    "resolve_kiosk_target_user",
     "stop_kiosk_mode",
 ]
 
@@ -501,6 +506,60 @@ def list_kiosk_linux_users() -> "tuple[KioskLinuxUser, ...]":
     return tuple(sorted(users, key=lambda u: (not u.is_autologin, u.username)))
 
 
+def resolve_kiosk_target_user(users: "tuple[KioskLinuxUser, ...]") -> "KioskLinuxUser | None":
+    """หา user ที่หน้า Kiosk ควรใช้เป็น 'target' สำหรับอ่าน/plan session type, autostart
+    path และ config file — เดิมโค้ดฝั่งเว็บผูกกับ is_autologin ตรงๆ ทำให้พอปิด auto-login
+    (หรือยังไม่เคยเปิดเลย) หน้าเว็บจะมองไม่เห็น user และ fallback ไปที่ home/session
+    ปลอมๆ ('/home/kiosk-user', 'gnome') ทั้งที่จริงมี user + ค่าที่เคยตั้งไว้อยู่แล้ว
+    บนดิสก์ — ลำดับความสำคัญ: user ที่ auto-login อยู่ปัจจุบัน > user ที่ VAS สร้างให้
+    (managed_by_vas) > user แรกสุดในลิสต์ > ไม่มี user เลย"""
+    autologin_user = next((u for u in users if u.is_autologin), None)
+    if autologin_user is not None:
+        return autologin_user
+    managed_user = next((u for u in users if u.managed_by_vas), None)
+    if managed_user is not None:
+        return managed_user
+    return users[0] if users else None
+
+
+def collect_kiosk_heartbeat_payload() -> dict[str, object]:
+    """สรุปสถานะ kiosk ปัจจุบันเป็น flat dict สำหรับส่งเป็น MQTT heartbeat payload —
+    เขียนแยกจาก server._kiosk_page_context() เพราะตัวนั้นผูกกับ Flask request context
+    (เรียก url_for) ส่วนอันนี้ต้องเรียกได้จาก background thread ที่ไม่มี request context ให้ใช้"""
+    users = list_kiosk_linux_users()
+    autologin = collect_gdm_autologin_status()
+    software = collect_kiosk_software_status()
+    target_user = resolve_kiosk_target_user(users)
+
+    session_type = "gnome"
+    if target_user is not None:
+        session_type = collect_accounts_service_status(target_user.username).session_type
+    home = target_user.home if target_user is not None else Path("/home/kiosk-user")
+
+    autostart = collect_kiosk_autostart_status(session_type, home)
+    readiness = collect_kiosk_readiness(users, autologin, autostart, software)
+
+    try:
+        hostname = socket.gethostname()
+    except OSError:
+        hostname = "unknown"
+
+    return {
+        "hostname": hostname,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "kiosk_user": target_user.username if target_user is not None else None,
+        "session_type": session_type,
+        "autologin_enabled": autologin.enabled,
+        "autostart_url": autostart.url if autostart.configured else None,
+        "readiness": {
+            "software_ok": readiness.software_ok,
+            "user_ok": readiness.user_ok,
+            "autologin_ok": readiness.autologin_ok,
+            "autostart_ok": readiness.autostart_ok,
+        },
+    }
+
+
 def collect_kiosk_autostart_status(session_type: str, home: Path) -> KioskAutostartStatus:
     if dev_fake_installed():
         return KioskAutostartStatus(
@@ -577,6 +636,36 @@ def stop_kiosk_mode(runner: CommandRunner, home: Path) -> None:
     manager = KioskManager(runner)
     manager.set_autologin(None, enabled=False)
     manager.remove_autostart(home)
+
+
+def check_url_reachable(url: str, timeout: int = 10) -> dict[str, object]:
+    """เช็คว่า URL ที่จะใช้เป็น autostart target เปิดได้จริงไหม (HTTP GET แบบสั้นๆ) — กันเคส
+    พิมพ์ URL ผิด/เข้าไม่ถึง แล้วจอ kiosk ขึ้นขาวตอน boot โดยไม่มีทางรู้จนกว่าจะเดินไปดูจอจริง
+    ใช้ urllib.request ตาม convention เดิมของโปรเจกต์ (ดู system/clock.py, services/updater.py)
+    ไม่เพิ่ม dependency ใหม่ (requests/httpx) — คืน dict เสมอ ไม่ raise
+
+    HTTPError ที่ status < 500 (เช่น 401/403/404) ยังถือว่า "เข้าถึงได้" เพราะ server ตอบกลับจริง
+    แค่ route/auth อาจไม่ตรง ไม่ใช่ URL เข้าไม่ถึงเลย — 5xx ถือว่า error เพราะฝั่งปลายทางมีปัญหาเอง
+    """
+    import urllib.error
+    import urllib.request
+
+    if not url or not url.strip():
+        return {"ok": False, "status_code": None, "error": "ไม่ได้ระบุ URL"}
+
+    request = urllib.request.Request(url, method="GET", headers={"User-Agent": "VAS-Kiosk-Check/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:  # noqa: S310 — URL มาจาก admin ตั้งเอง ไม่ใช่ user input จากภายนอก
+            return {"ok": True, "status_code": resp.status, "error": None}
+    except urllib.error.HTTPError as exc:
+        ok = exc.code < 500
+        return {"ok": ok, "status_code": exc.code, "error": None if ok else f"เซิร์ฟเวอร์ปลายทางตอบกลับ HTTP {exc.code}"}
+    except urllib.error.URLError as exc:
+        return {"ok": False, "status_code": None, "error": str(exc.reason)}
+    except ValueError as exc:
+        return {"ok": False, "status_code": None, "error": f"URL ไม่ถูกต้อง: {exc}"}
+    except Exception as exc:  # noqa: BLE001 — กันทุกกรณีที่ไม่คาดคิด ไม่ให้ endpoint 500 เปล่าๆ
+        return {"ok": False, "status_code": None, "error": str(exc)}
 
 
 def print_kiosk_status() -> None:

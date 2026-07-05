@@ -12,6 +12,7 @@ from system.status import (
     DISPLAY_SESSION_SCRIPT_SIGNATURE,
     DISPLAY_SESSION_SIGNATURE,
     GDM_CUSTOM_CONFIG_PATH,
+    SCREEN_BLANK_SIGNATURE,
     XORG_TOUCHSCREEN_CONFIG_PATH,
     XORG_TOUCHSCREEN_SIGNATURE,
     _effective_home_config_path,
@@ -37,21 +38,42 @@ ROTATION_MATRICES: "dict[str, tuple[str, ...]]" = {
 COORDINATE_TRANSFORMATION_MATRIX = "Coordinate Transformation Matrix"
 DISPLAY_SESSION_BEGIN = f"{DISPLAY_SESSION_SIGNATURE} BEGIN"
 DISPLAY_SESSION_END = f"{DISPLAY_SESSION_SIGNATURE} END"
+SCREEN_BLANK_BEGIN = f"{SCREEN_BLANK_SIGNATURE} BEGIN"
+SCREEN_BLANK_END = f"{SCREEN_BLANK_SIGNATURE} END"
+
+# ค่า timeout (วินาที) + label ภาษาไทย — เทียบเท่า GNOME Settings > Power > Screen Blank
+# 0 = ไม่ปิดหน้าจอ (Never) -> xset s off + xset -dpms
+SCREEN_BLANK_OPTIONS: "tuple[tuple[int, str], ...]" = (
+    (180, "3 นาที"),
+    (240, "4 นาที"),
+    (300, "5 นาที"),
+    (480, "8 นาที"),
+    (600, "10 นาที"),
+    (720, "12 นาที"),
+    (900, "15 นาที"),
+    (0, "ไม่ปิดหน้าจอ (Never)"),
+)
 
 __all__ = [
     "DISPLAY_SESSION_SIGNATURE",
     "ROTATION_MATRICES",
+    "SCREEN_BLANK_OPTIONS",
+    "SCREEN_BLANK_SIGNATURE",
     "XORG_TOUCHSCREEN_SIGNATURE",
     "DisplayConfigurator",
     "TouchDevice",
     "build_display_session_block",
     "build_display_session_script",
     "build_gdm_wayland_config",
+    "build_screen_blank_block",
+    "build_screen_blank_commands",
     "build_xorg_touchscreen_config",
+    "get_screen_blank_seconds",
     "get_udevadm_touchscreen_names",
     "list_touch_devices",
     "matrix_for_rotation",
     "parse_xinput_device_map",
+    "parse_xset_screen_blank_seconds",
     "remove_managed_block",
     "upsert_managed_block",
 ]
@@ -155,6 +177,50 @@ class DisplayConfigurator:
 
         existing_content = path.read_text(encoding="utf-8") if path.exists() else ""
         path.write_text(upsert_managed_block(existing_content, content), encoding="utf-8")
+        _chown_to_effective_user(path)
+
+    def apply_screen_blank(
+        self,
+        seconds: int,
+        x_display: "str | None" = None,
+        xauthority: "str | None" = None,
+    ) -> None:
+        """Apply screensaver/DPMS blanking timeout ทันที (runtime, ไม่ persist)"""
+        for args in build_screen_blank_commands(seconds):
+            self.runner.run(self._with_x_env(list(args), x_display, xauthority), check=False)
+
+    def persist_screen_blank(
+        self,
+        seconds: int,
+        path: "Path | None" = None,
+    ) -> None:
+        """เขียนคำสั่ง xset ลง .xprofile เพื่อให้ apply ทุกครั้งหลัง login"""
+        if path is None:
+            path = _effective_home_config_path()
+        content = build_screen_blank_block(seconds)
+        print(f"write {path.as_posix()}")
+        if self.runner.dry_run:
+            print(content.rstrip())
+            return
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing_content = path.read_text(encoding="utf-8") if path.exists() else ""
+        path.write_text(
+            upsert_managed_block(existing_content, content, begin=SCREEN_BLANK_BEGIN, end=SCREEN_BLANK_END),
+            encoding="utf-8",
+        )
+        _chown_to_effective_user(path)
+
+    def remove_screen_blank_persist(self, path: "Path | None" = None) -> None:
+        if path is None:
+            path = _effective_home_config_path()
+        if not path.exists():
+            return
+        existing_content = path.read_text(encoding="utf-8")
+        path.write_text(
+            remove_managed_block(existing_content, begin=SCREEN_BLANK_BEGIN, end=SCREEN_BLANK_END),
+            encoding="utf-8",
+        )
         _chown_to_effective_user(path)
 
     def disable_wayland(self, path: Path = GDM_CUSTOM_CONFIG_PATH) -> None:
@@ -390,6 +456,72 @@ def build_display_session_block(script_path: Path) -> str:
     )
 
 
+def build_screen_blank_commands(seconds: int) -> "tuple[tuple[str, ...], ...]":
+    """คืนชุดคำสั่ง xset สำหรับตั้งเวลา screen blank / DPMS
+
+    seconds <= 0  -> ปิดการ blank ทั้งหมด (เทียบเท่า GNOME "Never")
+    seconds > 0   -> ตั้ง screensaver timeout และ DPMS standby/suspend/off ที่ค่าเดียวกัน
+    """
+    if seconds <= 0:
+        return (
+            ("xset", "s", "off"),
+            ("xset", "s", "noblank"),
+            ("xset", "-dpms"),
+        )
+    value = str(int(seconds))
+    return (
+        ("xset", "s", value, value),
+        ("xset", "s", "blank"),
+        ("xset", "+dpms"),
+        ("xset", "dpms", value, value, value),
+    )
+
+
+def build_screen_blank_block(seconds: int) -> str:
+    command_lines = "\n".join(shlex.join(cmd) for cmd in build_screen_blank_commands(seconds))
+    return (
+        f"{SCREEN_BLANK_BEGIN}\n"
+        "# Managed by vending-auto-setup. Manual edits inside this block may be overwritten.\n"
+        f"{command_lines} || true\n"
+        f"{SCREEN_BLANK_END}\n"
+    )
+
+
+def parse_xset_screen_blank_seconds(xset_query_output: str) -> "int | None":
+    """Parse `xset q` output -> screensaver timeout (วินาที)
+
+    รูปแบบที่ต้องการ:
+        Screen Saver:
+          prefer blanking:  yes    allow exposures:  yes
+          timeout:  600    cycle:  600
+    """
+    match = re.search(r"timeout:\s*(\d+)\s+cycle:", xset_query_output)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def get_screen_blank_seconds(
+    runner: CommandRunner,
+    x_display: "str | None" = None,
+    xauthority: "str | None" = None,
+) -> "int | None":
+    """อ่านค่า screen blank timeout ปัจจุบันจาก `xset q`
+
+    คืน None ถ้า `xset` ไม่มีในเครื่อง (เช่น dev บน Windows) หรือคำสั่งล้มเหลว —
+    ตาม pattern เดียวกับ `_run_display_probe()` ใน server.py ที่ดักไม่ให้หน้า /display
+    500 ตอนไม่มี X11 tools ให้เรียก
+    """
+    configurator = DisplayConfigurator(runner)
+    try:
+        result = runner.run(configurator._with_x_env(["xset", "q"], x_display, xauthority), check=False)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_xset_screen_blank_seconds(result.stdout)
+
+
 def build_gdm_wayland_config(existing_content: str, enabled: bool) -> str:
     lines = existing_content.splitlines()
     if not lines:
@@ -445,32 +577,41 @@ def _is_active_ini_key(line: str, key: str) -> bool:
     return found_key.strip().lower() == key.lower()
 
 
-def upsert_managed_block(existing_content: str, managed_block: str) -> str:
-    if DISPLAY_SESSION_BEGIN not in existing_content:
+def upsert_managed_block(
+    existing_content: str,
+    managed_block: str,
+    begin: str = DISPLAY_SESSION_BEGIN,
+    end: str = DISPLAY_SESSION_END,
+) -> str:
+    if begin not in existing_content:
         separator = "\n" if existing_content and not existing_content.endswith("\n") else ""
         return f"{existing_content}{separator}{managed_block}"
 
-    start = existing_content.index(DISPLAY_SESSION_BEGIN)
-    end = existing_content.find(DISPLAY_SESSION_END, start)
-    if end == -1:
+    start = existing_content.index(begin)
+    end_index = existing_content.find(end, start)
+    if end_index == -1:
         return f"{existing_content.rstrip()}\n{managed_block}"
 
-    end += len(DISPLAY_SESSION_END)
-    if end < len(existing_content) and existing_content[end : end + 1] == "\n":
-        end += 1
-    return f"{existing_content[:start]}{managed_block}{existing_content[end:]}"
+    end_index += len(end)
+    if end_index < len(existing_content) and existing_content[end_index : end_index + 1] == "\n":
+        end_index += 1
+    return f"{existing_content[:start]}{managed_block}{existing_content[end_index:]}"
 
 
-def remove_managed_block(existing_content: str) -> str:
-    if DISPLAY_SESSION_BEGIN not in existing_content:
+def remove_managed_block(
+    existing_content: str,
+    begin: str = DISPLAY_SESSION_BEGIN,
+    end: str = DISPLAY_SESSION_END,
+) -> str:
+    if begin not in existing_content:
         return existing_content
 
-    start = existing_content.index(DISPLAY_SESSION_BEGIN)
-    end = existing_content.find(DISPLAY_SESSION_END, start)
-    if end == -1:
+    start = existing_content.index(begin)
+    end_index = existing_content.find(end, start)
+    if end_index == -1:
         return existing_content
 
-    end += len(DISPLAY_SESSION_END)
-    if end < len(existing_content) and existing_content[end : end + 1] == "\n":
-        end += 1
-    return f"{existing_content[:start]}{existing_content[end:]}"
+    end_index += len(end)
+    if end_index < len(existing_content) and existing_content[end_index : end_index + 1] == "\n":
+        end_index += 1
+    return f"{existing_content[:start]}{existing_content[end_index:]}"
