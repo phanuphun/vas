@@ -184,9 +184,11 @@
               {% endfor %}
             </select>
             {% else %}
-            <div class="flex items-center gap-2 px-3 py-2 border border-caution/20 rounded-lg bg-caution/5 text-[0.78rem] text-caution">
-              <iconify-icon icon="lucide:alert-triangle" width="13" height="13"></iconify-icon>
-              ยังไม่มี Broker — <a href="{{ url_for('mqtt_page') }}" class="underline underline-offset-2 ml-1">เพิ่ม Broker</a>
+            <div class="bg-caution/10 border border-caution/25 rounded-lg px-4 py-4 text-[0.8rem] text-ink flex items-start gap-2.5">
+              <svg width="15" height="15" class="flex-shrink-0 mt-0.5" style="color:#92660b;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
+              </svg>
+              <span>ยังไม่มี Broker — <a href="{{ url_for('mqtt_page') }}" class="text-accent underline underline-offset-2">เพิ่ม Broker</a></span>
             </div>
             {% endif %}
           </div>
@@ -232,8 +234,10 @@
         </div>
       </div>
 
-      <div id="autostart-caution-banner" class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/8 border-caution/25 text-[#92660b] {{ 'hidden' if readiness.autostart_ok else '' }}">
-        <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+      <div id="autostart-caution-banner" class="bg-caution/10 border border-caution/25 rounded-lg px-4 py-4 text-[0.8rem] text-ink flex items-start gap-2.5 {{ 'hidden' if readiness.autostart_ok else '' }}">
+        <svg width="15" height="15" class="flex-shrink-0 mt-0.5" style="color:#92660b;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
+        </svg>
         <span>ยังตั้งค่าไม่ครบ — ไปที่แท็บ <strong class="font-semibold">เปิดแอปอัตโนมัติ</strong> เพื่อกำหนด URL ที่ chromium จะเปิดตอน login</span>
       </div>
 

@@ -82,10 +82,11 @@
         <iconify-icon icon="lucide:package" width="13" height="13" class="flex-shrink-0"></iconify-icon>
         Software
       </button>
-      <button type="button" data-tab="source" onclick="setTab('source')"
-              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-muted hover:bg-surface hover:text-ink">
+      <button type="button" data-tab="source" disabled aria-disabled="true" title="เร็วๆ นี้"
+              class="tab-btn flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.8rem] font-medium whitespace-nowrap transition-colors text-faint cursor-not-allowed opacity-60">
         <iconify-icon icon="lucide:server" width="13" height="13" class="flex-shrink-0"></iconify-icon>
         แหล่งดาวน์โหลด
+        <span class="zone zone-mute">เร็วๆ นี้</span>
       </button>
     </div>
   </nav>
@@ -412,7 +413,7 @@
     var panel = document.getElementById("tab-" + id);
     if (panel) panel.classList.add("is-active");
 
-    document.querySelectorAll(".tab-btn").forEach(function (el) {
+    document.querySelectorAll(".tab-btn:not([disabled])").forEach(function (el) {
       var active = el.dataset.tab === id;
       el.className = el.className
         .replace(/\bbg-accent\/8\b/g, "").replace(/\btext-accent\b/g, "")

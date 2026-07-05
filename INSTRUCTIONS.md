@@ -469,6 +469,32 @@ document.addEventListener("keydown", function (e) {
 - Escape key ปิด modal ได้
 - ใส่ `role="dialog"` และ `aria-modal="true"` ทุกครั้ง
 
+## Alert / Caution Box Convention
+
+ใช้สำหรับกล่องแจ้งเตือนแบบเต็มบรรทัด (warning/caution) เช่น "ยังไม่มี Broker", "ยังตั้งค่าไม่ครบ" —
+canonical reference คือกล่อง "คำแนะนำ" ในหน้า Named Pipe (`pipe_tester.html`, แท็บ "คำแนะนำ")
+ทุกหน้าที่มี caution banner ต้อง**ใช้ class เดียวกันนี้ทุกตัวอักษร** ห้ามผสม opacity/padding ต่างกันในแต่ละหน้า
+
+```html
+<div class="bg-caution/10 border border-caution/25 rounded-lg px-4 py-4 text-[0.8rem] text-ink flex items-start gap-2.5">
+  <svg width="15" height="15" class="flex-shrink-0 mt-0.5" style="color:#92660b;"
+       viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+  </svg>
+  <div>
+    <p class="font-semibold mb-1">หัวข้อ (ใส่เฉพาะกล่องแบบมีหัวข้อ+ย่อหน้า — ตัด <code>&lt;p&gt;</code> นี้ทิ้งถ้าเป็น banner บรรทัดเดียว)</p>
+    <p class="text-muted leading-relaxed">ข้อความแจ้งเตือน</p>
+  </div>
+</div>
+```
+
+**กฎ:**
+- Background/border/spacing ตายตัว: `bg-caution/10 border border-caution/25 rounded-lg px-4 py-4` — ห้ามใช้ opacity อื่น (เช่น `/5`, `/8`, `/20`) หรือ `rounded-xl`/`px-4 py-3` เหมือนที่เคยเขียนไม่ตรงกันในแต่ละหน้า
+- ไอคอนใช้ raw inline `<svg>` (ไม่ใช่ `iconify-icon`) พร้อม `style="color:#92660b;"` ตรงตัวเสมอ — สีนี้ให้ contrast กับพื้นหลังดีกว่า `text-caution` utility เฉยๆ บน iconify
+- เลือกรูปไอคอนตามความหมาย: `circle-alert` (ตัวอย่างข้างบน) สำหรับข้อควรระวัง/ข้อมูลเพิ่มเติม, `alert-triangle` (path `m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z` + `M12 9v4` + `M12 17h.01`) สำหรับกรณีต้องรีบไปแก้ไข (missing config ฯลฯ) — แต่กล่อง/สี/spacing ต้องเหมือนกันเสมอไม่ว่าจะเลือกไอคอนไหน
+- ข้อความหลักใช้ `text-ink`, รายละเอียด/ย่อหน้าใช้ `text-muted` — **ห้าม**ใส่สี caution (`text-[#92660b]` หรือ `text-caution`) กับตัวอักษรทั้งกล่อง ให้สีนี้อยู่ที่ไอคอนเท่านั้น
+- banner บรรทัดเดียว (ไม่มีหัวข้อแยก) ใช้ `<span>` แทน `<div><p>...</p></div>` ได้ — โครงสร้าง flex ด้านนอกเหมือนเดิม
+
 ## Accordion Card Convention
 
 ใช้สำหรับแสดงรายการ config files, history entries, หรือ expandable detail — pattern นี้เป็น standard ของ VAS
