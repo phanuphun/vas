@@ -308,6 +308,7 @@ def create_app() -> Flask:
         """Inject is_partial + current_user so every template can use them."""
         from flask import session as flask_session
         from core.auth import get_user_by_id, ROLE_BADGE_CLASS, ROLE_LABELS, can_manage_user
+        from core.config import APP_VERSION
         is_partial = request.headers.get("X-VAS-Partial") == "1"
         base_template = "base_partial.html" if is_partial else "base.html"
         current_user = None
@@ -321,6 +322,7 @@ def create_app() -> Flask:
             "role_badge": ROLE_BADGE_CLASS,
             "role_labels": ROLE_LABELS,
             "can_manage": can_manage_user,
+            "app_version": APP_VERSION,
         }
 
     @app.get("/")

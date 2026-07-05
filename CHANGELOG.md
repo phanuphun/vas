@@ -2,6 +2,11 @@
 
 ## [2026-07-05]
 
+### Sidebar footer — เปลี่ยน "Version 0.1" hardcode ให้อิงตาม `APP_VERSION` เดียวกับหน้าอัปเดต
+- **ที่มา**: footer แถบล่าง sidebar (`base.html`) เขียน "Version 0.1" เป็นข้อความคงที่ ไม่ตรงกับเวอร์ชั่นจริงที่หน้า "อัปเดตระบบ" แสดง (อ่านจาก `APP_VERSION`/`pyproject.toml` ตาม entry ก่อนหน้า) — พอ bump version ใน `pyproject.toml` แล้ว footer ไม่ตามไปด้วย
+- เพิ่ม `app_version` เข้า `inject_spa_context()` (`context_processor` ใน `server.py`) — inject `APP_VERSION` (import จาก `core.config`) เข้าไปเป็น global ให้ทุกเทมเพลตใช้ได้ (context processor ทำงานกับทุก route อยู่แล้ว ไม่ต้องแก้ทีละหน้า) — เปลี่ยน `base.html` บรรทัด footer จาก `Version 0.1` เป็น `Version {{ app_version }}` — `base_partial.html` (ใช้ตอน SPA fetch) ไม่มี sidebar/footer อยู่แล้วจึงไม่ต้องแก้
+- ตรวจสอบ: ยืนยันเนื้อหาไฟล์จริงผ่าน Read tool ทั้ง 2 ไฟล์ที่แก้ — ทดสอบ block ที่แก้ใน `server.py` แยกด้วย `py_compile` ผ่าน — ทดสอบ Jinja snippet ของ footer ด้วย `jinja2.Environment().from_string()` render ได้ค่า `Version 0.1.5` ตรงตามคาด — ยังไม่ได้เปิดหน้าเว็บจริงเช็คว่า sidebar แสดงตรงกับหน้าอัปเดตครบทุกหน้า (SPA navigation ทุกเส้นทาง) ควร verify อีกครั้งหลัง deploy
+
 ### รวม `APP_VERSION` ให้อ่านจาก `pyproject.toml` ที่เดียว (single source of truth)
 - **ที่มา**: `APP_VERSION` (`src/core/config.py`) hardcode แยกจาก `version` ใน `pyproject.toml` เป็นคนละค่ากันมาตลอด (บังเอิญเท่ากันคือ `"0.1.0"`) ทำให้ต้องแก้ 2 ที่เวลาจะ bump version ไม่งั้นค่าที่แสดงในหน้า "อัปเดตระบบ"/`vas --version`/version compare ตอนเช็ค release จะไม่ตรงกับที่ประกาศใน package metadata
 - เปลี่ยน `APP_VERSION` ให้เรียก `_read_pyproject_version()` ตอน import — อ่านค่า `version = "..."` จากใต้ `[project]` section ของ `pyproject.toml` ด้วย regex ล้วนๆ (ไม่ใช้ `tomllib` เพราะเป็นของ Python 3.11+ แต่เครื่องเป้าหมาย Ubuntu 22.04 jammy มากับ Python 3.10 เป็นค่าเริ่มต้น) — resolve path แบบ `Path(__file__).resolve().parents[2] / "pyproject.toml"` (ใช้ได้ทั้งตอน dev ในนี้ และตอนติดตั้งจริงที่ `/opt/vending-auto-setup` เพราะ `shutil.copytree(source_dir, install_dir)` ใน `services/updater.py` ก็อปปี้ทั้ง repo root รวม `pyproject.toml` ไปด้วยอยู่แล้ว ไม่ใช่แค่ `src/`) — ถ้าอ่านไม่ได้ (path ไม่มี/ไฟล์เพี้ยน) fallback กลับไปที่ `_FALLBACK_VERSION = "0.1.0"` ไม่ crash
