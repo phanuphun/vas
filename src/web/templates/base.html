@@ -154,9 +154,10 @@
       <aside id="sidebar"
              class="sidebar fixed top-0 left-0 bottom-0 w-60 bg-card border-r border-line/10 flex flex-col z-[300] -translate-x-full lg:translate-x-0 lg:sticky lg:h-screen flex-shrink-0">
 
-        <!-- Brand — exact same height as top nav bar (52px) -->
-        <div class="flex-shrink-0 border-b border-line/10 h-[52px] flex items-center px-3">
-          <div class="flex items-center gap-2.5 flex-1 min-w-0">
+        <!-- Brand — exact same height as top nav bar (52px); การ์ดเดียว คลิกเพื่อไปหน้าอัปเดต ไม่มี hover/active state -->
+        <div class="flex-shrink-0 border-b border-line/10 h-[52px] flex items-center gap-1.5 px-3">
+          <a href="{{ url_for('update_page') }}" title="ตรวจสอบอัปเดต"
+             class="flex items-center gap-2.5 flex-1 min-w-0 border border-line/10 rounded-xl pl-2 pr-1.5 py-1.5">
             <!-- Icon -->
             <div class="relative flex-shrink-0">
               <div class="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
@@ -165,11 +166,12 @@
               <span class="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-safe border-2 border-card"></span>
             </div>
             <!-- Wordmark -->
-            <div class="min-w-0 flex items-center gap-1.5">
-              <span class="font-display text-[0.92rem] font-bold text-ink leading-none tracking-tight">VAS</span>
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[0.55rem] font-bold bg-accent/10 text-accent leading-none">v0.1</span>
-            </div>
-          </div>
+            <span class="font-display text-[0.92rem] font-bold text-ink leading-none tracking-tight truncate flex-1">VAS</span>
+            <!-- Download action -->
+            <span class="w-7 h-7 flex items-center justify-center rounded-lg border border-line/10 text-faint flex-shrink-0">
+              <iconify-icon icon="lucide:download" width="14" height="14"></iconify-icon>
+            </span>
+          </a>
           <!-- Close (mobile only) -->
           <button onclick="closeSidebar()"
                   class="lg:hidden w-7 h-7 flex items-center justify-center rounded-lg text-faint hover:text-ink hover:bg-surface transition-colors flex-shrink-0"
@@ -312,24 +314,10 @@
         })();
         </script>
 
-        <!-- Footer — version info (clickable → update page) -->
-        <a href="/update"
-           class="nav-link border-t border-line/10 px-3 py-2.5 flex-shrink-0 safe-pb
-                  hover:bg-surface/60 transition-colors block"
-           title="ตรวจสอบอัปเดต">
-          <div class="flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-safe flex-shrink-0"></span>
-            <span class="text-[0.7rem] text-faint">VAS</span>
-            <span class="text-[0.7rem] font-semibold text-muted">v0.1</span>
-            <span class="ml-auto text-[0.65rem] text-faint flex items-center gap-1">
-              online
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-40">
-                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-              </svg>
-            </span>
-          </div>
-        </a>
+        <!-- Footer — version text only (ไม่มี action แล้ว ย้ายไปที่ Header ด้านบนแทน) -->
+        <div class="border-t border-line/10 px-3 py-2.5 flex-shrink-0 safe-pb">
+          <span class="text-[0.7rem] text-faint">Version 0.1</span>
+        </div>
       </aside>
 
       <!-- Right column -->

@@ -7,7 +7,7 @@ import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, cast
+from typing import Any, Callable, Iterable, cast
 
 from system.clock import SystemClockPreflight
 from core.runner import CommandRunner
@@ -81,6 +81,7 @@ class WireGuardManager:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(content, encoding="utf-8")
         chmod_private(output)
+        reclaim_ownership(output)
 
     def validate_config(self, config: Path) -> WireGuardValidationResult:
         content = config.read_text(encoding="utf-8")
@@ -107,6 +108,7 @@ class WireGuardManager:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(config, target)
         chmod_private(target)
+        reclaim_ownership(self.store_dir)
 
     def sync(self, name: str, config: Path | None = None, restart: bool = True) -> None:
         source = config or self.saved_config_path(name)
@@ -134,6 +136,9 @@ class WireGuardManager:
             chmod_private(target)
             shutil.copyfile(source, synced)
             chmod_private(synced)
+            # target lives under /etc/wireguard and must stay root-owned; only the
+            # history/backup snapshots live under the user's store_dir and need reclaiming.
+            reclaim_ownership(self.store_dir)
 
         service = service_name(name)
         self.runner.run(["systemctl", "enable", service])
@@ -180,6 +185,7 @@ class WireGuardManager:
             shutil.copyfile(target, backup)
             chmod_private(backup)
             target.unlink()
+            reclaim_ownership(self.store_dir)
 
     def saved_config_path(self, name: str) -> Path:
         return self.store_dir / "configs" / f"{sanitize_interface_name(name)}.conf"
@@ -296,7 +302,7 @@ def sanitize_history_id(history_id: str) -> str:
 
 
 def default_store_dir() -> Path:
-    home = _sudo_user_home() or Path.home()
+    home = _resolve_home()
     config_home = os.environ.get("XDG_CONFIG_HOME")
     root = Path(config_home) if config_home else home / ".config"
     return root / "vending-auto-setup" / "wireguard"
@@ -307,6 +313,39 @@ def chmod_private(path: Path) -> None:
         path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
         pass
+
+
+def reclaim_ownership(path: Path) -> None:
+    """Chown ``path`` (recursively, if a directory) back to the real user's home owner.
+
+    Only three wireguard subcommands require root (install/sync/unsync), but the vas
+    web dashboard's systemd service always runs as root regardless. Both paths write
+    into the store dir under the resolved user's home (see ``_resolve_home``), so any
+    root-run operation -- ``sudo vas wireguard ...`` or the web UI -- leaves files
+    owned by root there. Left alone, that root ownership then breaks the *next*
+    non-root ``vas wireguard`` command with a plain Permission denied, which is the
+    exact sudo/non-sudo trap users hit on first install. Reclaiming ownership here
+    keeps the store dir usable by the real user no matter which privilege level last
+    touched it.
+    """
+    geteuid = cast("Callable[[], int] | None", getattr(os, "geteuid", None))
+    if geteuid is None or geteuid() != 0:
+        return  # not running as root: files are already owned by whoever wrote them
+
+    try:
+        owner_uid = os.stat(_resolve_home()).st_uid
+        owner_gid = os.stat(_resolve_home()).st_gid
+    except OSError:
+        return
+
+    if not path.exists():
+        return
+    targets = [path, *path.rglob("*")] if path.is_dir() else [path]
+    for target in targets:
+        try:
+            os.chown(target, owner_uid, owner_gid)
+        except OSError:
+            pass
 
 
 def service_name(name: str) -> str:
@@ -343,3 +382,7 @@ def _sudo_user_home() -> Path | None:
         return Path(PWD_MODULE.getpwnam(sudo_user).pw_dir)
     except KeyError:
         return None
+
+
+def _resolve_home() -> Path:
+    return _sudo_user_home() or Path.home()
