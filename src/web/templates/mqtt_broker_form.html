@@ -4,7 +4,7 @@
 
 {% block header_actions %}
 <a href="{{ '/mqtt/broker/' + broker.id|string if edit else '/mqtt' }}"
-   class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+   class="nav-link inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <polyline points="15 18 9 12 15 6"/>
   </svg>
@@ -186,7 +186,7 @@
         {{ 'บันทึกการแก้ไข' if edit else 'เพิ่ม Broker' }}
       </button>
       <a href="{{ '/mqtt/broker/' + broker.id|string if edit else '/mqtt' }}"
-        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+        class="nav-link inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
         ยกเลิก
       </a>
     </div>
@@ -268,7 +268,7 @@
         if (d.status === "ok") {
           setResult(IS_EDIT ? "✓ บันทึกแล้ว" : "✓ เพิ่ม Broker แล้ว", true);
           var id = IS_EDIT ? BROKER_ID : d.id;
-          setTimeout(function () { location.href = "/mqtt/broker/" + id; }, 800);
+          setTimeout(function () { (window.vasNavigate || function(u){location.href=u;})("/mqtt/broker/" + id); }, 800);
         } else {
           setResult("Error: " + (d.errors || []).join(", "), false);
         }

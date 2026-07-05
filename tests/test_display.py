@@ -68,6 +68,45 @@ def test_gdm_wayland_disable_creates_daemon_section_when_missing() -> None:
     assert "[security]\nDisallowTCP=true\n\n[daemon]\nWaylandEnable=false\n" == config
 
 
+def test_gdm_wayland_collapses_duplicate_commented_lines() -> None:
+    # simulate a config file already corrupted by the old bug: repeated toggling
+    # accumulated multiple #WaylandEnable=false lines. A new toggle must collapse
+    # these back down to a single line instead of adding yet another one.
+    existing = (
+        "[daemon]\n"
+        "WaylandEnable=false\n"
+        "#WaylandEnable=false\n"
+        "#WaylandEnable=false\n"
+        "#WaylandEnable=false\n"
+        "# Uncomment the line below to force the login screen to use Xorg\n"
+        "#WaylandEnable=false\n"
+        "\n"
+        "# Enabling automatic login\n"
+    )
+
+    config = build_gdm_wayland_config(existing, enabled=False)
+
+    assert config == (
+        "[daemon]\n"
+        "WaylandEnable=false\n"
+        "# Uncomment the line below to force the login screen to use Xorg\n"
+        "\n"
+        "# Enabling automatic login\n"
+    )
+    assert config.count("WaylandEnable=false") == 1
+
+
+def test_gdm_wayland_toggle_twice_does_not_accumulate_lines() -> None:
+    # toggling enable/disable repeatedly must never grow the number of
+    # WaylandEnable lines beyond one.
+    config = "[daemon]\nAutomaticLoginEnable=true\n"
+    for enabled in (False, True, False, True, False):
+        config = build_gdm_wayland_config(config, enabled=enabled)
+
+    assert config.count("WaylandEnable=false") == 1
+    assert "AutomaticLoginEnable=true" in config
+
+
 def test_upsert_managed_block_replaces_existing_block() -> None:
     old_content = (
         "before\n"

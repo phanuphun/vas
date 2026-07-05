@@ -89,6 +89,23 @@
       /* ── Scrollbar ── */
       .sidebar-nav { scrollbar-width: thin; scrollbar-color: rgb(var(--c-line) / 0.12) transparent; }
 
+      /* ── Sidebar nav-link active/hover background ──
+         Written explicitly instead of relying purely on Tailwind's CDN JIT for
+         the bg-accent/8 + hover:bg-accent/5 utility classes: "8" is not in
+         Tailwind's default opacity scale (0,5,10,20,25,30,40,50,60,70,75,80,90,95,100),
+         so the utility can silently fail to generate. These rules match the
+         literal class tokens via attribute selectors (no escaping headaches)
+         and guarantee the highlight renders regardless of JIT behavior. */
+      .nav-link[class~="bg-accent/8"] { background-color: rgb(var(--c-accent) / 0.08); }
+      .nav-link[class~="hover:bg-accent/5"]:hover { background-color: rgb(var(--c-accent) / 0.05); }
+
+      /* ── bg-line/6 opacity fallback (same root cause as above: "6" is also
+         not in Tailwind's default opacity scale) ── this utility is used all
+         over the app (tab-btn inactive state, dropdown items, footer link,
+         etc.) — fixed once here since base.html loads on every page. */
+      [class~="bg-line/6"] { background-color: rgb(var(--c-line) / 0.06); }
+      [class~="hover:bg-line/6"]:hover { background-color: rgb(var(--c-line) / 0.06); }
+
       /* ── Zone badges (JS-updated elements use these) ── */
       .zone { display:inline-flex; align-items:center; padding:0.1rem 0.5rem; border-radius:9999px; font-size:0.7rem; font-weight:600; border-width:1px; border-style:solid; white-space:nowrap; }
       .zone-safe    { background:rgb(var(--c-safe)/0.08);    border-color:rgb(var(--c-safe)/0.22);    color:#0f766e; }
@@ -164,12 +181,29 @@
         <!-- Nav -->
         <nav class="sidebar-nav flex-1 overflow-y-auto py-1.5">
 
-          {# Jinja macro: nav link — icon box + title + subtitle + active bar #}
-          {%- macro nav_link(endpoint, icon, label, subtitle, extra_attrs='') -%}
+          {# Jinja macro: nav link — icon box + title + subtitle + active bar
+             disabled=true → renders a non-interactive <div> (excluded from the SPA
+             click-intercept + a.nav-link selectors on purpose) with muted icon/title
+             and a "เร็วๆ นี้" zone-mute badge, for features that exist in the sidebar
+             but aren't ready to use yet. #}
+          {%- macro nav_link(endpoint, icon, label, subtitle, extra_attrs='', disabled=false) -%}
+          {%- if disabled -%}
+          <div class="nav-link-disabled relative flex items-center gap-3 pl-3.5 pr-2.5 py-2 rounded-xl w-full cursor-not-allowed opacity-60"
+               aria-disabled="true" title="เร็วๆ นี้">
+            <span class="nav-icon-box w-9 h-9 rounded-lg bg-card border border-line/10 flex items-center justify-center flex-shrink-0">
+              <iconify-icon icon="{{ icon }}" width="15" height="15" class="text-faint"></iconify-icon>
+            </span>
+            <span class="flex-1 min-w-0">
+              <span class="nav-title block text-[0.82rem] font-semibold leading-tight truncate text-faint">{{ label }}</span>
+              <span class="block text-[0.66rem] text-faint leading-tight mt-0.5 truncate">{{ subtitle }}</span>
+            </span>
+            <span class="zone zone-mute flex-shrink-0">เร็วๆ นี้</span>
+          </div>
+          {%- else -%}
           {%- set is_active = (request.endpoint == endpoint) -%}
           <a href="{{ url_for(endpoint) }}" {{ extra_attrs | safe }}
              class="nav-link relative flex items-center gap-3 pl-3.5 pr-2.5 py-2 rounded-xl w-full transition-colors
-                    {{ 'bg-line/6' if is_active else 'hover:bg-line/6' }}">
+                    {{ 'bg-accent/8' if is_active else 'hover:bg-accent/5' }}">
             <span class="nav-active-bar absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-accent transition-opacity
                          {{ 'opacity-100' if is_active else 'opacity-0' }}"></span>
             <span class="nav-icon-box w-9 h-9 rounded-lg bg-card border flex items-center justify-center flex-shrink-0
@@ -181,6 +215,7 @@
               <span class="block text-[0.66rem] text-faint leading-tight mt-0.5 truncate">{{ subtitle }}</span>
             </span>
           </a>
+          {%- endif -%}
           {%- endmacro -%}
 
           {# ── หลัก ──────────────────────────────────── #}
@@ -216,7 +251,7 @@
             <div class="flex flex-col gap-0.5">
               {{ nav_link('wireguard','simple-icons:wireguard','Wireguard','จัดการ VPN Wireguard','data-nav-pkg="wireguard" style="display:none;"') }}
               {{ nav_link('anydesk_page','simple-icons:anydesk','AnyDesk','จัดการ Remote Desktop','data-nav-pkg="anydesk" style="display:none;"') }}
-              {{ nav_link('openssh_page','lucide:terminal-square','OpenSSH','Authentication และการเข้าถึง SSH','data-nav-pkg="openssh" style="display:none;"') }}
+              {{ nav_link('openssh_page','lucide:terminal-square','OpenSSH','Authentication และการเข้าถึง SSH', disabled=true) }}
             </div>
           </div>
 
@@ -224,8 +259,8 @@
           <div class="nav-section px-2 pt-4 pb-1">
             <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">บริการ</span>
             <div class="flex flex-col gap-0.5">
-              {{ nav_link('docker_page','simple-icons:docker','Docker','Containers, Images และ Swarm','data-nav-pkg="docker" style="display:none;"') }}
-              {{ nav_link('pm2_page','simple-icons:pm2','PM2','Node.js process manager','data-nav-pkg="pm2" style="display:none;"') }}
+              {{ nav_link('docker_page','simple-icons:docker','Docker','Containers, Images และ Swarm', disabled=true) }}
+              {{ nav_link('pm2_page','simple-icons:pm2','PM2','Node.js process manager', disabled=true) }}
             </div>
           </div>
 
@@ -764,7 +799,8 @@
           var aPath = href.replace(/\/$/, '') || '/';
           var isActive = (aPath === norm);
 
-          a.classList.toggle('bg-line/6', isActive);
+          a.classList.toggle('bg-accent/8', isActive);
+          a.classList.toggle('hover:bg-accent/5', !isActive);
 
           var bar = a.querySelector('.nav-active-bar');
           if (bar) {
@@ -890,6 +926,13 @@
 
       // ── Seed initial history state ─────────────────────────────────
       history.replaceState({ vas: location.href }, '');
+
+      // ── Expose for page scripts ──────────────────────────────────
+      // เรียกแทน location.href / location.reload() เพื่อไม่ให้ sidebar/header
+      // ถูก re-render (กระพริบ) ตอนหน้าย่อย (เช่น ฟอร์ม MQTT broker) นำทางหลัง
+      // save/delete สำเร็จ
+      window.vasNavigate = function (url) { navigate(new URL(url, location.origin).href, true); };
+      window.vasReload   = function ()    { navigate(location.href, false); };
 
     })();
     </script>

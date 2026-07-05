@@ -537,16 +537,21 @@ def build_gdm_wayland_config(existing_content: str, enabled: bool) -> str:
 
     daemon_lines = lines[daemon_start + 1 : daemon_end]
     replacement = "#WaylandEnable=false" if enabled else "WaylandEnable=false"
-    active_indexes = [
+    # หา WaylandEnable ทุกบรรทัดใน [daemon] ไม่ว่าจะ active หรือ comment อยู่ก็ตาม —
+    # เดิม toggle จะมองแค่บรรทัด active แล้ว insert บรรทัดใหม่ทุกครั้งที่ไม่เจอ ทำให้
+    # #WaylandEnable=false ที่ comment ไว้จากรอบก่อนหน้าค้างสะสมไม่ถูกลบ (ดู CHANGELOG)
+    key_indexes = [
         index
         for index, line in enumerate(daemon_lines, start=daemon_start + 1)
-        if _is_active_ini_key(line, "WaylandEnable")
+        if _is_active_ini_key(line, "WaylandEnable", allow_commented=True)
     ]
 
     updated = list(lines)
-    if active_indexes:
-        for index in active_indexes:
-            updated[index] = replacement
+    if key_indexes:
+        first_index, *duplicate_indexes = key_indexes
+        updated[first_index] = replacement
+        for index in sorted(duplicate_indexes, reverse=True):
+            del updated[index]
     elif not enabled:
         updated.insert(daemon_start + 1, "WaylandEnable=false")
 
@@ -569,9 +574,20 @@ def _find_section_bounds(lines: list[str], section_name: str) -> tuple[int | Non
     return start, len(lines)
 
 
-def _is_active_ini_key(line: str, key: str) -> bool:
+def _is_active_ini_key(line: str, key: str, allow_commented: bool = False) -> bool:
+    """เช็คว่าบรรทัดนี้เป็น `key=value` (INI) หรือไม่
+
+    ปกติจะนับเฉพาะบรรทัด active (ไม่ได้ comment ด้วย # หรือ ;) — แต่ถ้า
+    `allow_commented=True` จะ strip comment marker ออกก่อนเช็ค key ด้วย
+    เพื่อใช้หาบรรทัดที่เคย comment ทิ้งไว้จาก toggle รอบก่อนๆ (กัน key สะสมซ้ำ)
+    """
     stripped = line.strip()
-    if not stripped or stripped.startswith(("#", ";")) or "=" not in stripped:
+    if allow_commented:
+        while stripped.startswith(("#", ";")):
+            stripped = stripped[1:].strip()
+    elif stripped.startswith(("#", ";")):
+        return False
+    if not stripped or "=" not in stripped:
         return False
     found_key, _ = stripped.split("=", 1)
     return found_key.strip().lower() == key.lower()

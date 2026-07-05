@@ -178,6 +178,43 @@ Horizontal pill row; omit entirely on pages with only one section.
 - Inactive pill: `text-muted hover:bg-surface hover:text-ink`
 - Always `overflow-x-auto` for mobile scroll support
 
+#### JS Tab Switch Pattern
+
+**ห้าม** สลับ tab ด้วย `classList.toggle()` แบบ toggle ทีละ class — ปุ่มที่ active
+ตอน initial render (มักจะเป็น `loop.first`) จะไม่มี `hover:*` class ติดมาด้วยตั้งแต่แรก
+(เพราะ template ใส่ class คนละชุดให้ active/inactive) ทำให้พอสลับปุ่มนั้นออกจาก active
+มันจะไม่มี hover state ตลอดไป (bug ที่เจอในหน้า จอแสดงผล — ดู CHANGELOG)
+
+ให้ใช้ pattern **rewrite `className` เต็มทุกครั้ง** แทน (ตามหน้า คีออส):
+
+```javascript
+window.setTab = function (id) {
+  document.querySelectorAll(".tab-panel").forEach(function (el) {
+    el.classList.remove("is-active");
+  });
+  var panel = document.getElementById("tab-" + id);
+  if (panel) panel.classList.add("is-active");
+
+  document.querySelectorAll(".tab-btn").forEach(function (el) {
+    var active = el.dataset.tab === id;
+    el.className = el.className
+      .replace(/\bbg-accent\/8\b/g, "").replace(/\btext-accent\b/g, "")
+      .replace(/\bfont-semibold\b/g, "").replace(/\btext-muted\b/g, "")
+      .replace(/\bhover:bg-surface\b/g, "").replace(/\bhover:text-ink\b/g, "")
+      .replace(/\s{2,}/g, " ").trim();
+    el.className += active
+      ? " bg-accent/8 text-accent font-semibold"
+      : " text-muted hover:bg-surface hover:text-ink";
+  });
+};
+```
+
+**กฎ:**
+- Strip ทั้ง active class set (`bg-accent/8 text-accent font-semibold`) และ inactive
+  class set (`text-muted hover:bg-surface hover:text-ink`) ออกก่อนเสมอ แล้วค่อย append
+  ชุดที่ถูกต้องกลับเข้าไป — ห้าม toggle ทีละ class เพราะจะพลาด class ที่ปุ่มนั้นไม่เคยมีมาก่อน
+- ปุ่มทุกปุ่ม (รวม `loop.first`) ต้องผ่าน rewrite เดียวกันนี้ทุกครั้งที่ tab เปลี่ยน ไม่ใช่แค่ตอน initial render
+
 ### 3 · Content Section
 
 Wraps all tab panels. Only the active panel is visible.
@@ -229,10 +266,29 @@ Wraps all tab panels. Only the active panel is visible.
 | Nav link icon box | `w-9 h-9 rounded-lg bg-card border border-line/10` | Icon inside: `text-muted`, `width="15" height="15"` |
 | Nav link title | `text-[0.82rem] font-semibold text-ink truncate` | — |
 | Nav link subtitle | `text-[0.66rem] text-faint truncate mt-0.5` | Short one-line description per item |
-| Nav link active state | `bg-line/6` row + `bg-accent` left bar (`.nav-active-bar`, `w-[3px] rounded-full`) + accent icon/title | Bar + icon box border + icon color + title color all flip together; toggled by `updateNavActive()` in the SPA router via `.nav-active-bar` / `.nav-icon-box` / `.nav-title` hook classes |
+| Nav link hover state | `hover:bg-accent/5` row, rounded (`rounded-xl` on the link itself, unconditional) | Same blue family as active, just lighter — no icon/title color change on hover |
+| Nav link active state | `bg-accent/8` row + `bg-accent` left bar (`.nav-active-bar`, `w-[3px] rounded-full`) + accent icon/title | Same blue family as hover, just more intense (`/8` vs `/5`). Bar + icon box border + icon color + title color all flip together; toggled by `updateNavActive()` in the SPA router via `.nav-active-bar` / `.nav-icon-box` / `.nav-title` hook classes |
+| Nav link disabled ("coming soon") state | `nav_link(..., disabled=true)` → renders a non-interactive `<div class="nav-link-disabled">` instead of `<a>` | Muted icon/title (`text-faint`), `opacity-60`, `cursor-not-allowed`, `aria-disabled="true"`, trailing `<span class="zone zone-mute">เร็วๆ นี้</span>` badge. Deliberately **not** an `<a>` so it's excluded from both the SPA click-intercept (`a.nav-link` selector) and `updateNavActive()` (`querySelectorAll('a.nav-link')`) — no extra guard code needed. Use for sidebar entries that exist but aren't ready for use yet (currently: OpenSSH, Docker, PM2) |
 | **Footer** | version strip only | `VAS v0.1 · online` with green dot; no user info |
 
-`nav_link()` macro signature: `nav_link(endpoint, icon, label, subtitle, extra_attrs='')` — every call site must pass a short Thai subtitle. The macro renders a `.nav-active-bar` / `.nav-icon-box` / `.nav-title` hook on every link so `updateNavActive()` can flip active styling client-side during SPA navigation without a full re-render.
+> **Why the explicit CSS in `base.html`'s `<style>` block:** neither `8` nor `6` are in Tailwind's default opacity scale (`0,5,10,20,25,30,40,50,60,70,75,80,90,95,100`), so the Play CDN's on-the-fly JIT does not reliably generate `bg-accent/8` or `bg-line/6` (used everywhere for the inactive tab-btn hover convention, see "Section Menu (Tab Nav)" above). `base.html` hand-writes `[class~="..."]` attribute-selector rules for both so they always render regardless of JIT behavior — this fix lives once in `base.html` since it's loaded on every page. Follow this same pattern (explicit CSS keyed off the literal class string) for any future utility using a non-default opacity value.
+
+### Disabled ("coming soon") tab-btn — same convention, non-sidebar context
+
+For a tab pill that isn't ready yet (e.g. MQTT's "Message Monitor"), don't remove it — disable it in place so users know it exists:
+
+```html
+<button type="button" data-tab="foo" disabled aria-disabled="true" title="เร็วๆ นี้"
+        class="mqtt-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium whitespace-nowrap flex-shrink-0 text-faint cursor-not-allowed opacity-60">
+  <iconify-icon icon="lucide:activity" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+  Label
+  <span class="zone zone-mute">เร็วๆ นี้</span>
+</button>
+```
+
+Native `disabled` attribute (not just removing `onclick`) is required — it blocks the click event outright and is the accessible signal screen readers rely on.
+
+`nav_link()` macro signature: `nav_link(endpoint, icon, label, subtitle, extra_attrs='', disabled=false)` — every call site must pass a short Thai subtitle. The macro renders a `.nav-active-bar` / `.nav-icon-box` / `.nav-title` hook on every link so `updateNavActive()` can flip active styling client-side during SPA navigation without a full re-render. Pass `disabled=true` to skip all of that and render the "coming soon" variant instead (see row above).
 
 ### Top Nav Bar (`base.html`)
 

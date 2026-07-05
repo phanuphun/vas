@@ -49,10 +49,11 @@
         <iconify-icon icon="lucide:server" width="14" height="14" class="flex-shrink-0"></iconify-icon>
         Brokers
       </button>
-      <button type="button" data-tab="monitor" onclick="mqttTab('monitor')"
-              class="mqtt-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium whitespace-nowrap flex-shrink-0 text-muted hover:bg-line/6 hover:text-ink">
+      <button type="button" data-tab="monitor" disabled aria-disabled="true" title="เร็วๆ นี้"
+              class="mqtt-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium whitespace-nowrap flex-shrink-0 text-faint cursor-not-allowed opacity-60">
         <iconify-icon icon="lucide:activity" width="14" height="14" class="flex-shrink-0"></iconify-icon>
         Message Monitor
+        <span class="zone zone-mute">เร็วๆ นี้</span>
       </button>
     </div>
   </nav>
@@ -84,7 +85,7 @@
           <div class="flex items-center gap-3 flex-shrink-0">
             <span class="text-[0.78rem] text-faint" id="list-msg"></span>
             <a href="/mqtt/broker/add"
-               class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">
+               class="nav-link inline-flex items-center gap-1.5 px-3 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">
               <iconify-icon icon="lucide:plus" width="12" height="12"></iconify-icon>
               เพิ่ม Broker
             </a>
@@ -117,10 +118,10 @@
                 <iconify-icon icon="lucide:plug" width="12" height="12"></iconify-icon>เชื่อมต่อ
               </button>
               {% endif %}
-              <a href="/mqtt/broker/{{ broker.id }}" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">
+              <a href="/mqtt/broker/{{ broker.id }}" class="nav-link inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.75rem] font-semibold hover:bg-blue-700 transition-colors">
                 <iconify-icon icon="lucide:settings-2" width="12" height="12"></iconify-icon>จัดการ
               </a>
-              <a href="/mqtt/broker/{{ broker.id }}/edit" class="inline-flex items-center justify-center w-8 h-8 border border-line/15 rounded-lg bg-card text-muted hover:bg-surface hover:text-ink transition-colors" title="แก้ไข">
+              <a href="/mqtt/broker/{{ broker.id }}/edit" class="nav-link inline-flex items-center justify-center w-8 h-8 border border-line/15 rounded-lg bg-card text-muted hover:bg-surface hover:text-ink transition-colors" title="แก้ไข">
                 <iconify-icon icon="lucide:pencil" width="13" height="13"></iconify-icon>
               </a>
               <button onclick="deleteBroker({{ broker.id }}, '{{ broker.name | e }}')" class="inline-flex items-center justify-center w-8 h-8 border border-danger/20 rounded-lg bg-card text-danger hover:bg-danger/5 transition-colors" title="ลบ">
@@ -139,7 +140,7 @@
             <div class="text-[0.88rem] font-semibold text-ink">ยังไม่มี Broker</div>
             <div class="text-[0.78rem] text-faint mt-0.5">เพิ่ม broker แรกเพื่อเริ่มใช้งาน MQTT</div>
           </div>
-          <a href="/mqtt/broker/add" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors mt-1">
+          <a href="/mqtt/broker/add" class="nav-link inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors mt-1">
             <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>เพิ่ม Broker
           </a>
         </div>
@@ -296,7 +297,7 @@
     fetch("/api/mqtt/brokers/" + bid + "/connect", { method: "POST" })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (d.status === "ok") { setListMsg("เชื่อมต่อสำเร็จ"); setTimeout(function () { location.reload(); }, 1200); }
+        if (d.status === "ok") { setListMsg("เชื่อมต่อสำเร็จ"); setTimeout(function () { (window.vasReload || function(){location.reload();})(); }, 1200); }
         else setListMsg("Error: " + (d.errors || []).join(", "), true);
       })
       .catch(function (e) { setListMsg("Error: " + e, true); });

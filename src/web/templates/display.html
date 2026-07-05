@@ -74,7 +74,7 @@
       {% for tid, icon, label in tabs %}
       <button type="button" data-tab="{{ tid }}" onclick="switchTab('{{ tid }}')"
               class="disp-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
-                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-surface hover:text-ink' }}">
         <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
         <span>{{ label }}</span>
       </button>
@@ -255,9 +255,7 @@
             <div>
               <div class="flex items-center gap-2">
                 <span class="font-display text-[1rem] font-bold text-ink">X11 / Xorg</span>
-                {% if gdm_wayland.disabled %}
-                <span class="zone zone-safe">Active</span>
-                {% endif %}
+                <span class="zone zone-safe {{ '' if gdm_wayland.disabled else 'hidden' }}" id="x11ActiveBadge">Active</span>
               </div>
               <div class="text-[0.72rem] text-faint mt-0.5">Classic Display Server</div>
             </div>
@@ -280,18 +278,15 @@
               ตั้งค่าผ่าน <code class="text-[0.7rem] bg-surface px-1 rounded">/etc/gdm3/custom.conf</code>
             </li>
           </ul>
-          {% if gdm_wayland.disabled %}
-          <div class="flex items-center gap-2 px-3 py-2 bg-safe/8 border border-safe/20 rounded-lg">
+          <div class="flex items-center gap-2 px-3 py-2 bg-safe/8 border border-safe/20 rounded-lg {{ '' if gdm_wayland.disabled else 'hidden' }}" id="x11ActiveBox">
             <iconify-icon icon="lucide:check" width="14" height="14" class="text-safe"></iconify-icon>
             <span class="text-[0.78rem] text-safe font-semibold">กำลังใช้งาน X11</span>
           </div>
-          {% else %}
-          <button data-wayland-action="disable" type="button"
-                  class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+          <button data-wayland-action="disable" type="button" id="x11SwitchBtn"
+                  class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors {{ 'hidden' if gdm_wayland.disabled else '' }}">
             <iconify-icon icon="lucide:arrow-right" width="14" height="14"></iconify-icon>
             เปลี่ยนมาใช้ X11
           </button>
-          {% endif %}
         </div>
 
         <!-- Wayland card -->
@@ -301,9 +296,7 @@
             <div>
               <div class="flex items-center gap-2">
                 <span class="font-display text-[1rem] font-bold text-ink">Wayland</span>
-                {% if not gdm_wayland.disabled %}
-                <span class="zone zone-safe">Active</span>
-                {% endif %}
+                <span class="zone zone-safe {{ '' if not gdm_wayland.disabled else 'hidden' }}" id="waylandActiveBadge">Active</span>
               </div>
               <div class="text-[0.72rem] text-faint mt-0.5">Modern Display Protocol</div>
             </div>
@@ -326,18 +319,15 @@
               <span class="text-caution font-semibold">ไม่แนะนำ</span> สำหรับ vending machine
             </li>
           </ul>
-          {% if not gdm_wayland.disabled %}
-          <div class="flex items-center gap-2 px-3 py-2 bg-safe/8 border border-safe/20 rounded-lg">
+          <div class="flex items-center gap-2 px-3 py-2 bg-safe/8 border border-safe/20 rounded-lg {{ '' if not gdm_wayland.disabled else 'hidden' }}" id="waylandActiveBox">
             <iconify-icon icon="lucide:check" width="14" height="14" class="text-safe"></iconify-icon>
             <span class="text-[0.78rem] text-safe font-semibold">กำลังใช้งาน Wayland</span>
           </div>
-          {% else %}
-          <button data-wayland-action="enable" type="button"
-                  class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+          <button data-wayland-action="enable" type="button" id="waylandSwitchBtn"
+                  class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors {{ 'hidden' if not gdm_wayland.disabled else '' }}">
             <iconify-icon icon="lucide:arrow-right" width="14" height="14"></iconify-icon>
             เปลี่ยนมาใช้ Wayland
           </button>
-          {% endif %}
         </div>
       </div>
 
@@ -496,19 +486,25 @@
   "use strict";
 
   // ── Tab switching ─────────────────────────────────────────────────────────────
+  // ใช้ full className rewrite (ไม่ใช่ classList.toggle บาง class) ตาม convention
+  // "JS Tab Switch Pattern" ใน INSTRUCTIONS.md — กันปุ่มที่ active ตอน initial render
+  // (loop.first) ไม่มี hover:* class ติดมาด้วยตั้งแต่แรก แล้วพอสลับ active ออกจะไม่มี hover state
   window.switchTab = function (id) {
     document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
     var p = document.getElementById("tab-" + id);
     if (p) p.classList.add("is-active");
 
     document.querySelectorAll(".disp-tab-btn").forEach(function (btn) {
-      var on = btn.dataset.tab === id;
-      btn.classList.toggle("bg-accent\/8",  on);
-      btn.classList.toggle("text-accent",    on);
-      btn.classList.toggle("font-semibold",  on);
-      btn.classList.toggle("text-muted",     !on);
+      var active = btn.dataset.tab === id;
+      btn.className = btn.className
+        .replace(/\bbg-accent\/8\b/g, "").replace(/\btext-accent\b/g, "")
+        .replace(/\bfont-semibold\b/g, "").replace(/\btext-muted\b/g, "")
+        .replace(/\bhover:bg-surface\b/g, "").replace(/\bhover:text-ink\b/g, "")
+        .replace(/\s{2,}/g, " ").trim();
+      btn.className += active
+        ? " bg-accent/8 text-accent font-semibold"
+        : " text-muted hover:bg-surface hover:text-ink";
     });
-
   };
 
   // ── Monitor preview ───────────────────────────────────────────────────────────
@@ -606,12 +602,35 @@
   if (applyBtn) applyBtn.addEventListener("click", doApply);
 
   // ── Display Protocol switch (X11 / Wayland) ──────────────────────────────
-  var waylandResult = document.getElementById("waylandResult");
+  var waylandResult   = document.getElementById("waylandResult");
+  var protoX11Card     = document.getElementById("protoX11");
+  var protoWaylandCard = document.getElementById("protoWayland");
+  var x11Badge   = document.getElementById("x11ActiveBadge");
+  var x11Box     = document.getElementById("x11ActiveBox");
+  var x11Btn     = document.getElementById("x11SwitchBtn");
+  var wlBadge    = document.getElementById("waylandActiveBadge");
+  var wlBox      = document.getElementById("waylandActiveBox");
+  var wlBtn      = document.getElementById("waylandSwitchBtn");
 
   function setWaylandResult(msg, status) {
     if (!waylandResult) return;
     waylandResult.className = "text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
     waylandResult.textContent = msg;
+  }
+
+  // อัปเดต UI ของ protocol cards ทันทีตามค่า disabled ล่าสุด (true = X11 active)
+  // โดยไม่ต้อง reload หน้า — session จริงจะ apply หลัง re-login/reboot เท่านั้น
+  function renderProtocolState(disabled) {
+    if (protoX11Card)     protoX11Card.classList.toggle("active", disabled);
+    if (protoWaylandCard) protoWaylandCard.classList.toggle("active", !disabled);
+
+    if (x11Badge) x11Badge.classList.toggle("hidden", !disabled);
+    if (x11Box)   x11Box.classList.toggle("hidden", !disabled);
+    if (x11Btn) { x11Btn.classList.toggle("hidden", disabled); x11Btn.disabled = false; }
+
+    if (wlBadge) wlBadge.classList.toggle("hidden", disabled);
+    if (wlBox)   wlBox.classList.toggle("hidden", disabled);
+    if (wlBtn) { wlBtn.classList.toggle("hidden", !disabled); wlBtn.disabled = false; }
   }
 
   document.querySelectorAll("[data-wayland-action]").forEach(function (btn) {
@@ -628,8 +647,9 @@
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, body: d }; }); })
         .then(function (res) {
           if (res.ok && res.body.status === "ok") {
+            var disabled = res.body.gdmWayland ? !!res.body.gdmWayland.disabled : action === "disable";
+            renderProtocolState(disabled);
             setWaylandResult("เปลี่ยนเป็น " + label + " แล้ว — ต้อง re-login หรือ reboot เพื่อให้มีผล", "ok");
-            setTimeout(function () { location.reload(); }, 1200);
           } else {
             btn.disabled = false;
             setWaylandResult("Error: " + ((res.body && res.body.errors || []).join(", ") || "ไม่ทราบสาเหตุ"), "error");
