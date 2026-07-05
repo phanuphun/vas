@@ -228,17 +228,18 @@
     <div id="done-bar" class="hidden px-4 pb-4">
       <div class="flex items-center justify-between px-4 py-3 rounded-xl bg-safe/6 border border-safe/20">
         <div class="flex items-center gap-2">
-          <svg width="15" height="15" class="text-safe flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <span class="spin flex-shrink-0" id="done-bar-spin"></span>
+          <svg width="15" height="15" class="text-safe flex-shrink-0 hidden" id="done-bar-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          <span class="text-[0.82rem] font-semibold text-[#0f766e]">อัปเดตสำเร็จ! รีสตาร์ทเพื่อใช้เวอร์ชั่นใหม่</span>
+          <span class="text-[0.82rem] font-semibold text-[#0f766e]" id="done-bar-msg">อัปเดตสำเร็จ! กำลังรีสตาร์ทอัตโนมัติ...</span>
         </div>
-        <button onclick="restartServer()"
+        <button id="btn-restart-now" onclick="restartServer()"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-safe/30 rounded-lg bg-safe/10 text-[#0f766e] text-[0.82rem] font-semibold hover:bg-safe/15 transition-colors cursor-pointer">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
           </svg>
-          รีสตาร์ท
+          รีสตาร์ทตอนนี้
         </button>
       </div>
     </div>
@@ -374,6 +375,9 @@
       // Show done bar
       var doneBar = document.getElementById('done-bar');
       if (doneBar) doneBar.classList.remove('hidden');
+      // อัปเดตเสร็จแล้ว — รีสตาร์ท service อัตโนมัติทันที (ใช้ host/port เดิมจาก
+      // /etc/default/vending-auto-setup-server ไม่ต้องตั้งค่าใหม่)
+      restartServer();
     });
 
     _updateSse.addEventListener('error-event', function(e) {
@@ -444,18 +448,39 @@
   }
 
   // ── Restart ───────────────────────────────────────────────────
+  var _restartTriggered = false;
+
   window.restartServer = function () {
-    logLine('⟳ กำลังรีสตาร์ท...');
+    if (_restartTriggered) return;
+    _restartTriggered = true;
+
+    var btn = document.getElementById('btn-restart-now');
+    if (btn) btn.disabled = true;
+    var msg = document.getElementById('done-bar-msg');
+    if (msg) msg.textContent = 'อัปเดตสำเร็จ! กำลังรีสตาร์ท...';
+
+    logLine('⟳ กำลังรีสตาร์ท (ใช้ host/port เดิม)...');
     fetch('/api/server/restart', { method: 'POST' })
       .then(function() {
         logLine('รอระบบกลับมา...');
+        onRestartRequested();
         setTimeout(function() { location.reload(); }, 5000);
       })
       .catch(function() {
         // restart might kill connection — just reload after delay
+        onRestartRequested();
         setTimeout(function() { location.reload(); }, 5000);
       });
   };
+
+  function onRestartRequested() {
+    var msg = document.getElementById('done-bar-msg');
+    if (msg) msg.textContent = 'รีสตาร์ทแล้ว — รอเซิร์ฟเวอร์กลับมา...';
+    var spin = document.getElementById('done-bar-spin');
+    if (spin) spin.classList.add('hidden');
+    var check = document.getElementById('done-bar-check');
+    if (check) check.classList.remove('hidden');
+  }
 
   // ── Cleanup ───────────────────────────────────────────────────
   window.__vasCleanup = window.__vasCleanup || [];
