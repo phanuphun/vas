@@ -154,7 +154,39 @@
     </div>
   </div>
 
-  <!-- ── 3. Download Progress Card (hidden until updating) ─────── -->
+  <!-- ── 3. Dev Update Card (ดึง source ล่าสุดจาก branch โดยตรง) ── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="flex items-center gap-3 px-4 py-4 border-b border-line/10">
+      <div class="w-9 h-9 border border-line/15 rounded-lg bg-surface text-muted grid place-items-center flex-shrink-0">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+        </svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-[0.88rem] font-semibold text-ink">โหมด Dev — ดึงจาก Source โดยตรง</span>
+          <span class="zone zone-info">TESTING</span>
+        </div>
+        <p class="text-[0.75rem] text-muted mt-0.5">ดึง source ล่าสุดจาก branch ที่ระบุมาติดตั้งทันที โดยไม่เช็คเวอร์ชั่นก่อน — ใช้สำหรับทดสอบระหว่าง develop</p>
+      </div>
+    </div>
+    <div class="px-4 py-4 flex flex-col sm:flex-row items-start sm:items-end gap-3">
+      <div class="flex flex-col gap-1.5 flex-1 min-w-0 w-full sm:w-auto">
+        <label class="text-[0.75rem] font-semibold text-muted" for="dev-branch-input">Branch</label>
+        <input id="dev-branch-input" type="text" placeholder="main" autocomplete="off" spellcheck="false"
+               class="w-full sm:w-64 px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+      </div>
+      <button id="btn-dev-update" onclick="startDevUpdate()"
+              class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors cursor-pointer flex-shrink-0">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+        </svg>
+        ดึง Source ล่าสุด &amp; ติดตั้ง
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 4. Download Progress Card (hidden until updating) ─────── -->
   <div id="progress-card" class="hidden bg-card border border-line/10 rounded-xl">
     <div class="px-4 py-4 border-b border-line/10 flex items-center gap-3">
       <div class="w-9 h-9 border border-accent/28 rounded-lg bg-accent/6 text-accent grid place-items-center flex-shrink-0" id="progress-icon">
@@ -212,7 +244,7 @@
     </div>
   </div>
 
-  <!-- ── 4. Info Card ───────────────────────────────────────────── -->
+  <!-- ── 5. Info Card ───────────────────────────────────────────── -->
   <div class="bg-card border border-line/10 rounded-xl px-4 py-4">
     <h2 class="text-[0.88rem] font-semibold text-ink mb-3">ข้อมูลระบบ</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -302,19 +334,21 @@
   };
 
   // ── Update ────────────────────────────────────────────────────
-  window.startUpdate = function () {
+  function beginUpdateFlow(branch, disableBtn) {
     if (_updateSse) return;
 
-    // Hide update button, show progress card
-    var btnU = document.getElementById('btn-update');
-    if (btnU) btnU.disabled = true;
+    // Disable trigger button, show progress card
+    if (disableBtn) disableBtn.disabled = true;
     var pCard = document.getElementById('progress-card');
     if (pCard) pCard.classList.remove('hidden');
+    if (pCard) pCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     setProgress(2, 'check', 'เชื่อมต่อ...');
-    logLine('▶ เริ่มการอัปเดต VAS...');
+    logLine('▶ เริ่มการอัปเดต VAS...' + (branch ? ' (branch: ' + branch + ')' : ''));
 
-    _updateSse = new EventSource('/api/update/stream');
+    var url = '/api/update/stream';
+    if (branch) url += '?branch=' + encodeURIComponent(branch);
+    _updateSse = new EventSource(url);
 
     _updateSse.addEventListener('progress', function(e) {
       var data = JSON.parse(e.data);
@@ -350,7 +384,7 @@
       if (fill) fill.classList.add('is-error');
       var title = document.getElementById('progress-title');
       if (title) title.textContent = 'เกิดข้อผิดพลาด';
-      if (btnU) btnU.disabled = false;
+      if (disableBtn) disableBtn.disabled = false;
     });
 
     _updateSse.onerror = function() {
@@ -358,6 +392,16 @@
         closeUpdateSse();
       }
     };
+  }
+
+  window.startUpdate = function () {
+    beginUpdateFlow(null, document.getElementById('btn-update'));
+  };
+
+  window.startDevUpdate = function () {
+    var input = document.getElementById('dev-branch-input');
+    var branch = (input && input.value.trim()) || 'main';
+    beginUpdateFlow(branch, document.getElementById('btn-dev-update'));
   };
 
   function closeUpdateSse() {

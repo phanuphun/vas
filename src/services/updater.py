@@ -196,6 +196,19 @@ def get_update_queue() -> "queue.Queue[dict[str, object]] | None":
         return _active_update
 
 
+BRANCH_NAME_RE = re.compile(r"^[A-Za-z0-9._\-/]+$")
+
+
+def is_valid_branch_name(branch: str) -> bool:
+    """ตรวจสอบว่า branch name ปลอดภัยพอจะใส่ใน GitHub archive URL (ป้องกัน path/URL injection)"""
+    branch = branch.strip()
+    if not branch or len(branch) > 250:
+        return False
+    if branch.startswith("/") or branch.startswith("-") or ".." in branch:
+        return False
+    return bool(BRANCH_NAME_RE.match(branch))
+
+
 def start_web_update(
     repo: str = DEFAULT_REPO,
     branch: str = "main",
@@ -206,6 +219,9 @@ def start_web_update(
     Returns (ok, error_msg)
     """
     global _active_update
+
+    if version == "latest" and not is_valid_branch_name(branch):
+        return False, f"ชื่อ branch ไม่ถูกต้อง: {branch}"
 
     with _update_lock:
         if _active_update is not None:

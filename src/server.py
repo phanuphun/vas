@@ -2702,12 +2702,18 @@ def create_app() -> Flask:
 
     @app.get("/api/update/stream")
     def update_stream_api():  # type: ignore[return]
-        """SSE stream ของขั้นตอนการอัปเดต — เริ่มอัปเดตทันทีถ้ายังไม่มีงานทำอยู่"""
+        """SSE stream ของขั้นตอนการอัปเดต — เริ่มอัปเดตทันทีถ้ายังไม่มีงานทำอยู่
+
+        รองรับ query param ?branch=<name> สำหรับโหมด Dev — ดึง source ล่าสุด
+        จาก branch ที่ระบุมาติดตั้งทันที โดยไม่ผ่านการเช็ค GitHub release
+        """
         from flask import stream_with_context, Response
         from services.updater import start_web_update, get_update_queue, is_updating
 
+        branch = (request.args.get("branch") or "main").strip()
+
         if not is_updating():
-            ok, err = start_web_update()
+            ok, err = start_web_update(branch=branch)
             if not ok:
                 def _err_only():
                     yield f"event: error-event\ndata: {_json_dumps({'msg': err})}\n\n"
@@ -3489,13 +3495,3 @@ def screen_blank_label(seconds: "int | None") -> str:
     if seconds <= 0:
         return "ไม่ปิดหน้าจอ (Never)"
     return f"{seconds} วินาที"
-
-
-def vpn_connection_label(vpn: VpnStatus) -> str:
-    if vpn.service_active == "active" and vpn.interface_exists:
-        if vpn.handshake_peers is None:
-            return "Active, handshake unknown"
-        if vpn.handshake_peers > 0:
-            return f"Connected with {vpn.handshake_peers} peer(s)"
-        return "Active, waiting for peer handshake"
-    return f"Service {vpn.service_active}"
