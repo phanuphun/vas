@@ -2761,7 +2761,13 @@ def create_app() -> Flask:
     @app.get("/update")
     def update_page() -> str:
         from core.config import APP_VERSION
-        return render_template("update.html", current_version=APP_VERSION)
+        from services.updater import DEFAULT_INSTALL_DIR, DEFAULT_REPO
+        return render_template(
+            "update.html",
+            current_version=APP_VERSION,
+            update_repo=DEFAULT_REPO,
+            update_install_dir=DEFAULT_INSTALL_DIR.as_posix(),
+        )
 
     @app.get("/api/update/check")
     def update_check_api() -> dict[str, object]:

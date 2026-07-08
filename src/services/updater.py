@@ -14,7 +14,7 @@ from pathlib import Path
 from core.runner import CommandRunner
 
 
-DEFAULT_REPO = "phanuphun/vending-auto-setup"
+DEFAULT_REPO = "phanuphun/vas"
 DEFAULT_INSTALL_DIR = Path("/opt/vending-auto-setup")
 WRAPPER_NAMES = ("vending-auto-setup", "vas", "vending-status")
 RUNTIME_PACKAGES = ("python3-flask",)
