@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -988,11 +989,15 @@ def create_app() -> Flask:
         default_display = _default_x_display()
         devices = collect_display_devices(x_display=default_display)
         current_screen_blank = get_screen_blank_seconds(DisplayCommandRunner(), x_display=default_display)
+        default_output = devices.outputs[0] if devices.outputs else None
+        current_rotation = devices.rotations.get(default_output, "normal") if default_output else "normal"
         return render_template(
             "display.html",
             outputs=devices.outputs,
             touch_devices=devices.touch_devices,
             rotations=ROTATION_LABELS,
+            current_rotation=current_rotation,
+            device_rotations=devices.rotations,
             default_display=default_display,
             session=collect_display_session_status(),
             gdm_wayland=collect_gdm_wayland_status(),
@@ -1028,6 +1033,7 @@ def create_app() -> Flask:
             "outputs": devices.outputs,
             "touchDevices": [{"name": d.name, "id": d.xinput_id} for d in devices.touch_devices],
             "defaultDisplay": x_display,
+            "rotations": devices.rotations,
         }
 
     @app.post("/api/display/apply")
@@ -3258,6 +3264,7 @@ def build_server_commands() -> tuple[CommandPreview, ...]:
 class DisplayDevices:
     outputs: tuple[str, ...]
     touch_devices: tuple[TouchDevice, ...]
+    rotations: "dict[str, str]" = field(default_factory=dict)
 
 
 def collect_display_devices(x_display: str | None = None) -> DisplayDevices:
@@ -3276,6 +3283,7 @@ def collect_display_devices(x_display: str | None = None) -> DisplayDevices:
     )
 
     outputs = parse_xrandr_outputs(xrandr.stdout)
+    rotations = parse_xrandr_rotations(xrandr.stdout)
     xinput_map = parse_xinput_device_map(xinput.stdout)
 
     if not outputs:
@@ -3287,10 +3295,11 @@ def collect_display_devices(x_display: str | None = None) -> DisplayDevices:
             xrandr = _run_display_probe(runner, ["runuser", "-u", desktop_user, "--", *env_args, "xrandr", "--query"])
             xinput = _run_display_probe(runner, ["runuser", "-u", desktop_user, "--", *env_args, "xinput", "list"])
             outputs = parse_xrandr_outputs(xrandr.stdout)
+            rotations = parse_xrandr_rotations(xrandr.stdout)
             xinput_map = parse_xinput_device_map(xinput.stdout)
 
     touch_devices = _resolve_touch_devices(runner, xinput_map)
-    return DisplayDevices(outputs=outputs, touch_devices=touch_devices)
+    return DisplayDevices(outputs=outputs, touch_devices=touch_devices, rotations=rotations)
 
 
 def _run_display_probe(runner: CommandRunner, args: Sequence[str]) -> CommandResult:
@@ -3325,6 +3334,33 @@ def parse_xrandr_outputs(output: str) -> tuple[str, ...]:
         if len(parts) >= 2 and parts[1] == "connected":
             outputs.append(parts[0])
     return tuple(outputs)
+
+
+_XRANDR_GEOMETRY_RE = re.compile(r"\d+x\d+[+-]\d+[+-]\d+")
+_XRANDR_ROTATION_WORDS = frozenset({"normal", "left", "right", "inverted"})
+
+
+def parse_xrandr_rotations(output: str) -> "dict[str, str]":
+    """Parse `xrandr --query` -> {output_name: current_rotation}
+
+    xrandr เว้นคำ rotation ไว้เฉยๆ เมื่อจอยังอยู่ใน orientation ปกติ เช่น
+    "HDMI-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 531mm x 299mm"
+    และจะพิมพ์คำ rotation (left/right/inverted) ต่อท้าย geometry ก็ต่อเมื่อจอถูกหมุนออกจาก normal เท่านั้น
+    """
+    result: "dict[str, str]" = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or parts[1] != "connected":
+            continue
+        name = parts[0]
+        match = _XRANDR_GEOMETRY_RE.search(line)
+        rotation = "normal"
+        if match:
+            remainder = line[match.end():].split()
+            if remainder and remainder[0] in _XRANDR_ROTATION_WORDS:
+                rotation = remainder[0]
+        result[name] = rotation
+    return result
 
 
 def parse_xinput_touch_devices(output: str) -> tuple[str, ...]:

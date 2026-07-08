@@ -124,7 +124,7 @@
           <!-- Preview -->
           <div class="flex flex-col items-center gap-4 flex-shrink-0">
             <div class="flex items-center justify-center w-[120px] h-[120px]">
-              <div class="monitor-preview" id="monitorPreview" data-rotation="normal">
+              <div class="monitor-preview" id="monitorPreview" data-rotation="{{ current_rotation }}">
                 <div class="corner top-left"></div><div class="corner top-right"></div>
                 <div class="corner bottom-left"></div><div class="corner bottom-right"></div>
                 <span class="text-[0.6rem] font-bold text-faint uppercase tracking-wide" id="previewLabel">Normal</span>
@@ -132,7 +132,7 @@
             </div>
             <div class="flex gap-1.5 flex-wrap justify-center">
               {% for value, label in rotations %}
-              <button class="rotation-btn {{ 'active' if value == 'normal' else '' }}" data-rotation="{{ value }}" type="button">{{ label }}</button>
+              <button class="rotation-btn {{ 'active' if value == current_rotation else '' }}" data-rotation="{{ value }}" type="button">{{ label }}</button>
               {% endfor %}
             </div>
           </div>
@@ -481,6 +481,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script id="deviceRotationsData" type="application/json">{{ device_rotations | tojson }}</script>
 <script>
 (function () {
   "use strict";
@@ -516,7 +517,14 @@
   var persistSession  = document.getElementById("persistSession");
   var persistXorg     = document.getElementById("persistXorg");
   var applyResult     = document.getElementById("applyResult");
-  var selectedRotation = "normal";
+  var selectedRotation = "{{ current_rotation }}";
+
+  // ── Rotation state per output (จาก server-render + refresh ภายหลัง) ──────────
+  var deviceRotations = {};
+  try {
+    var rotationsDataEl = document.getElementById("deviceRotationsData");
+    deviceRotations = rotationsDataEl ? (JSON.parse(rotationsDataEl.textContent || "{}") || {}) : {};
+  } catch (e) { deviceRotations = {}; }
 
   var rotDeg = { normal:"0deg", left:"-90deg", right:"90deg", inverted:"180deg" };
   var rotLbl = { normal:"Normal", left:"Left", right:"Right", inverted:"Revert" };
@@ -527,14 +535,25 @@
     if (previewLabel) previewLabel.textContent = rotLbl[selectedRotation];
   }
 
-  document.querySelectorAll(".rotation-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      selectedRotation = btn.dataset.rotation;
-      document.querySelectorAll(".rotation-btn").forEach(function (b) { b.classList.remove("active"); });
-      btn.classList.add("active");
-      updatePreview();
+  function setRotation(value) {
+    selectedRotation = value;
+    document.querySelectorAll(".rotation-btn").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.rotation === value);
     });
+    updatePreview();
+  }
+
+  // แสดง rotation ปัจจุบันของ output ที่เลือกอยู่ (ถ้ารู้จัก) ไม่งั้น fallback เป็น normal
+  function applyRotationForSelectedOutput() {
+    var name = outputSelect ? outputSelect.value : "";
+    setRotation(deviceRotations[name] || "normal");
+  }
+
+  document.querySelectorAll(".rotation-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () { setRotation(btn.dataset.rotation); });
   });
+
+  if (outputSelect) outputSelect.addEventListener("change", applyRotationForSelectedOutput);
 
   function setResult(msg, status) {
     if (!applyResult) return;
@@ -576,19 +595,23 @@
       .then(function (d) {
         replaceOptions(outputSelect, d.outputs || []);
         replaceOptions(touchSelect, d.touchDevices || []);
+        deviceRotations = d.rotations || {};
+        applyRotationForSelectedOutput();
         setResult("", "");
       });
   });
 
   function doApply() {
     setResult("Applying...", "");
+    var payload = selectedConfig();
     fetch("{{ url_for('display_apply') }}", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload()),
+      body: JSON.stringify(payload),
     })
     .then(function (r) { return r.json(); })
     .then(function (d) {
-      if (d.ok) {
+      if (d.status === "ok") {
+        deviceRotations[payload.output] = payload.rotate;
         setResult("Applied successfully", "ok");
         setTimeout(function () { setResult("", ""); }, 3000);
       } else {
@@ -751,11 +774,11 @@
     if (badge) {
       if (_simLibOk) {
         badge.className = "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-safe/30 bg-safe/5 text-[0.75rem] font-semibold text-safe";
-        badge.innerHTML = '<iconify-icon icon="lucide:check-circle" width="13" height="13"></iconify-icon><span>'+ "\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e43\u0e0a\u0e49" + '</span>';
+        badge.innerHTML = '<iconify-icon icon="lucide:check-circle" width="13" height="13"></iconify-icon><span>'+ "พร้อมใช้" + '</span>';
         if (missing) missing.style.display = "none";
       } else {
         badge.className = "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-caution/30 bg-caution/5 text-[0.75rem] font-semibold text-caution";
-        badge.innerHTML = '<iconify-icon icon="lucide:alert-triangle" width="13" height="13"></iconify-icon><span>'+ "\u0e44\u0e21\u0e48\u0e1e\u0e1a Library" + '</span>';
+        badge.innerHTML = '<iconify-icon icon="lucide:alert-triangle" width="13" height="13"></iconify-icon><span>'+ "ไม่พบ Library" + '</span>';
         if (missing) missing.style.display = "";
       }
     }
@@ -764,7 +787,7 @@
     var pid  = document.getElementById("sim-pid");
     var running = !!d.running;
     if (dot) dot.className = "w-2 h-2 rounded-full flex-shrink-0 " + (running ? "bg-safe" : "bg-faint/40");
-    if (txt) { txt.textContent = running ? "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e17\u0e33\u0e07\u0e32\u0e19" : "\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e17\u0e33\u0e07\u0e32\u0e19"; txt.className = "text-[0.78rem] flex-1 " + (running ? "text-safe font-medium" : "text-muted"); }
+    if (txt) { txt.textContent = running ? "กำลังทำงาน" : "ไม่ได้ทำงาน"; txt.className = "text-[0.78rem] flex-1 " + (running ? "text-safe font-medium" : "text-muted"); }
     if (pid) pid.textContent = d.pid ? "PID " + d.pid : "";
     var startBtn = document.getElementById("sim-start-btn");
     var stopBtn  = document.getElementById("sim-stop-btn");
