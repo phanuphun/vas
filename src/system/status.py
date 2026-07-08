@@ -685,44 +685,69 @@ def _scan_loginctl_sessions() -> str | None:
 
 
 def find_x11_session_owner() -> "tuple[str, str] | None":
-    """หา (username, display) ของ active X11 session ปัจจุบันผ่าน loginctl (live, ไม่ cache)
+    """หา (username, display) ของ desktop user ที่ login หน้าจอเครื่องจริงผ่าน loginctl (live, ไม่ cache)
 
     ใช้แทนการเดา DISPLAY=":0" คงที่ หรือพึ่ง SUDO_USER/HOME ของ process VAS server เอง —
     ค่าพวกนั้นผิดพลาดได้เวลา VAS server รันเป็น systemd service (root, ไม่มี SUDO_USER ใน env,
     HOME ที่ persist ไว้ใน env file ตอน install อาจไม่ตรง user จริงเวลา service auto-start
-    หลัง reboot) หรือ X session ถูก allocate เป็น display หมายเลขอื่นที่ไม่ใช่ :0
+    หลัง reboot)
+
+    ใช้ "Seat" เป็นสัญญาณหลักในการแยก session — session ที่มี Seat (เช่น seat0) คือ session
+    ที่ login อยู่หน้าจอ/คีย์บอร์ดเครื่องจริง ส่วน session ที่ไม่มี Seat (Seat ว่าง) คือ
+    remote session (SSH pts/N) ซึ่งไม่ใช่ desktop user ที่เราต้องการเลย — เดิมใช้ Type=x11
+    เป็นตัวกรองหลักแต่พบว่า kiosk session ที่ start X ผ่าน startx/xinit ตรงๆ (ไม่ผ่าน display
+    manager อย่าง gdm/lightdm) มักไม่ถูก logind ติด Type=x11 ให้ ทำให้หา session ไม่เจอเลย
+    แล้ว fallback ไปเจอ SSH session ของ sysadmin แทน (bug จริงที่เจอในหน้างาน)
     """
     completed = _run_command(("loginctl", "list-sessions", "--no-legend"))
     if completed is None or completed.returncode != 0:
         return None
 
+    candidates: "list[tuple[str, str]]" = []
     for line in completed.stdout.splitlines():
         parts = line.split()
         if not parts:
             continue
         session_id = parts[0]
-        props = _read_loginctl_session_props(session_id, ("Type", "Name", "Display"))
-        if props.get("Type") != "x11":
-            continue
+        props = _read_loginctl_session_props(session_id, ("Type", "Class", "Name", "Seat", "Display"))
         name = props.get("Name")
         if not name or name == "root":
             continue
+        if not props.get("Seat"):
+            # ไม่มี seat = remote/pts session (เช่น SSH ของ sysadmin) ไม่ใช่ user หน้าจอเครื่องจริง
+            continue
         display = props.get("Display") or ":0"
-        return (name, display)
+        if props.get("Type") == "x11" and props.get("Class") == "user":
+            return (name, display)  # ชัวร์สุด: x11 + user class + มี seat จริง
+        candidates.append((name, display))
 
-    return None
+    return candidates[0] if candidates else None
 
 
 def _read_loginctl_session_props(session_id: str, keys: "tuple[str, ...]") -> "dict[str, str]":
+    """อ่านหลาย property จาก `loginctl show-session` พร้อมกันแบบ order-independent
+
+    ห้ามใช้ --value กับหลาย -p พร้อมกัน — ค่าที่ได้เรียงตาม internal property order ของ
+    systemd เอง ไม่ใช่ตามลำดับ -p ที่ระบุใน command line (เจอ bug จริงในหน้างาน: request
+    ("Type","Class","Name","Seat","Display") แต่ output กลับมาเป็นลำดับ Name/Seat/Type/Class
+    ทำให้ mapping ผิดค่าทั้งหมด) — ใช้ format ปกติ `Key=Value` (ไม่ใส่ --value) แทน แล้ว parse
+    ด้วยชื่อ key ตรงๆ ถึงจะ map ค่าได้ถูกต้องไม่ว่า systemd จะเรียงลำดับยังไง
+    """
     args: list[str] = ["loginctl", "show-session", session_id]
     for key in keys:
         args += ["-p", key]
-    args.append("--value")
     completed = _run_command(tuple(args))
     if completed is None or completed.returncode != 0:
         return {}
-    lines = completed.stdout.splitlines()
-    return {key: lines[i].strip() for i, key in enumerate(keys) if i < len(lines)}
+    result: "dict[str, str]" = {}
+    for line in completed.stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, _sep, value = line.partition("=")
+        key = key.strip()
+        if key in keys:
+            result[key] = value.strip()
+    return result
 
 
 def _print_display_session_status(status: DisplaySessionStatus) -> None:
