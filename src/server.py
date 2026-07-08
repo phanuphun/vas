@@ -1077,8 +1077,23 @@ def create_app() -> Flask:
     def display_reset() -> tuple[dict[str, object], int] | dict[str, object]:
         payload = request.get_json(silent=True) or {}
         touch = str(payload.get("touch", "")).strip()
-        output = str(payload.get("output", "")).strip() or None
+        requested_output = str(payload.get("output", "")).strip() or None
         x_display = str(payload.get("display", "")).strip() or None
+
+        # หา output/touch ที่ connected จริงตอนนี้เองฝั่ง backend เสมอ — ห้ามพึ่งค่าจาก
+        # dropdown ฝั่ง frontend อย่างเดียว เพราะถ้า dropdown ว่าง (เช่นตอนที่ยังหา monitor
+        # ไม่เจอ) ปุ่ม Reset จะข้ามขั้นตอน "xrandr --rotate normal" ไปเลย ทำให้จอยังคงหมุนค้าง
+        # อยู่ในขณะที่ touch matrix ถูกรีเซ็ตเป็น identity แล้ว — เกิดอาการจอกับ touch ไม่ตรงกัน
+        # (จอหมุนซ้าย แต่ touch คิดว่าจอปกติ) ซึ่งดูเหมือน "touch เพี้ยน" ทั้งที่จริงๆ matrix รีเซ็ตถูกแล้ว
+        devices = collect_display_devices(x_display=x_display)
+        outputs_to_reset = list(devices.outputs)
+        if not outputs_to_reset and requested_output:
+            outputs_to_reset = [requested_output]
+
+        if not touch and devices.touch_devices:
+            # dropdown ฝั่ง frontend อาจว่างด้วยเหตุผลเดียวกัน (detection ตอนนั้นยังไม่เจอ) —
+            # ใช้ touchscreen ตัวแรกที่ detect ได้จริงตอนนี้แทน
+            touch = devices.touch_devices[0].name
 
         if not touch:
             return {"status": "error", "errors": ["Touchscreen device is required."]}, 400
@@ -1086,14 +1101,18 @@ def create_app() -> Flask:
         runner = DisplayCommandRunner()
         configurator = DisplayConfigurator(runner)
         try:
-            configurator.reset_touch_mapping(touch=touch, output=output, x_display=x_display)
+            if outputs_to_reset:
+                for output_name in outputs_to_reset:
+                    configurator.reset_touch_mapping(touch=touch, output=output_name, x_display=x_display)
+            else:
+                configurator.reset_touch_mapping(touch=touch, output=None, x_display=x_display)
         except (CommandExecutionError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
         return {
             "status": "ok",
             "touch": touch,
-            "output": output,
+            "outputs": outputs_to_reset,
             "display": x_display,
             "rotate": "normal",
         }
