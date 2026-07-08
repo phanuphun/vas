@@ -55,6 +55,7 @@ from system.status import (
     collect_qr_reader_status,
     collect_remote_access_status,
     collect_screen_blank_config_status,
+    find_x11_session_owner,
     collect_vpn_status,
     collect_xorg_touchscreen_config_status,
 )
@@ -3483,15 +3484,47 @@ def _system_snapshot_dir_label() -> str:
     return system_snapshot_dir().as_posix()
 
 def _default_x_display() -> str:
+    session_owner = find_x11_session_owner()
+    if session_owner:
+        _name, display = session_owner
+        if display:
+            return display
     return ":0"
 
 
 def _default_xauthority() -> str | None:
+    session_owner = find_x11_session_owner()
+    if session_owner:
+        name, _display = session_owner
+        candidate = _xauthority_for_user(name)
+        if candidate is not None:
+            return candidate
+
     xauthority = Path.home() / ".Xauthority"
     return xauthority.as_posix() if xauthority.exists() else None
 
 
+def _xauthority_for_user(username: str) -> str | None:
+    try:
+        import pwd
+
+        home = Path(pwd.getpwnam(username).pw_dir)  # type: ignore[attr-defined]
+    except (ImportError, KeyError, OSError):
+        return None
+    candidate = home / ".Xauthority"
+    return candidate.as_posix() if candidate.exists() else None
+
+
 def _desktop_user() -> str | None:
+    # ใช้ loginctl หา owner ของ active X11 session จริงก่อนเสมอ — เชื่อถือได้กว่า
+    # SUDO_USER/HOME เพราะไม่ขึ้นกับว่า VAS server เอง (systemd service, รันเป็น root
+    # ไม่มี SUDO_USER ใน env) ถูก start มายังไง (ดู system/status.py::find_x11_session_owner)
+    session_owner = find_x11_session_owner()
+    if session_owner:
+        name, _display = session_owner
+        if name and name != "root":
+            return name
+
     if os.name != "posix" or not hasattr(os, "geteuid") or os.geteuid() != 0:
         return None
     sudo_user = os.environ.get("SUDO_USER", "").strip()

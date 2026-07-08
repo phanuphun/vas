@@ -137,7 +137,30 @@ SCREEN_BLANK_SIGNATURE = "# vending-auto-config: screen-blank"
 
 
 def _effective_home() -> Path:
-    """Return home directory ของ user จริง แม้ว่าจะรัน sudo"""
+    """Return home directory ของ desktop user จริง (คนที่ login X11 session อยู่)
+
+    ลำดับความสำคัญ:
+    1. loginctl — หา owner ของ active X11 session จริง (ดู find_x11_session_owner()) เชื่อถือ
+       ได้ที่สุด เพราะไม่ขึ้นกับว่า VAS server เอง (systemd service, รันเป็น root, ไม่มี
+       SUDO_USER ใน env) ถูก start มายังไง — ถ้าใช้แค่ SUDO_USER แล้ว VAS server รันเป็น
+       service (ไม่ใช่ interactive `sudo vas server run`) จะ fallback ไป Path.home() = /root
+       ทันที ทำให้ persist .xprofile/display-session.sh ไปผิด home (ของ root ไม่ใช่ของ
+       desktop user) — สคริปต์ที่ persist ไว้เลยไม่มีวันถูก X session จริงเจอ ทำให้การตั้งค่า
+       จอ (เช่น rotation) หายกลับไปเป็นค่าเดิมทุกครั้งหลัง reboot
+    2. SUDO_USER — เผื่อรันแบบ `sudo vas ...` interactive และ loginctl หา session ไม่เจอ
+       (เช่นทดสอบใน environment ที่ไม่มี X11 session จริง)
+    3. Path.home() ของ process เอง — fallback สุดท้าย
+    """
+    session_owner = find_x11_session_owner()
+    if session_owner:
+        name, _display = session_owner
+        try:
+            import pwd
+
+            return Path(pwd.getpwnam(name).pw_dir)  # type: ignore[attr-defined]
+        except (ImportError, KeyError):
+            pass
+
     sudo_user = os.environ.get("SUDO_USER", "").strip()
     if sudo_user and sudo_user != "root":
         try:
@@ -156,10 +179,6 @@ def _effective_home_config_path() -> Path:
 def _effective_home_script_path() -> Path:
     return _effective_home() / ".config/vending-auto-setup/display-session.sh"
 
-
-# Legacy constants สำหรับ backward compat (ใช้ได้เฉพาะ non-sudo context)
-DISPLAY_SESSION_CONFIG_PATH = _effective_home_config_path()
-DISPLAY_SESSION_SCRIPT_PATH = _effective_home_script_path()
 
 TOOLS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("Git", "git", ("git", "--version")),
@@ -663,6 +682,47 @@ def _scan_loginctl_sessions() -> str | None:
             return session_type
 
     return None
+
+
+def find_x11_session_owner() -> "tuple[str, str] | None":
+    """หา (username, display) ของ active X11 session ปัจจุบันผ่าน loginctl (live, ไม่ cache)
+
+    ใช้แทนการเดา DISPLAY=":0" คงที่ หรือพึ่ง SUDO_USER/HOME ของ process VAS server เอง —
+    ค่าพวกนั้นผิดพลาดได้เวลา VAS server รันเป็น systemd service (root, ไม่มี SUDO_USER ใน env,
+    HOME ที่ persist ไว้ใน env file ตอน install อาจไม่ตรง user จริงเวลา service auto-start
+    หลัง reboot) หรือ X session ถูก allocate เป็น display หมายเลขอื่นที่ไม่ใช่ :0
+    """
+    completed = _run_command(("loginctl", "list-sessions", "--no-legend"))
+    if completed is None or completed.returncode != 0:
+        return None
+
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        session_id = parts[0]
+        props = _read_loginctl_session_props(session_id, ("Type", "Name", "Display"))
+        if props.get("Type") != "x11":
+            continue
+        name = props.get("Name")
+        if not name or name == "root":
+            continue
+        display = props.get("Display") or ":0"
+        return (name, display)
+
+    return None
+
+
+def _read_loginctl_session_props(session_id: str, keys: "tuple[str, ...]") -> "dict[str, str]":
+    args: list[str] = ["loginctl", "show-session", session_id]
+    for key in keys:
+        args += ["-p", key]
+    args.append("--value")
+    completed = _run_command(tuple(args))
+    if completed is None or completed.returncode != 0:
+        return {}
+    lines = completed.stdout.splitlines()
+    return {key: lines[i].strip() for i, key in enumerate(keys) if i < len(lines)}
 
 
 def _print_display_session_status(status: DisplaySessionStatus) -> None:
