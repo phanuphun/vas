@@ -7,7 +7,7 @@ VAS ใช้ **SQLite** เป็น database เก็บข้อมูลท
 | ค่า | รายละเอียด |
 |---|---|
 | Engine | SQLite 3 |
-| ที่เก็บไฟล์ | `~/.config/vas/vas.db` (นอกโฟลเดอร์ install `/opt/vending-auto-setup` โดยตั้งใจ — ดู "Migration System" ด้านล่าง) |
+| ที่เก็บไฟล์ | `/var/lib/vending-auto-setup/vas.db` (path คงที่ระดับเครื่อง ไม่ผูกกับ user คนไหน — นอกโฟลเดอร์ install `/opt/vending-auto-setup` โดยตั้งใจ — ดู "Migration System" ด้านล่าง; fallback เป็น `~/.config/vas/vas.db` เฉพาะกรณี dev/test ที่ไม่มีสิทธิ์เขียน `/var/lib`) |
 | WAL mode | เปิดอยู่ (`PRAGMA journal_mode=WAL`) |
 | Foreign keys | เปิดอยู่ (`PRAGMA foreign_keys=ON`) |
 | Source | `src/core/database.py` |

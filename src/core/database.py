@@ -1,7 +1,8 @@
 """
 VAS — SQLite database layer
 
-ไฟล์ DB: ~/.config/vas/vas.db  (สร้างอัตโนมัติถ้าไม่มี)
+ไฟล์ DB: /var/lib/vending-auto-setup/vas.db  (สร้างอัตโนมัติถ้าไม่มี — path คงที่ระดับเครื่อง
+ไม่ผูกกับ user คนไหน ดู db_path() สำหรับ fallback กรณี dev/test ที่ไม่มีสิทธิ์เขียน /var/lib)
 
 Tables:
     qr_scans           — ประวัติ QR scan ทุกครั้ง
@@ -32,8 +33,26 @@ from typing import Generator
 # DB path
 # ---------------------------------------------------------------------------
 
+_FIXED_DB_DIR = Path("/var/lib/vending-auto-setup")
+
+
 def db_path() -> Path:
-    """~/.config/vas/vas.db (ใช้ effective home เพื่อรองรับ sudo)"""
+    """/var/lib/vending-auto-setup/vas.db — path คงที่ระดับเครื่อง (per-machine) ไม่ผูกกับ user
+
+    เดิมใช้ effective_home()/.config/vas/vas.db ซึ่งผูกกับ home ของ "desktop user" ที่ระบบ
+    ตรวจเจอ ณ ขณะนั้น — ขัดกับ design intent ที่ตั้งใจไว้ตั้งแต่แรกว่าเป็น per-machine ไม่ share
+    ตาม user (ดู docs/database.md) บั๊กจริงที่เจอในหน้างาน: พอแก้ logic หา desktop user ให้
+    ถูกต้อง (จาก user ผิดตัวเป็นตัวที่ถูก) ฐานข้อมูลทั้งก้อนก็ "หาย" ไปด้วย เพราะ path มันขยับ
+    ตาม user ที่ตรวจเจอ ณ ตอนนั้น — เปลี่ยนมาใช้ path คงที่ระดับเครื่องแทน ไม่ขึ้นกับ user คนไหน
+    เลย ไม่ว่า desktop user จะเปลี่ยนไปกี่รอบก็ตาม
+    """
+    try:
+        _FIXED_DB_DIR.mkdir(parents=True, exist_ok=True)
+        return _FIXED_DB_DIR / "vas.db"
+    except (OSError, PermissionError):
+        pass
+
+    # Fallback: เผื่อรันแบบไม่มีสิทธิ์เขียน /var/lib (เช่น dev/test บนเครื่องที่ไม่ใช่ root)
     try:
         from system.status import _effective_home  # type: ignore[import]
         base = _effective_home() / ".config" / "vas"
