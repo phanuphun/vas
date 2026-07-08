@@ -1073,6 +1073,31 @@ def create_app() -> Flask:
             "persistXorg": persist_xorg,
         }
 
+    @app.post("/api/display/reset")
+    def display_reset() -> tuple[dict[str, object], int] | dict[str, object]:
+        payload = request.get_json(silent=True) or {}
+        touch = str(payload.get("touch", "")).strip()
+        output = str(payload.get("output", "")).strip() or None
+        x_display = str(payload.get("display", "")).strip() or None
+
+        if not touch:
+            return {"status": "error", "errors": ["Touchscreen device is required."]}, 400
+
+        runner = DisplayCommandRunner()
+        configurator = DisplayConfigurator(runner)
+        try:
+            configurator.reset_touch_mapping(touch=touch, output=output, x_display=x_display)
+        except (CommandExecutionError, OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        return {
+            "status": "ok",
+            "touch": touch,
+            "output": output,
+            "display": x_display,
+            "rotate": "normal",
+        }
+
     @app.post("/api/display/screen-blank")
     def display_screen_blank() -> tuple[dict[str, object], int] | dict[str, object]:
         payload = request.get_json(silent=True) or {}

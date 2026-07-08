@@ -223,6 +223,59 @@ class DisplayConfigurator:
         )
         _chown_to_effective_user(path)
 
+    def reset_touch_mapping(
+        self,
+        touch: str,
+        output: "str | None" = None,
+        x_display: "str | None" = None,
+        xauthority: "str | None" = None,
+        xorg_path: Path = XORG_TOUCHSCREEN_CONFIG_PATH,
+        session_path: "Path | None" = None,
+        script_path: "Path | None" = None,
+    ) -> None:
+        """รีเซ็ต rotation + touch calibration กลับเป็นค่า default (normal, identity matrix)
+
+        ทำ 4 ขั้นตอนตามลำดับ:
+        1. runtime: xrandr rotate normal (ถ้ามี output) + xinput identity matrix ทันที —
+           ทำก่อนเสมอเพื่อให้เห็นผลทันทีแม้ข้อ 2-4 (persist) จะ fail บางส่วน
+        2. ลบ managed block ออกจาก .xprofile — เลิก source display-session.sh ตอน login
+        3. ลบไฟล์ display-session.sh — ไม่มีอะไรเรียกมันแล้วหลังข้อ 2
+        4. ลบไฟล์ Xorg touchscreen calibration config (/etc/X11/xorg.conf.d/...) ถ้ามี
+        """
+        identity_matrix = matrix_for_rotation("normal")
+
+        if output:
+            self.runner.run(
+                self._with_x_env(["xrandr", "--output", output, "--rotate", "normal"], x_display, xauthority),
+                check=False,
+            )
+        self.runner.run(
+            self._with_x_env(
+                ["xinput", "set-prop", touch, COORDINATE_TRANSFORMATION_MATRIX, *identity_matrix],
+                x_display,
+                xauthority,
+            ),
+            check=False,
+        )
+
+        if session_path is None:
+            session_path = _effective_home_config_path()
+        print(f"remove managed block from {session_path.as_posix()}")
+        if not self.runner.dry_run and session_path.exists():
+            existing_content = session_path.read_text(encoding="utf-8")
+            session_path.write_text(remove_managed_block(existing_content), encoding="utf-8")
+            _chown_to_effective_user(session_path)
+
+        if script_path is None:
+            script_path = _effective_home_script_path()
+        print(f"remove {script_path.as_posix()}")
+        if not self.runner.dry_run and script_path.exists():
+            script_path.unlink()
+
+        print(f"remove {xorg_path.as_posix()}")
+        if not self.runner.dry_run and xorg_path.exists():
+            xorg_path.unlink()
+
     def disable_wayland(self, path: Path = GDM_CUSTOM_CONFIG_PATH) -> None:
         self._set_gdm_wayland(enabled=False, path=path)
 

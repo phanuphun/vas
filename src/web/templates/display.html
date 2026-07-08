@@ -185,10 +185,16 @@
         <!-- Apply result -->
         <div class="px-4 py-4 flex items-center justify-between gap-4">
           <div class="msg text-[0.82rem]" id="applyResult" aria-live="polite"></div>
-          <button id="applyDisplayInline" type="button"
-                  class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
-            <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
-          </button>
+          <div class="flex items-center gap-2">
+            <button id="resetDisplayInline" type="button"
+                    class="inline-flex items-center gap-1.5 px-4 py-2 border border-line/15 rounded-lg bg-card text-muted text-[0.82rem] font-semibold hover:bg-surface hover:text-ink transition-colors">
+              <iconify-icon icon="lucide:rotate-ccw" width="14" height="14"></iconify-icon>Reset to Default
+            </button>
+            <button id="applyDisplayInline" type="button"
+                    class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+              <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
+            </button>
+          </div>
         </div>
       </div>
 
@@ -623,6 +629,45 @@
 
   var applyBtn = document.getElementById("applyDisplayInline");
   if (applyBtn) applyBtn.addEventListener("click", doApply);
+
+  function doReset() {
+    if (!window.confirm("รีเซ็ตการตั้งค่าจอ + touchscreen mapping กลับเป็นค่าเริ่มต้น (Normal) และลบไฟล์ที่ persist ไว้ทั้งหมด?")) {
+      return;
+    }
+    var resetBtn = document.getElementById("resetDisplayInline");
+    if (resetBtn) resetBtn.disabled = true;
+    setResult("Resetting...", "");
+    var touch = touchSelect ? touchSelect.value : "";
+    var output = outputSelect ? outputSelect.value : "";
+    fetch("{{ url_for('display_reset') }}", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        touch: touch,
+        output: output,
+        display: xDisplayInput ? xDisplayInput.value.trim() : ":0",
+      }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (resetBtn) resetBtn.disabled = false;
+      if (d.status === "ok") {
+        if (persistXorg) persistXorg.checked = false;
+        if (output) deviceRotations[output] = "normal";
+        setRotation("normal");
+        setResult("Reset to default สำเร็จ", "ok");
+        setTimeout(function () { setResult("", ""); }, 3000);
+      } else {
+        setResult("Error: " + (d.errors || []).join(", "), "error");
+      }
+    })
+    .catch(function (e) {
+      if (resetBtn) resetBtn.disabled = false;
+      setResult("Fetch error: " + e, "error");
+    });
+  }
+
+  var resetBtn = document.getElementById("resetDisplayInline");
+  if (resetBtn) resetBtn.addEventListener("click", doReset);
 
   // ── Display Protocol switch (X11 / Wayland) ──────────────────────────────
   var waylandResult   = document.getElementById("waylandResult");
