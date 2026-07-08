@@ -992,6 +992,8 @@ def create_app() -> Flask:
         current_screen_blank = get_screen_blank_seconds(DisplayCommandRunner(), x_display=default_display)
         default_output = devices.outputs[0] if devices.outputs else None
         current_rotation = devices.rotations.get(default_output, "normal") if default_output else "normal"
+        default_touch = devices.touch_devices[0].name if devices.touch_devices else None
+        current_touch_rotation = devices.touch_rotations.get(default_touch, "normal") if default_touch else "normal"
         return render_template(
             "display.html",
             outputs=devices.outputs,
@@ -999,6 +1001,8 @@ def create_app() -> Flask:
             rotations=ROTATION_LABELS,
             current_rotation=current_rotation,
             device_rotations=devices.rotations,
+            current_touch_rotation=current_touch_rotation,
+            device_touch_rotations=devices.touch_rotations,
             default_display=default_display,
             session=collect_display_session_status(),
             gdm_wayland=collect_gdm_wayland_status(),
@@ -1035,6 +1039,7 @@ def create_app() -> Flask:
             "touchDevices": [{"name": d.name, "id": d.xinput_id} for d in devices.touch_devices],
             "defaultDisplay": x_display,
             "rotations": devices.rotations,
+            "touchRotations": devices.touch_rotations,
         }
 
     @app.post("/api/display/apply")
@@ -3320,6 +3325,7 @@ class DisplayDevices:
     outputs: tuple[str, ...]
     touch_devices: tuple[TouchDevice, ...]
     rotations: "dict[str, str]" = field(default_factory=dict)
+    touch_rotations: "dict[str, str]" = field(default_factory=dict)
 
 
 def collect_display_devices(x_display: str | None = None) -> DisplayDevices:
@@ -3341,9 +3347,12 @@ def collect_display_devices(x_display: str | None = None) -> DisplayDevices:
     rotations = parse_xrandr_rotations(xrandr.stdout)
     xinput_map = parse_xinput_device_map(xinput.stdout)
 
+    desktop_user: "str | None" = None
+    use_runuser = False
     if not outputs:
         desktop_user = _desktop_user()
         if desktop_user:
+            use_runuser = True
             env_args = ["env", f"DISPLAY={resolved_display}"]
             if xauthority:
                 env_args.append(f"XAUTHORITY={xauthority}")
@@ -3354,7 +3363,32 @@ def collect_display_devices(x_display: str | None = None) -> DisplayDevices:
             xinput_map = parse_xinput_device_map(xinput.stdout)
 
     touch_devices = _resolve_touch_devices(runner, xinput_map)
-    return DisplayDevices(outputs=outputs, touch_devices=touch_devices, rotations=rotations)
+
+    # อ่านทิศทาง touch จริงที่แต่ละ device ใช้งานอยู่ตอนนี้ (ไม่ใช่แค่ค่า default ของฟอร์ม) —
+    # ใช้ hydrate หน้า /display ให้ toggle "แยกทิศทาง Touch จากจอ" sync กับของจริงบนเครื่อง
+    # (ดู parse_touch_rotation)
+    touch_rotations: "dict[str, str]" = {}
+    for device in touch_devices:
+        if use_runuser and desktop_user:
+            env_args = ["env", f"DISPLAY={resolved_display}"]
+            if xauthority:
+                env_args.append(f"XAUTHORITY={xauthority}")
+            props_result = _run_display_probe(
+                runner, ["runuser", "-u", desktop_user, "--", *env_args, "xinput", "list-props", device.name]
+            )
+        else:
+            props_result = _run_display_probe(
+                runner,
+                configurator._with_x_env(["xinput", "list-props", device.name], resolved_display, xauthority),
+            )
+        if props_result.returncode == 0:
+            detected = parse_touch_rotation(props_result.stdout)
+            if detected:
+                touch_rotations[device.name] = detected
+
+    return DisplayDevices(
+        outputs=outputs, touch_devices=touch_devices, rotations=rotations, touch_rotations=touch_rotations
+    )
 
 
 def _run_display_probe(runner: CommandRunner, args: Sequence[str]) -> CommandResult:
@@ -3416,6 +3450,35 @@ def parse_xrandr_rotations(output: str) -> "dict[str, str]":
                 rotation = remainder[0]
         result[name] = rotation
     return result
+
+
+_COORDINATE_MATRIX_RE = re.compile(r"Coordinate Transformation Matrix\s*\(\d+\):\s*(.+)")
+
+
+def parse_touch_rotation(list_props_output: str) -> "str | None":
+    """Parse `xinput list-props <device>` -> ชื่อ rotation ("normal"/"left"/"right"/"inverted")
+
+    อ่านค่า "Coordinate Transformation Matrix" จริงที่ device ใช้งานอยู่ตอนนี้ แล้วเทียบกับ
+    ROTATION_MATRICES ย้อนกลับ เพื่อรู้ว่า touch กำลังตั้งทิศทางไหนอยู่จริงๆ (ไม่ใช่แค่เดาจาก
+    ค่า rotate ของจอ) — ใช้ hydrate หน้า /display ให้ toggle "แยกทิศทาง Touch จากจอ" กับปุ่ม
+    ทิศทาง sync กับของจริงบนเครื่องตอนโหลดหน้าทุกครั้ง เดิมหน้านี้ไม่เคยอ่านค่านี้เลย ทำให้กด
+    Apply ซ้ำ (เช่นหลัง deploy โค้ดใหม่) ทับค่า touch rotation ที่ตั้งไว้ถูกต้องด้วยค่า default
+    "normal" ของฟอร์มไปเงียบๆ โดยผู้ใช้ไม่รู้ตัว (ดู CHANGELOG)
+    """
+    match = _COORDINATE_MATRIX_RE.search(list_props_output)
+    if not match:
+        return None
+    raw_values = [v.strip() for v in match.group(1).split(",")]
+    if len(raw_values) != 9:
+        return None
+    try:
+        candidate = tuple(round(float(v), 3) for v in raw_values)
+    except ValueError:
+        return None
+    for name, matrix in ROTATION_MATRICES.items():
+        if tuple(round(float(v), 3) for v in matrix) == candidate:
+            return name
+    return None
 
 
 def parse_xinput_touch_devices(output: str) -> tuple[str, ...]:

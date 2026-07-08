@@ -504,6 +504,7 @@
 
 {% block extra_scripts %}
 <script id="deviceRotationsData" type="application/json">{{ device_rotations | tojson }}</script>
+<script id="deviceTouchRotationsData" type="application/json">{{ device_touch_rotations | tojson }}</script>
 <script>
 (function () {
   "use strict";
@@ -548,6 +549,17 @@
     deviceRotations = rotationsDataEl ? (JSON.parse(rotationsDataEl.textContent || "{}") || {}) : {};
   } catch (e) { deviceRotations = {}; }
 
+  // ── Touch rotation state per device (จาก server-render + refresh ภายหลัง) ────
+  // อ่านค่าจริงที่ touch device ใช้งานอยู่ตอนนี้ (ไม่ใช่แค่เดาตาม rotate ของจอ) เพื่อ hydrate
+  // toggle "แยกทิศทาง Touch จากจอ" ให้ตรงกับของจริงบนเครื่องทุกครั้งที่โหลดหน้า — เดิมค่านี้
+  // ไม่เคยถูกอ่านจากเครื่องเลย ทำให้กด Apply ซ้ำ (เช่นหลัง deploy โค้ดใหม่) ทับค่า touch
+  // rotation ที่ถูกต้องอยู่แล้วด้วยค่า default "normal" ของฟอร์มไปเงียบๆ
+  var deviceTouchRotations = {};
+  try {
+    var touchRotationsDataEl = document.getElementById("deviceTouchRotationsData");
+    deviceTouchRotations = touchRotationsDataEl ? (JSON.parse(touchRotationsDataEl.textContent || "{}") || {}) : {};
+  } catch (e) { deviceTouchRotations = {}; }
+
   var rotDeg = { normal:"0deg", left:"-90deg", right:"90deg", inverted:"180deg" };
   var rotLbl = { normal:"Normal", left:"Left", right:"Right", inverted:"Revert" };
 
@@ -580,7 +592,7 @@
   // ── ทิศทาง Touch แยกจากจอ (เผื่อ touch controller ต่อคนละทิศกับ panel วิดีโอ) ────────
   var decoupleTouchRotation = document.getElementById("decoupleTouchRotation");
   var touchRotationRow      = document.getElementById("touchRotationRow");
-  var selectedTouchRotation = selectedRotation;
+  var selectedTouchRotation = "{{ current_touch_rotation }}";
 
   function setTouchRotation(value) {
     selectedTouchRotation = value;
@@ -590,9 +602,25 @@
   }
   setTouchRotation(selectedTouchRotation);
 
+  // แสดงทิศทาง touch จริงของ device ที่เลือกอยู่ (ถ้ารู้จัก) — เปิด toggle "แยกทิศทาง" ให้
+  // อัตโนมัติก็ต่อเมื่อ touch จริงต่างจากจอเท่านั้น (ไม่งั้นปล่อยปิดไว้ เพราะพฤติกรรม default
+  // คือ touch = rotate ของจออยู่แล้ว)
+  function applyTouchRotationForSelectedDevice() {
+    var name = touchSelect ? touchSelect.value : "";
+    var known = Object.prototype.hasOwnProperty.call(deviceTouchRotations, name) ? deviceTouchRotations[name] : null;
+    var touchValue = known || selectedRotation;
+    setTouchRotation(touchValue);
+    var shouldDecouple = !!known && known !== selectedRotation;
+    if (decoupleTouchRotation) decoupleTouchRotation.checked = shouldDecouple;
+    if (touchRotationRow) touchRotationRow.classList.toggle("hidden", !shouldDecouple);
+  }
+  applyTouchRotationForSelectedDevice();
+
   document.querySelectorAll(".touch-rotation-btn").forEach(function (btn) {
     btn.addEventListener("click", function () { setTouchRotation(btn.dataset.rotation); });
   });
+
+  if (touchSelect) touchSelect.addEventListener("change", applyTouchRotationForSelectedDevice);
 
   if (decoupleTouchRotation) {
     decoupleTouchRotation.addEventListener("change", function () {
@@ -645,7 +673,9 @@
         replaceOptions(outputSelect, d.outputs || []);
         replaceOptions(touchSelect, d.touchDevices || []);
         deviceRotations = d.rotations || {};
+        deviceTouchRotations = d.touchRotations || {};
         applyRotationForSelectedOutput();
+        applyTouchRotationForSelectedDevice();
         setResult("", "");
       });
   });
@@ -661,6 +691,7 @@
     .then(function (d) {
       if (d.status === "ok") {
         deviceRotations[payload.output] = payload.rotate;
+        if (payload.touch) deviceTouchRotations[payload.touch] = d.touchRotate || payload.rotate;
         setResult("Applied successfully", "ok");
         setTimeout(function () { setResult("", ""); }, 3000);
       } else {
@@ -697,6 +728,7 @@
         if (persistXorg) persistXorg.checked = false;
         if (output) deviceRotations[output] = "normal";
         setRotation("normal");
+        if (touch) deviceTouchRotations[touch] = "normal";
         if (decoupleTouchRotation) decoupleTouchRotation.checked = false;
         if (touchRotationRow) touchRotationRow.classList.add("hidden");
         setTouchRotation("normal");
