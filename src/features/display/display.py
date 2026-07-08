@@ -107,10 +107,15 @@ class DisplayConfigurator:
         output: str,
         touch: str,
         rotate: str,
+        touch_rotate: "str | None" = None,
         x_display: "str | None" = None,
         xauthority: "str | None" = None,
     ) -> None:
-        matrix = matrix_for_rotation(rotate)
+        # touch_rotate แยกจาก rotate (จอ) ได้ — เผื่อ touch controller ต่อสาย/ติดตั้งคนละทิศกับ
+        # panel วิดีโอ (พบจริงในหน้างาน: จอ Normal ปกติ แต่ touch ต้องใช้ matrix แบบ "right"
+        # ถึงจะตรงจุด) ถ้าไม่ระบุ touch_rotate จะ default ตาม rotate เหมือนพฤติกรรมเดิม
+        effective_touch_rotate = touch_rotate or rotate
+        matrix = matrix_for_rotation(effective_touch_rotate)
         self.runner.run(self._with_x_env(["xrandr", "--output", output, "--rotate", rotate], x_display, xauthority))
         self.runner.run(
             self._with_x_env(
@@ -124,9 +129,11 @@ class DisplayConfigurator:
         self,
         touch: str,
         rotate: str,
+        touch_rotate: "str | None" = None,
         path: Path = XORG_TOUCHSCREEN_CONFIG_PATH,
     ) -> None:
-        matrix = " ".join(matrix_for_rotation(rotate))
+        effective_touch_rotate = touch_rotate or rotate
+        matrix = " ".join(matrix_for_rotation(effective_touch_rotate))
         content = build_xorg_touchscreen_config(touch, matrix)
         print(f"write {path.as_posix()}")
         if self.runner.dry_run:
@@ -141,6 +148,7 @@ class DisplayConfigurator:
         output: str,
         touch: str,
         rotate: str,
+        touch_rotate: "str | None" = None,
         x_display: "str | None" = None,
         path: "Path | None" = None,
         script_path: "Path | None" = None,
@@ -151,11 +159,13 @@ class DisplayConfigurator:
             path = _effective_home_config_path()
         if script_path is None:
             script_path = _effective_home_script_path()
-        matrix = " ".join(matrix_for_rotation(rotate))
+        effective_touch_rotate = touch_rotate or rotate
+        matrix = " ".join(matrix_for_rotation(effective_touch_rotate))
         script_content = build_display_session_script(
             output=output,
             touch=touch,
             rotate=rotate,
+            touch_rotate=effective_touch_rotate,
             matrix=matrix,
             x_display=x_display,
             delay_seconds=delay_seconds,
@@ -456,8 +466,12 @@ def build_display_session_script(
     x_display: "str | None",
     delay_seconds: int,
     retries: int,
+    touch_rotate: "str | None" = None,
 ) -> str:
     display_line = f"export DISPLAY={shlex.quote(x_display)}\n" if x_display else ""
+    # touch_rotate เป็นแค่ label ไว้อ่าน/debug ในสคริปต์ที่ persist ไว้ — ค่าจริงที่ apply
+    # ถูกคำนวณเป็น MATRIX ไว้แล้วตั้งแต่ตอนเรียกฟังก์ชันนี้ (ดู DisplayConfigurator.persist_session)
+    effective_touch_rotate = touch_rotate or rotate
     return (
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -468,6 +482,7 @@ def build_display_session_script(
         f"OUTPUT={shlex.quote(output)}\n"
         f"TOUCH_DEVICE={shlex.quote(touch)}\n"
         f"ROTATE={shlex.quote(rotate)}\n"
+        f"TOUCH_ROTATE={shlex.quote(effective_touch_rotate)}\n"
         f"MATRIX={shlex.quote(matrix)}\n"
         f"RETRIES={retries}\n"
         "\n"

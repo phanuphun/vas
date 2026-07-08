@@ -19,13 +19,13 @@
   .monitor-preview .corner.top-right   { top:3px;    right:3px; border-width:2px 2px 0 0; }
   .monitor-preview .corner.bottom-left { bottom:3px; left:3px;  border-width:0 0 2px 2px; }
   .monitor-preview .corner.bottom-right{ bottom:3px; right:3px; border-width:0 2px 2px 0; }
-  .rotation-btn {
+  .rotation-btn, .touch-rotation-btn {
     padding:0.3rem 0.85rem; font-size:0.75rem; font-weight:600; border-radius:0.4rem; cursor:pointer;
     border:1px solid rgb(var(--c-line)/0.14); background:rgb(var(--c-card));
     color:rgb(var(--c-muted)); transition:all 0.15s; font-family:inherit;
   }
-  .rotation-btn:hover { background:rgb(var(--c-surface)); color:rgb(var(--c-ink)); }
-  .rotation-btn.active { background:rgb(var(--c-accent)); border-color:rgb(var(--c-accent)); color:#fff; }
+  .rotation-btn:hover, .touch-rotation-btn:hover { background:rgb(var(--c-surface)); color:rgb(var(--c-ink)); }
+  .rotation-btn.active, .touch-rotation-btn.active { background:rgb(var(--c-accent)); border-color:rgb(var(--c-accent)); color:#fff; }
 
   /* Protocol cards */
   .proto-card {
@@ -177,6 +177,22 @@
                   <input id="persistXorg" type="checkbox">
                   <div class="toggle-track"><div class="toggle-thumb"></div></div>
                 </label>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-[0.82rem] text-ink">แยกทิศทาง Touch จากจอ</span>
+                <label class="toggle-switch">
+                  <input id="decoupleTouchRotation" type="checkbox">
+                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                </label>
+              </div>
+              <div id="touchRotationRow" class="hidden flex flex-col gap-1.5">
+                <label class="text-[0.75rem] font-semibold text-muted">ทิศทาง Touch</label>
+                <div class="flex gap-1.5 flex-wrap">
+                  {% for value, label in rotations %}
+                  <button class="touch-rotation-btn" data-rotation="{{ value }}" type="button">{{ label }}</button>
+                  {% endfor %}
+                </div>
+                <p class="text-[0.7rem] text-faint">ใช้เมื่อ touch controller ต่อคนละทิศกับจอ (เช่น จอ Normal แต่ touch ต้องตั้งเป็น Right ถึงจะตรงจุด)</p>
               </div>
             </div>
           </div>
@@ -561,6 +577,29 @@
 
   if (outputSelect) outputSelect.addEventListener("change", applyRotationForSelectedOutput);
 
+  // ── ทิศทาง Touch แยกจากจอ (เผื่อ touch controller ต่อคนละทิศกับ panel วิดีโอ) ────────
+  var decoupleTouchRotation = document.getElementById("decoupleTouchRotation");
+  var touchRotationRow      = document.getElementById("touchRotationRow");
+  var selectedTouchRotation = selectedRotation;
+
+  function setTouchRotation(value) {
+    selectedTouchRotation = value;
+    document.querySelectorAll(".touch-rotation-btn").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.rotation === value);
+    });
+  }
+  setTouchRotation(selectedTouchRotation);
+
+  document.querySelectorAll(".touch-rotation-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () { setTouchRotation(btn.dataset.rotation); });
+  });
+
+  if (decoupleTouchRotation) {
+    decoupleTouchRotation.addEventListener("change", function () {
+      if (touchRotationRow) touchRotationRow.classList.toggle("hidden", !decoupleTouchRotation.checked);
+    });
+  }
+
   function setResult(msg, status) {
     if (!applyResult) return;
     applyResult.className = "msg text-[0.82rem] " + (status === "success" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
@@ -568,7 +607,7 @@
   }
 
   function selectedConfig() {
-    return {
+    var config = {
       output: outputSelect ? outputSelect.value : "",
       touch: touchSelect ? touchSelect.value : "",
       rotate: selectedRotation,
@@ -576,6 +615,10 @@
       persistSession: persistSession ? persistSession.checked : false,
       persistXorg: persistXorg ? persistXorg.checked : false,
     };
+    if (decoupleTouchRotation && decoupleTouchRotation.checked) {
+      config.touchRotate = selectedTouchRotation;
+    }
+    return config;
   }
 
   function replaceOptions(sel, values) {
@@ -654,6 +697,9 @@
         if (persistXorg) persistXorg.checked = false;
         if (output) deviceRotations[output] = "normal";
         setRotation("normal");
+        if (decoupleTouchRotation) decoupleTouchRotation.checked = false;
+        if (touchRotationRow) touchRotationRow.classList.add("hidden");
+        setTouchRotation("normal");
         setResult("Reset to default สำเร็จ", "ok");
         setTimeout(function () { setResult("", ""); }, 3000);
       } else {

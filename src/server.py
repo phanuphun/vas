@@ -1043,23 +1043,32 @@ def create_app() -> Flask:
         output = str(payload.get("output", "")).strip()
         touch = str(payload.get("touch", "")).strip()
         rotate = str(payload.get("rotate", "normal")).strip()
+        # touchRotate: ทิศทาง touch แยกจากจอ — เผื่อ touch controller ต่อคนละทิศกับ panel
+        # วิดีโอ (พบจริงในหน้างาน) ถ้าไม่ส่งมาจะ default ตาม rotate เหมือนพฤติกรรมเดิม
+        touch_rotate = str(payload.get("touchRotate", "")).strip() or None
         x_display = str(payload.get("display", "")).strip() or None
         persist_session = bool(payload.get("persistSession", True))
         persist_xorg = bool(payload.get("persistXorg", False))
 
         devices = collect_display_devices(x_display=x_display)
         errors = validate_display_apply(output, touch, rotate, devices)
+        if touch_rotate and touch_rotate not in ROTATION_MATRICES:
+            errors.append(f"Unsupported touch rotation: {touch_rotate}")
         if errors:
             return {"status": "error", "errors": errors}, 400
 
         runner = DisplayCommandRunner()
         configurator = DisplayConfigurator(runner)
         try:
-            configurator.apply_runtime(output=output, touch=touch, rotate=rotate, x_display=x_display)
+            configurator.apply_runtime(
+                output=output, touch=touch, rotate=rotate, touch_rotate=touch_rotate, x_display=x_display
+            )
             if persist_session:
-                configurator.persist_session(output=output, touch=touch, rotate=rotate, x_display=x_display)
+                configurator.persist_session(
+                    output=output, touch=touch, rotate=rotate, touch_rotate=touch_rotate, x_display=x_display
+                )
             if persist_xorg:
-                configurator.persist_xorg(touch=touch, rotate=rotate)
+                configurator.persist_xorg(touch=touch, rotate=rotate, touch_rotate=touch_rotate)
         except (CommandExecutionError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
@@ -1068,6 +1077,7 @@ def create_app() -> Flask:
             "output": output,
             "touch": touch,
             "rotate": rotate,
+            "touchRotate": touch_rotate or rotate,
             "display": x_display,
             "persistSession": persist_session,
             "persistXorg": persist_xorg,
