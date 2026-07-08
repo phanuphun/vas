@@ -477,6 +477,12 @@ def build_display_session_script(
         "set -euo pipefail\n"
         f"{DISPLAY_SESSION_SCRIPT_SIGNATURE}\n"
         "# Managed by vending-auto-setup. Manual edits may be overwritten.\n"
+        # log ทุก run ลงไฟล์ข้างๆ สคริปต์นี้เอง (~/.config/vending-auto-setup/display-session.log)
+        # เพราะสคริปต์นี้ถูกสั่งรันแบบ background (`&`) จาก .xprofile ตอน login — ถ้า fail
+        # แบบเงียบๆ (หา output/touch ไม่เจอ, permission error ฯลฯ) จะไม่มีร่องรอยให้ debug เลย
+        'LOG_FILE="$(cd "$(dirname "$0")" && pwd)/display-session.log"\n'
+        'exec >>"$LOG_FILE" 2>&1\n'
+        'echo "---- $(date -Iseconds) run start (pid $$) ----"\n'
         f"sleep {delay_seconds}\n"
         f"{display_line}"
         f"OUTPUT={shlex.quote(output)}\n"
@@ -504,6 +510,7 @@ def build_display_session_script(
         'for attempt in $(seq 1 "$RETRIES"); do\n'
         '  if xinput list --name-only | grep -Fxq "$TOUCH_DEVICE"; then\n'
         f'    xinput set-prop "$TOUCH_DEVICE" "{COORDINATE_TRANSFORMATION_MATRIX}" $MATRIX\n'
+        '    echo "applied OK: output=$OUTPUT rotate=$ROTATE touch=$TOUCH_DEVICE touch_rotate=$TOUCH_ROTATE"\n'
         "    exit 0\n"
         "  fi\n"
         '  echo "Waiting for touchscreen ${TOUCH_DEVICE} (${attempt}/${RETRIES})"\n'
