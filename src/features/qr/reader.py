@@ -79,6 +79,23 @@ EVDEV_KEYMAP: dict[int, str] = {
     39: ";", 40: "'", 51: ",", 52: ".", 53: "/",
 }
 
+# Shift-variant ของ EVDEV_KEYMAP -- ใช้เมื่อ Left/Right Shift ถูกกดค้างอยู่
+EVDEV_SHIFT_KEYMAP: dict[int, str] = {
+    2: "!", 3: "@", 4: "#", 5: "$", 6: "%",
+    7: "^", 8: "&", 9: "*", 10: "(", 11: ")",
+    16: "Q", 17: "W", 18: "E", 19: "R", 20: "T",
+    21: "Y", 22: "U", 23: "I", 24: "O", 25: "P",
+    30: "A", 31: "S", 32: "D", 33: "F", 34: "G",
+    35: "H", 36: "J", 37: "K", 38: "L",
+    44: "Z", 45: "X", 46: "C", 47: "V", 48: "B",
+    49: "N", 50: "M",
+    12: "_", 13: "+", 26: "{", 27: "}",
+    39: ":", 40: '"', 51: "<", 52: ">", 53: "?",
+}
+
+# evdev scancode ของ Left/Right Shift (Linux input-event-codes.h: KEY_LEFTSHIFT=42, KEY_RIGHTSHIFT=54)
+EVDEV_SHIFT_SCANCODES = {42, 54}
+
 EVDEV_DEVICE_NAMES = ["ZKRFID", "ZK", "QR500"]
 
 
@@ -507,6 +524,7 @@ class EvdevQrReaderThread(threading.Thread):
 
         buffer: list[str] = []
         raw_buf: list[int] = []
+        shift_pressed = False
         try:
             for event in device.read_loop():
                 if self._stop_event.is_set():
@@ -514,6 +532,13 @@ class EvdevQrReaderThread(threading.Thread):
                 if event.type != evdev.ecodes.EV_KEY:
                     continue
                 key = evdev.categorize(event)
+                # Track Shift modifier state จาก key_down/key_up (ไม่สนใจ key_hold)
+                if key.scancode in EVDEV_SHIFT_SCANCODES:
+                    if key.keystate == evdev.KeyEvent.key_down:
+                        shift_pressed = True
+                    elif key.keystate == evdev.KeyEvent.key_up:
+                        shift_pressed = False
+                    continue
                 if key.keystate != evdev.KeyEvent.key_down:
                     continue
                 if key.scancode == 28:  # KEY_ENTER = จบ QR
@@ -524,9 +549,12 @@ class EvdevQrReaderThread(threading.Thread):
                             self._scan_seq += 1
                         buffer.clear()
                         raw_buf = []
-                elif key.scancode in EVDEV_KEYMAP:
-                    buffer.append(EVDEV_KEYMAP[key.scancode])
-                    raw_buf.append(key.scancode)  # เก็บ raw scancode ควบคู่
+                    shift_pressed = False
+                else:
+                    keymap = EVDEV_SHIFT_KEYMAP if shift_pressed else EVDEV_KEYMAP
+                    if key.scancode in keymap:
+                        buffer.append(keymap[key.scancode])
+                        raw_buf.append(key.scancode)  # เก็บ raw scancode ควบคู่ (ไม่รวม shift state)
         except (OSError, IOError):
             pass
         finally:

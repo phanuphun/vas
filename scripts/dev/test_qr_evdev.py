@@ -39,6 +39,23 @@ KEYMAP: dict[int, str] = {
     39: ";", 40: "'", 51: ",", 52: ".", 53: "/",
 }
 
+# Shift-variant ของ KEYMAP -- ใช้เมื่อ Left/Right Shift ถูกกดค้างอยู่
+SHIFT_KEYMAP: dict[int, str] = {
+    2: "!", 3: "@", 4: "#", 5: "$", 6: "%",
+    7: "^", 8: "&", 9: "*", 10: "(", 11: ")",
+    16: "Q", 17: "W", 18: "E", 19: "R", 20: "T",
+    21: "Y", 22: "U", 23: "I", 24: "O", 25: "P",
+    30: "A", 31: "S", 32: "D", 33: "F", 34: "G",
+    35: "H", 36: "J", 37: "K", 38: "L",
+    44: "Z", 45: "X", 46: "C", 47: "V", 48: "B",
+    49: "N", 50: "M",
+    12: "_", 13: "+", 26: "{", 27: "}",
+    39: ":", 40: '"', 51: "<", 52: ">", 53: "?",
+}
+
+# evdev scancode ของ Left/Right Shift (KEY_LEFTSHIFT=42, KEY_RIGHTSHIFT=54)
+SHIFT_SCANCODES = {42, 54}
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -114,6 +131,7 @@ def run(device_path: str | None, grab: bool) -> int:
 
     buffer: list[str] = []
     scan_count = 0
+    shift_pressed = False
 
     try:
         for event in device.read_loop():
@@ -122,6 +140,12 @@ def run(device_path: str | None, grab: bool) -> int:
             if event.type != evdev.ecodes.EV_KEY:
                 continue
             key = evdev.categorize(event)
+            if key.scancode in SHIFT_SCANCODES:
+                if key.keystate == evdev.KeyEvent.key_down:
+                    shift_pressed = True
+                elif key.keystate == evdev.KeyEvent.key_up:
+                    shift_pressed = False
+                continue
             if key.keystate != evdev.KeyEvent.key_down:
                 continue
             if key.scancode == 28:  # KEY_ENTER = จบ QR
@@ -130,8 +154,11 @@ def run(device_path: str | None, grab: bool) -> int:
                     scan_count += 1
                     print(f"[#{scan_count}] {data}")
                     buffer.clear()
-            elif key.scancode in KEYMAP:
-                buffer.append(KEYMAP[key.scancode])
+                shift_pressed = False
+            else:
+                keymap = SHIFT_KEYMAP if shift_pressed else KEYMAP
+                if key.scancode in keymap:
+                    buffer.append(keymap[key.scancode])
     finally:
         if grab:
             try:
