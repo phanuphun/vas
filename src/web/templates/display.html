@@ -603,14 +603,16 @@
   setTouchRotation(selectedTouchRotation);
 
   // แสดงทิศทาง touch จริงของ device ที่เลือกอยู่ (ถ้ารู้จัก) — เปิด toggle "แยกทิศทาง" ให้
-  // อัตโนมัติก็ต่อเมื่อ touch จริงต่างจากจอเท่านั้น (ไม่งั้นปล่อยปิดไว้ เพราะพฤติกรรม default
-  // คือ touch = rotate ของจออยู่แล้ว)
+  // อัตโนมัติทุกครั้งที่ detect ค่าจริงได้ (ไม่ใช่แค่ตอนต่างจากจอ) เพื่อให้ toggle สะท้อนของจริง
+  // บนเครื่องเสมอ แม้ค่า touch จะบังเอิญตรงกับจอพอดีก็ตาม — เดิมซ่อน/ปิด toggle ทุกครั้งที่ค่า
+  // ตรงกับจอ ทำให้ผู้ใช้เปิด toggle + เลือกทิศทาง + Apply ไปแล้ว พอ refresh หน้าใหม่ toggle
+  // กลับไปปิดเอง (ทั้งที่ค่าจริงยังถูกต้องอยู่) ดูเหมือนการตั้งค่าหายไป
   function applyTouchRotationForSelectedDevice() {
     var name = touchSelect ? touchSelect.value : "";
     var known = Object.prototype.hasOwnProperty.call(deviceTouchRotations, name) ? deviceTouchRotations[name] : null;
     var touchValue = known || selectedRotation;
     setTouchRotation(touchValue);
-    var shouldDecouple = !!known && known !== selectedRotation;
+    var shouldDecouple = !!known;
     if (decoupleTouchRotation) decoupleTouchRotation.checked = shouldDecouple;
     if (touchRotationRow) touchRotationRow.classList.toggle("hidden", !shouldDecouple);
   }

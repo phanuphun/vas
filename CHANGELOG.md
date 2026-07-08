@@ -15,6 +15,11 @@
 - เพิ่ม log เข้า `display-session.sh` (`display.py`: `build_display_session_script`) เขียนไปที่ `display-session.log` ข้างสคริปต์ — เดิมสคริปต์นี้รันแบบ background จาก `.xprofile` ตอน login แล้ว fail แบบเงียบๆ ไม่มีร่องรอย debug เลย
 - ตรวจสอบ: ทดสอบ `parse_touch_rotation()` แยกด้วย matrix ตัวอย่างจริงที่ดึงมาจากเครื่อง (`normal`/`left`/`right`) ได้ผลตรงหมด — ทดสอบ syntax `display.py`/`server.py` ผ่านสำเนาใน sandbox (`py_compile`) เพราะ bash mount ของไฟล์ที่เพิ่งแก้ในเซสชันนี้ค้าง/ไม่ sync ทันที (ปัญหาเดิมของ session นี้) — ทดสอบ JS ที่แก้ใน `display.html` ผ่าน `node --check` บนสำเนาที่ประกอบขึ้นใหม่ (แทนที่ Jinja placeholder ด้วยค่าตัวอย่าง) ผ่านหมด — ยังไม่ได้ทดสอบ end-to-end บนเครื่องจริงหลังแก้ repo mismatch (ต้องรอ deploy รอบใหม่)
 
+### ตามด้วย: toggle "แยกทิศทาง Touch จากจอ" ยังปิดเองทุกครั้งที่ refresh แม้ตั้งค่าถูกต้องอยู่แล้ว
+- **ที่มา**: เงื่อนไขเดิม (`applyTouchRotationForSelectedDevice()` ใน `display.html`) เปิด toggle ก็ต่อเมื่อค่า touch จริงที่ detect ได้ **ต่างจาก** ค่า rotate ของจอเท่านั้น (`shouldDecouple = !!known && known !== selectedRotation`) — เคสที่ touch ตั้งไว้ตรงกับจอพอดี (เช่นทั้งคู่เป็น "left") จะโดนตีความว่า "ไม่ได้ decouple" แล้วปิด toggle ให้เองทุกครั้ง ทั้งที่ผู้ใช้ตั้งใจเปิด toggle + เลือกทิศทาง + Apply ไปแล้วจริง ดูเหมือนการตั้งค่าหายไปทุกครั้งที่ refresh
+- เปลี่ยนเงื่อนไขเป็น `shouldDecouple = !!known` — เปิด toggle ทุกครั้งที่ detect ค่า touch จริงได้สำเร็จ ไม่สนว่าค่านั้นจะตรงกับจอหรือไม่ ให้ toggle สะท้อนสถานะจริงของเครื่องเสมอ ไม่ขึ้นอยู่กับว่าค่าบังเอิญตรงกับจอหรือไม่
+- หมายเหตุ: toggle "Persist touch in Xorg" (คนละอันกับ "แยกทิศทาง") ยังคงเป็น action flag ล้วนๆ ไม่ hydrate จากสถานะจริง (เจตนา — ใช้บอกว่า "จะเขียน Xorg config รอบนี้ไหม" ไม่ใช่ "เคยเขียนไว้หรือยัง" ซึ่งมีสถานะแยกแสดงอยู่แล้วในส่วน config file ของหน้าเดียวกัน) — ถ้าผู้ใช้อยากให้ toggle นี้ hydrate ด้วยต้องแก้เพิ่มเป็นคนละงาน
+
 ## [2026-07-05]
 
 ### หน้า "ซอฟต์แวร์ระบบ" — ปิดแท็บ "แหล่งดาวน์โหลด" เป็น "เร็วๆ นี้", หน้า "คีออส" — ปรับกล่อง caution ให้ตรง convention ของ Named Pipe
