@@ -120,6 +120,13 @@ def build_parser() -> argparse.ArgumentParser:
     display_persist.add_argument("--touch", required=True, help="xinput touchscreen product name.")
     display_persist.add_argument("--rotate", choices=sorted(ROTATION_MATRICES), required=True)
 
+    display_persist_rotate = display_subcommands.add_parser(
+        "persist-xorg-rotate",
+        help="Persist display rotation with a machine-level Xorg Monitor config (before login).",
+    )
+    display_persist_rotate.add_argument("--output", required=True, help="xrandr output name, for example HDMI-1.")
+    display_persist_rotate.add_argument("--rotate", choices=sorted(ROTATION_MATRICES), required=True)
+
     display_persist_session = display_subcommands.add_parser(
         "persist-session",
         help="Persist display rotation and touchscreen mapping in the user's X session profile.",
@@ -528,6 +535,13 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 require_linux()
                 require_root()
             configurator.persist_xorg(touch=args.touch, rotate=args.rotate)
+            return 0
+
+        if args.display_command == "persist-xorg-rotate":
+            if not args.dry_run:
+                require_linux()
+                require_root()
+            configurator.persist_xorg_display_rotate(output=args.output, rotate=args.rotate)
             return 0
 
         if args.display_command == "persist-session":

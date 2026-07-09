@@ -37,6 +37,13 @@ class XorgTouchscreenConfigStatus:
 
 
 @dataclass(frozen=True)
+class XorgDisplayRotateConfigStatus:
+    path: Path
+    exists: bool
+    has_signature: bool
+
+
+@dataclass(frozen=True)
 class DisplaySessionConfigStatus:
     path: Path
     exists: bool
@@ -126,8 +133,14 @@ class OpenSshStatus:
 
 
 XORG_TOUCHSCREEN_CONFIG_PATH = Path("/etc/X11/xorg.conf.d/99-vending-touchscreen.conf")
+# หมายเลข 98 ต้องโหลด "ก่อน" 99 เสมอ (Xorg อ่านไฟล์ใน xorg.conf.d ตามลำดับตัวเลข/ชื่อไฟล์) —
+# ทั้งคู่เป็น machine-level config ที่ X server อ่านตอน start ครั้งแรก (ก่อน login ใครทั้งสิ้น)
+# ไม่ผูกกับ user คนไหน ต่างจาก .xprofile/display-session.sh ที่ผูกกับ home ของ user ที่ login
+# อยู่ตอนนั้นเท่านั้น — ดู docs/kiosk-display-touch-order-guide.md หัวข้อ 2 ประกอบ
+XORG_DISPLAY_ROTATE_CONFIG_PATH = Path("/etc/X11/xorg.conf.d/98-vending-display-rotate.conf")
 GDM_CUSTOM_CONFIG_PATH = Path("/etc/gdm3/custom.conf")
 XORG_TOUCHSCREEN_SIGNATURE = "# vending-auto-config: touchscreen-xorg"
+XORG_DISPLAY_ROTATE_SIGNATURE = "# vending-auto-config: display-rotate-xorg"
 DISPLAY_SESSION_SIGNATURE = "# vending-auto-config: display-session"
 DISPLAY_SESSION_SCRIPT_SIGNATURE = "# vending-auto-config: display-session-script"
 SCREEN_BLANK_SIGNATURE = "# vending-auto-config: screen-blank"
@@ -316,6 +329,24 @@ def collect_xorg_touchscreen_config_status(
     )
 
 
+def collect_xorg_display_rotate_config_status(
+    path: Path = XORG_DISPLAY_ROTATE_CONFIG_PATH,
+) -> XorgDisplayRotateConfigStatus:
+    if not _path_exists(path):
+        return XorgDisplayRotateConfigStatus(path=path, exists=False, has_signature=False)
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return XorgDisplayRotateConfigStatus(path=path, exists=True, has_signature=False)
+
+    return XorgDisplayRotateConfigStatus(
+        path=path,
+        exists=True,
+        has_signature=XORG_DISPLAY_ROTATE_SIGNATURE in content,
+    )
+
+
 def collect_display_session_config_status(
     path: Path | None = None,
 ) -> DisplaySessionConfigStatus:
@@ -412,6 +443,7 @@ def print_status() -> None:
     _print_display_session_script_status(collect_display_session_script_status())
     print()
     _print_xorg_touchscreen_config_status(collect_xorg_touchscreen_config_status())
+    _print_xorg_display_rotate_config_status(collect_xorg_display_rotate_config_status())
     print()
     print("[Core Tools]")
     for status in collect_status():
@@ -439,6 +471,7 @@ def main() -> int:
     _print_display_session_script_status(collect_display_session_script_status())
     print()
     _print_xorg_touchscreen_config_status(collect_xorg_touchscreen_config_status())
+    _print_xorg_display_rotate_config_status(collect_xorg_display_rotate_config_status())
     print()
     print("[Core Tools]")
     for status in statuses:
@@ -783,6 +816,21 @@ def _print_tool_status(status: ToolStatus) -> None:
 
 def _print_xorg_touchscreen_config_status(status: XorgTouchscreenConfigStatus) -> None:
     print("[Touchscreen]")
+    config_path = status.path.as_posix()
+    if status.has_signature:
+        marker = "OK"
+        detail = f"configured ({config_path})"
+    elif status.exists:
+        marker = "WARN"
+        detail = f"file exists but signature missing ({config_path})"
+    else:
+        marker = "WARN"
+        detail = f"not configured ({config_path})"
+    print(f"{marker:7} {'Xorg':10} {detail}")
+
+
+def _print_xorg_display_rotate_config_status(status: XorgDisplayRotateConfigStatus) -> None:
+    print("[Display Rotate Xorg]")
     config_path = status.path.as_posix()
     if status.has_signature:
         marker = "OK"

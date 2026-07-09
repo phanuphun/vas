@@ -13,6 +13,8 @@ from system.status import (
     DISPLAY_SESSION_SIGNATURE,
     GDM_CUSTOM_CONFIG_PATH,
     SCREEN_BLANK_SIGNATURE,
+    XORG_DISPLAY_ROTATE_CONFIG_PATH,
+    XORG_DISPLAY_ROTATE_SIGNATURE,
     XORG_TOUCHSCREEN_CONFIG_PATH,
     XORG_TOUCHSCREEN_SIGNATURE,
     _effective_home_config_path,
@@ -67,6 +69,7 @@ __all__ = [
     "build_gdm_wayland_config",
     "build_screen_blank_block",
     "build_screen_blank_commands",
+    "build_xorg_display_rotate_config",
     "build_xorg_touchscreen_config",
     "get_screen_blank_seconds",
     "get_udevadm_touchscreen_names",
@@ -135,6 +138,30 @@ class DisplayConfigurator:
         effective_touch_rotate = touch_rotate or rotate
         matrix = " ".join(matrix_for_rotation(effective_touch_rotate))
         content = build_xorg_touchscreen_config(touch, matrix)
+        print(f"write {path.as_posix()}")
+        if self.runner.dry_run:
+            print(content.rstrip())
+            return
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def persist_xorg_display_rotate(
+        self,
+        output: str,
+        rotate: str,
+        path: Path = XORG_DISPLAY_ROTATE_CONFIG_PATH,
+    ) -> None:
+        """เขียน Monitor section ระดับเครื่อง (ไม่ผูก user) ให้ X server หมุนจอ output
+        นี้ตั้งแต่เริ่มทำงานครั้งแรก — ก่อน login/ก่อน GDM greeter ขึ้นด้วยซ้ำ
+
+        หมายเหตุสำคัญ: session ที่มี compositor จัดการจอเอง (เช่น GNOME Shell/mutter ที่ใช้
+        กับ GDM greeter และ session แบบ gnome) จะ "เขียนทับ" ค่านี้กลับเป็น normal อีกทีตอน
+        compositor เริ่มทำงาน ถ้าไม่มี monitors.xml ของ user/gdm นั้นระบุไว้ — ดังนั้นไฟล์นี้
+        จะมีผลจริงกับ session ที่ไม่มี compositor คุมจอเอง เช่น Openbox (ที่ใช้กับ kiosk-user)
+        เท่านั้น ส่วน session แบบ GNOME ยังต้องพึ่ง persist_session() (.xprofile) เหมือนเดิม
+        """
+        content = build_xorg_display_rotate_config(output, rotate)
         print(f"write {path.as_posix()}")
         if self.runner.dry_run:
             print(content.rstrip())
@@ -240,17 +267,19 @@ class DisplayConfigurator:
         x_display: "str | None" = None,
         xauthority: "str | None" = None,
         xorg_path: Path = XORG_TOUCHSCREEN_CONFIG_PATH,
+        xorg_rotate_path: Path = XORG_DISPLAY_ROTATE_CONFIG_PATH,
         session_path: "Path | None" = None,
         script_path: "Path | None" = None,
     ) -> None:
         """รีเซ็ต rotation + touch calibration กลับเป็นค่า default (normal, identity matrix)
 
-        ทำ 4 ขั้นตอนตามลำดับ:
+        ทำ 5 ขั้นตอนตามลำดับ:
         1. runtime: xrandr rotate normal (ถ้ามี output) + xinput identity matrix ทันที —
-           ทำก่อนเสมอเพื่อให้เห็นผลทันทีแม้ข้อ 2-4 (persist) จะ fail บางส่วน
+           ทำก่อนเสมอเพื่อให้เห็นผลทันทีแม้ข้อ 2-5 (persist) จะ fail บางส่วน
         2. ลบ managed block ออกจาก .xprofile — เลิก source display-session.sh ตอน login
         3. ลบไฟล์ display-session.sh — ไม่มีอะไรเรียกมันแล้วหลังข้อ 2
-        4. ลบไฟล์ Xorg touchscreen calibration config (/etc/X11/xorg.conf.d/...) ถ้ามี
+        4. ลบไฟล์ Xorg touchscreen calibration config (/etc/X11/xorg.conf.d/99-...) ถ้ามี
+        5. ลบไฟล์ Xorg display rotate config (/etc/X11/xorg.conf.d/98-...) ถ้ามี
         """
         identity_matrix = matrix_for_rotation("normal")
 
@@ -285,6 +314,10 @@ class DisplayConfigurator:
         print(f"remove {xorg_path.as_posix()}")
         if not self.runner.dry_run and xorg_path.exists():
             xorg_path.unlink()
+
+        print(f"remove {xorg_rotate_path.as_posix()}")
+        if not self.runner.dry_run and xorg_rotate_path.exists():
+            xorg_rotate_path.unlink()
 
     def disable_wayland(self, path: Path = GDM_CUSTOM_CONFIG_PATH) -> None:
         self._set_gdm_wayland(enabled=False, path=path)
@@ -454,6 +487,23 @@ def build_xorg_touchscreen_config(touch: str, matrix: str) -> str:
         '    Identifier "vending-touchscreen-calibration"\n'
         f'    MatchProduct "{touch}"\n'
         f'    Option "CalibrationMatrix" "{matrix}"\n'
+        "EndSection\n"
+    )
+
+
+def build_xorg_display_rotate_config(output: str, rotate: str) -> str:
+    """Machine-level Monitor section — X server อ่านตอนเริ่มทำงานครั้งแรก (ก่อน login)
+
+    Identifier ต้องตรงชื่อ output จาก xrandr เป๊ะ (เช่น "HDMI-1") ถึงจะถูก auto-config
+    ของ Xorg จับคู่ให้ถูกต้อง — คนละกลไกกับ MatchProduct ของ touchscreen ที่จับคู่ด้วยชื่อ
+    ฮาร์ดแวร์ input device
+    """
+    return (
+        f"{XORG_DISPLAY_ROTATE_SIGNATURE}\n"
+        "# Managed by vending-auto-setup. Manual edits may be overwritten.\n"
+        'Section "Monitor"\n'
+        f'    Identifier "{output}"\n'
+        f'    Option "Rotate" "{rotate}"\n'
         "EndSection\n"
     )
 

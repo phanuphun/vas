@@ -55,6 +55,7 @@ from system.status import (
     collect_qr_reader_status,
     collect_remote_access_status,
     collect_screen_blank_config_status,
+    collect_xorg_display_rotate_config_status,
     find_x11_session_owner,
     collect_vpn_status,
     collect_xorg_touchscreen_config_status,
@@ -202,6 +203,11 @@ DISPLAY_ACTIONS = (
         "Persist touch in Xorg",
         "sudo vas display persist-xorg --touch 'Vending Virtual Touchscreen' --rotate normal",
         "เขียนค่าการหมุนจอทัชลงไฟล์ Xorg config ให้มีผลถาวรระดับระบบ",
+    ),
+    (
+        "Persist display rotate in Xorg",
+        "sudo vas display persist-xorg-rotate --output Virtual1 --rotate normal",
+        "เขียนค่าการหมุนจอลงไฟล์ Xorg config (98-vending-display-rotate.conf) ให้ X server ตั้งค่าจอตั้งแต่เริ่มทำงานครั้งแรก ก่อน login — ไม่ผูกกับ user คนไหน",
     ),
 )
 SERVER_ACTIONS = (
@@ -1012,6 +1018,7 @@ def create_app() -> Flask:
             display_config=collect_display_session_config_status(),
             display_script=collect_display_session_script_status(),
             xorg_touchscreen=collect_xorg_touchscreen_config_status(),
+            xorg_display_rotate=collect_xorg_display_rotate_config_status(),
             screen_blank_options=SCREEN_BLANK_OPTIONS,
             screen_blank_config=collect_screen_blank_config_status(),
             current_screen_blank=current_screen_blank,
@@ -1055,8 +1062,15 @@ def create_app() -> Flask:
         # วิดีโอ (พบจริงในหน้างาน) ถ้าไม่ส่งมาจะ default ตาม rotate เหมือนพฤติกรรมเดิม
         touch_rotate = str(payload.get("touchRotate", "")).strip() or None
         x_display = str(payload.get("display", "")).strip() or None
-        persist_session = bool(payload.get("persistSession", True))
+        # persistSession (.xprofile) เป็น opt-in เท่านั้น (default False) — พบว่าถ้าเปิดพร้อมกับ
+        # persistXorg ในรอบเดียวกัน touch อาจเพี้ยนได้ (คนละ mechanism เขียนทับกันคนละจังหวะ
+        # เวลา ดู docs/kiosk-display-touch-order-guide.md) ต้อง toggle เองเสมอ ไม่มี default เปิด
+        persist_session = bool(payload.get("persistSession", False))
         persist_xorg = bool(payload.get("persistXorg", False))
+        # persistDisplayRotateXorg: เขียน Monitor section ระดับเครื่อง (98-vending-display-
+        # rotate.conf) คู่กับ persistXorg (99-vending-touchscreen.conf) — ทั้งคู่ X server อ่าน
+        # ตอนเริ่มทำงานครั้งแรกก่อน login ไม่ผูก user คนไหน
+        persist_display_rotate_xorg = bool(payload.get("persistDisplayRotateXorg", False))
 
         devices = collect_display_devices(x_display=x_display)
         errors = validate_display_apply(output, touch, rotate, devices)
@@ -1077,6 +1091,8 @@ def create_app() -> Flask:
                 )
             if persist_xorg:
                 configurator.persist_xorg(touch=touch, rotate=rotate, touch_rotate=touch_rotate)
+            if persist_display_rotate_xorg:
+                configurator.persist_xorg_display_rotate(output=output, rotate=rotate)
         except (CommandExecutionError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
@@ -1089,6 +1105,7 @@ def create_app() -> Flask:
             "display": x_display,
             "persistSession": persist_session,
             "persistXorg": persist_xorg,
+            "persistDisplayRotateXorg": persist_display_rotate_xorg,
         }
 
     @app.post("/api/display/reset")
@@ -3612,6 +3629,7 @@ def _allowed_config_paths() -> dict[str, Path]:
     """Allowlist ของ config files ที่อ่านได้ผ่าน API"""
     from system.status import (
         GDM_CUSTOM_CONFIG_PATH,
+        XORG_DISPLAY_ROTATE_CONFIG_PATH,
         XORG_TOUCHSCREEN_CONFIG_PATH,
         _effective_home_config_path,
         _effective_home_script_path,
@@ -3621,6 +3639,7 @@ def _allowed_config_paths() -> dict[str, Path]:
         "xprofile": _effective_home_config_path(),
         "display_script": _effective_home_script_path(),
         "xorg_touchscreen": Path(XORG_TOUCHSCREEN_CONFIG_PATH),
+        "xorg_display_rotate": Path(XORG_DISPLAY_ROTATE_CONFIG_PATH),
     }
 
 

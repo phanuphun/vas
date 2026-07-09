@@ -6,6 +6,8 @@ from features.display.display import remove_managed_block
 from core.runner import CommandRunner
 from system.status import (
     DISPLAY_SESSION_SCRIPT_SIGNATURE,
+    XORG_DISPLAY_ROTATE_CONFIG_PATH,
+    XORG_DISPLAY_ROTATE_SIGNATURE,
     XORG_TOUCHSCREEN_CONFIG_PATH,
     XORG_TOUCHSCREEN_SIGNATURE,
     _effective_home_config_path,
@@ -145,6 +147,7 @@ class LifecycleManager:
 
     def reset_display_config(self) -> None:
         self._remove_file_if_has_signature(XORG_TOUCHSCREEN_CONFIG_PATH, XORG_TOUCHSCREEN_SIGNATURE)
+        self._remove_file_if_has_signature(XORG_DISPLAY_ROTATE_CONFIG_PATH, XORG_DISPLAY_ROTATE_SIGNATURE)
         self._remove_file_if_has_signature(_effective_home_script_path(), DISPLAY_SESSION_SCRIPT_SIGNATURE)
         self._remove_display_session_block(_effective_home_config_path())
 

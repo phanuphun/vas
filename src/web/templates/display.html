@@ -165,20 +165,6 @@
             </div>
             <div class="flex flex-col gap-3">
               <div class="flex items-center justify-between gap-4">
-                <span class="text-[0.82rem] text-ink">Persist at login</span>
-                <label class="toggle-switch">
-                  <input id="persistSession" type="checkbox" checked>
-                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                </label>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-[0.82rem] text-ink">Persist touch in Xorg</span>
-                <label class="toggle-switch">
-                  <input id="persistXorg" type="checkbox">
-                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                </label>
-              </div>
-              <div class="flex items-center justify-between gap-4">
                 <span class="text-[0.82rem] text-ink">แยกทิศทาง Touch จากจอ</span>
                 <label class="toggle-switch">
                   <input id="decoupleTouchRotation" type="checkbox">
@@ -194,6 +180,7 @@
                 </div>
                 <p class="text-[0.7rem] text-faint">ใช้เมื่อ touch controller ต่อคนละทิศกับจอ (เช่น จอ Normal แต่ touch ต้องตั้งเป็น Right ถึงจะตรงจุด)</p>
               </div>
+              <p class="text-[0.7rem] text-faint">การบันทึกค่าให้ถาวรหลัง reboot (.xprofile หรือ Xorg) แยกไปตั้งค่าที่การ์ดด้านล่างนี้</p>
             </div>
           </div>
         </div>
@@ -211,6 +198,74 @@
               <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Persist หลัง Login (.xprofile) card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-2">
+            <iconify-icon icon="lucide:user" width="14" height="14" class="text-faint"></iconify-icon>
+            <h2 class="text-[0.9rem] font-semibold text-ink">การตั้งค่าหลัง Login (.xprofile)</h2>
+          </div>
+          <span class="zone {{ 'zone-info' if display_config.has_signature else 'zone-mute' }}">{{ 'ตั้งค่าแล้ว' if display_config.has_signature else 'ยังไม่ได้ตั้งค่า' }}</span>
+        </div>
+        <div class="flex flex-col gap-3 p-4">
+          <p class="text-[0.78rem] text-muted leading-relaxed">
+            เขียนสคริปต์ <code class="text-[0.7rem] bg-surface px-1 rounded font-mono">display-session.sh</code> แล้วเรียกจาก
+            <code class="text-[0.7rem] bg-surface px-1 rounded font-mono">~/.xprofile</code> ของ<strong>เฉพาะ user ที่ login อยู่ตอนกด Apply เท่านั้น</strong> —
+            ทำงานหลัง login (รอ 5 วินาที แล้วเช็คซ้ำสูงสุด 30 ครั้งว่าจอ/ทัชพร้อมหรือยัง) ก่อนจะหมุนจอ/ปรับ touch ให้จริง
+            ใช้เมื่อต้องการตั้งค่าเฉพาะ user คนใดคนหนึ่งบนเครื่องที่มีหลาย user (เช่น ค่าของ kiosk-user ต่างจาก hapymed)
+          </p>
+          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-caution/8 border-caution/25 text-[0.78rem] text-[#92660b]">
+            <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+            <span>พบว่าถ้าเปิด toggle นี้พร้อมกับ <strong>"Persist touch ใน Xorg"</strong> ในรอบเดียวกัน touch อาจเพี้ยนได้ — เป็นคนละ mechanism ที่เขียนทับ Coordinate Transformation Matrix คนละจังหวะเวลา (ตัวนี้เขียนตอน login, อีกตัวเขียนตอน X server เริ่มก่อน login) จึงตั้งเป็น <strong>optional ต้อง toggle เองเสมอ ไม่มี default เปิดให้</strong> แนะนำให้ทดสอบทีละอย่าง เปิดตัวเดียว reboot เช็คผลก่อน ค่อยเปิดอีกตัว</span>
+          </div>
+          <div class="flex items-center justify-between gap-4">
+            <span class="text-[0.82rem] text-ink">สร้าง .xprofile + display-session.sh (Persist at login)</span>
+            <label class="toggle-switch">
+              <input id="persistSession" type="checkbox">
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+          <p class="text-[0.7rem] text-faint">Toggle นี้จะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน โดยใช้ค่าจอ/ทัช/ทิศทางที่เลือกไว้ตอนนั้นเขียนลงไฟล์</p>
+        </div>
+      </div>
+
+      <!-- Persist ระดับเครื่อง (Xorg — ก่อน Login) card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-2">
+            <iconify-icon icon="lucide:server" width="14" height="14" class="text-faint"></iconify-icon>
+            <h2 class="text-[0.9rem] font-semibold text-ink">ตั้งค่าระดับเครื่อง (Xorg — ก่อน Login)</h2>
+          </div>
+        </div>
+        <div class="flex flex-col gap-3 p-4">
+          <p class="text-[0.78rem] text-muted leading-relaxed">
+            ไฟล์ในหมวดนี้ถูก X server อ่าน<strong>ตอนเริ่มทำงานครั้งแรก ก่อนมีใคร login เลย</strong> (ก่อนหน้าจอ GDM greeter จะขึ้นด้วยซ้ำ)
+            มีผลกับ<strong>ทุก user บนเครื่องเหมือนกันหมด</strong> ไม่ผูกกับ home ของใครคนใดคนหนึ่ง และไม่มีการรอ/เช็คซ้ำแบบ script ต่อ user ด้านบน
+          </p>
+          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-accent/6 border-accent/20 text-[0.78rem] text-ink">
+            <iconify-icon icon="lucide:info" width="14" height="14" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+            <span>ใช้ได้ผลดีที่สุดกับ session ที่ไม่มีตัวจัดการจอของตัวเอง เช่น <strong>Openbox</strong> (แนะนำให้ใช้กับ kiosk-user) — session แบบ <strong>GNOME</strong> (เช่น GDM greeter หรือ user ที่ตั้ง session type เป็น gnome) มี GNOME Shell/mutter คอยเขียนทับค่านี้กลับเป็น normal อีกทีตอน compositor เริ่มทำงาน ถ้าเป็นกรณีนี้ยังต้องพึ่ง ".xprofile" การ์ดด้านบนแทนอยู่ดี</span>
+          </div>
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between gap-4">
+              <span class="text-[0.82rem] text-ink">Persist touch ใน Xorg <span class="text-faint">(99-vending-touchscreen.conf)</span></span>
+              <label class="toggle-switch">
+                <input id="persistXorg" type="checkbox">
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+              </label>
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <span class="text-[0.82rem] text-ink">Persist การหมุนจอใน Xorg <span class="text-faint">(98-vending-display-rotate.conf)</span></span>
+              <label class="toggle-switch">
+                <input id="persistDisplayRotateXorg" type="checkbox">
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+              </label>
+            </div>
+          </div>
+          <p class="text-[0.7rem] text-faint">Toggle ทั้งสองนี้จะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน — ไฟล์ 98-... ถูกโหลดก่อน 99-... เสมอ (เลขน้อยกว่าโหลดก่อน) แต่คนละ Section กัน ไม่ชนกัน</p>
         </div>
       </div>
 
@@ -394,11 +449,21 @@
           "display_script"
         ),
         (
+          "xorg_display_rotate",
+          "lucide:rotate-cw",
+          xorg_display_rotate.path.as_posix(),
+          "98-vending-display-rotate.conf",
+          "Xorg configuration สำหรับหมุนจอ (Monitor section) — โหลด<em>ก่อน</em> 99-vending-touchscreen.conf เสมอ (เลขน้อยกว่าโหลดก่อน) มีผลตั้งแต่ X server เริ่มทำงานครั้งแรก ก่อน login ใช้เมื่อ <em>Persist การหมุนจอใน Xorg</em> ถูก enable — <strong>มีผลจริงเฉพาะ session ที่ไม่มี compositor คุมจอเอง เช่น Openbox</strong> (session แบบ GNOME จะเขียนทับค่านี้)",
+          xorg_display_rotate.has_signature,
+          "ตั้งค่า Xorg config แล้ว" if xorg_display_rotate.has_signature else "ยังไม่ได้ตั้งค่า",
+          "xorg_display_rotate"
+        ),
+        (
           "xorg_touchscreen",
           "lucide:settings-2",
           xorg_touchscreen.path.as_posix(),
           "99-vending-touchscreen.conf",
-          "Xorg configuration สำหรับ touchscreen — กำหนด input device mapping ให้ถาวรผ่าน X server โดยไม่ต้องรัน script ทุกครั้ง ใช้เมื่อ <em>Persist touch in Xorg</em> ถูก enable",
+          "Xorg configuration สำหรับ touchscreen — กำหนด input device mapping ให้ถาวรผ่าน X server โดยไม่ต้องรัน script ทุกครั้ง ใช้เมื่อ <em>Persist touch ใน Xorg</em> ถูก enable",
           xorg_touchscreen.has_signature,
           "ตั้งค่า Xorg config แล้ว" if xorg_touchscreen.has_signature else "ยังไม่ได้ตั้งค่า",
           "xorg_touchscreen"
@@ -539,6 +604,7 @@
   var xDisplayInput   = document.getElementById("xDisplay");
   var persistSession  = document.getElementById("persistSession");
   var persistXorg     = document.getElementById("persistXorg");
+  var persistDisplayRotateXorg = document.getElementById("persistDisplayRotateXorg");
   var applyResult     = document.getElementById("applyResult");
   var selectedRotation = "{{ current_rotation }}";
 
@@ -644,6 +710,7 @@
       display: xDisplayInput ? xDisplayInput.value.trim() : ":0",
       persistSession: persistSession ? persistSession.checked : false,
       persistXorg: persistXorg ? persistXorg.checked : false,
+      persistDisplayRotateXorg: persistDisplayRotateXorg ? persistDisplayRotateXorg.checked : false,
     };
     if (decoupleTouchRotation && decoupleTouchRotation.checked) {
       config.touchRotate = selectedTouchRotation;
@@ -728,6 +795,8 @@
       if (resetBtn) resetBtn.disabled = false;
       if (d.status === "ok") {
         if (persistXorg) persistXorg.checked = false;
+        if (persistDisplayRotateXorg) persistDisplayRotateXorg.checked = false;
+        if (persistSession) persistSession.checked = false;
         if (output) deviceRotations[output] = "normal";
         setRotation("normal");
         if (touch) deviceTouchRotations[touch] = "normal";
