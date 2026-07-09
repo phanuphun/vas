@@ -223,12 +223,15 @@
           </div>
           <div class="flex items-center justify-between gap-4">
             <span class="text-[0.82rem] text-ink">สร้าง .xprofile + display-session.sh (Persist at login)</span>
-            <label class="toggle-switch">
-              <input id="persistSession" type="checkbox">
-              <div class="toggle-track"><div class="toggle-thumb"></div></div>
-            </label>
+            <div class="flex items-center gap-2">
+              <span class="text-[0.68rem] text-faint" id="persistSessionRemoveMsg"></span>
+              <label class="toggle-switch">
+                <input id="persistSession" type="checkbox" {{ 'checked' if display_config.has_signature else '' }}>
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+              </label>
+            </div>
           </div>
-          <p class="text-[0.7rem] text-faint">Toggle นี้จะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน โดยใช้ค่าจอ/ทัช/ทิศทางที่เลือกไว้ตอนนั้นเขียนลงไฟล์</p>
+          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นี้ตั้งไว้แล้วจริง — เปิดเพิ่ม/แก้ไขจะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน แต่ถ้า<strong>ปิด toggle จะลบไฟล์ทันที ไม่ต้องรอกด Apply</strong></p>
         </div>
       </div>
 
@@ -252,20 +255,26 @@
           <div class="flex flex-col gap-3">
             <div class="flex items-center justify-between gap-4">
               <span class="text-[0.82rem] text-ink">Persist touch ใน Xorg <span class="text-faint">(99-vending-touchscreen.conf)</span></span>
-              <label class="toggle-switch">
-                <input id="persistXorg" type="checkbox">
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-              </label>
+              <div class="flex items-center gap-2">
+                <span class="text-[0.68rem] text-faint" id="persistXorgRemoveMsg"></span>
+                <label class="toggle-switch">
+                  <input id="persistXorg" type="checkbox" {{ 'checked' if xorg_touchscreen.has_signature else '' }}>
+                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                </label>
+              </div>
             </div>
             <div class="flex items-center justify-between gap-4">
               <span class="text-[0.82rem] text-ink">Persist การหมุนจอใน Xorg <span class="text-faint">(98-vending-display-rotate.conf)</span></span>
-              <label class="toggle-switch">
-                <input id="persistDisplayRotateXorg" type="checkbox">
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-              </label>
+              <div class="flex items-center gap-2">
+                <span class="text-[0.68rem] text-faint" id="persistDisplayRotateXorgRemoveMsg"></span>
+                <label class="toggle-switch">
+                  <input id="persistDisplayRotateXorg" type="checkbox" {{ 'checked' if xorg_display_rotate.has_signature else '' }}>
+                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                </label>
+              </div>
             </div>
           </div>
-          <p class="text-[0.7rem] text-faint">Toggle ทั้งสองนี้จะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน — ไฟล์ 98-... ถูกโหลดก่อน 99-... เสมอ (เลขน้อยกว่าโหลดก่อน) แต่คนละ Section กัน ไม่ชนกัน</p>
+          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นั้นตั้งไว้แล้วจริง — เปิดเพิ่ม/แก้ไขจะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน แต่ถ้า<strong>ปิด toggle จะลบไฟล์ทันที ไม่ต้องรอกด Apply</strong> (ไฟล์ 98-... ถูกโหลดก่อน 99-... เสมอ แต่คนละ toggle กัน ไม่ชนกัน)</p>
         </div>
       </div>
 
@@ -606,6 +615,37 @@
   var persistXorg     = document.getElementById("persistXorg");
   var persistDisplayRotateXorg = document.getElementById("persistDisplayRotateXorg");
   var applyResult     = document.getElementById("applyResult");
+
+  // ── Persist toggle ปิด = ลบไฟล์ทันที (ไม่ต้องรอกด Apply) ──────────────────────
+  // ตอน hydrate ค่า checked มาจาก has_signature จริงบนเครื่องอยู่แล้ว (server-render) —
+  // ฟังก์ชันนี้ผูกเฉพาะ event "change" ตอนผู้ใช้กดปิด toggle เอง ไม่ทำงานตอนโหลดหน้าครั้งแรก
+  function bindPersistRemoveToggle(toggleEl, target, msgEl) {
+    if (!toggleEl) return;
+    toggleEl.addEventListener("change", function () {
+      if (toggleEl.checked) return; // เปิด toggle แค่ตั้งสถานะไว้ ยังไม่เขียนไฟล์จนกว่าจะกด Apply
+      if (msgEl) msgEl.textContent = "กำลังลบ...";
+      toggleEl.disabled = true;
+      fetch("{{ url_for('display_persist_remove') }}", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: target }),
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        toggleEl.disabled = false;
+        if (msgEl) {
+          msgEl.textContent = d.status === "ok" ? "ลบไฟล์แล้ว" : "Error: " + (d.errors || []).join(", ");
+          setTimeout(function () { msgEl.textContent = ""; }, 3000);
+        }
+      })
+      .catch(function (e) {
+        toggleEl.disabled = false;
+        if (msgEl) msgEl.textContent = "Fetch error: " + e;
+      });
+    });
+  }
+  bindPersistRemoveToggle(persistSession, "session", document.getElementById("persistSessionRemoveMsg"));
+  bindPersistRemoveToggle(persistXorg, "xorg", document.getElementById("persistXorgRemoveMsg"));
+  bindPersistRemoveToggle(persistDisplayRotateXorg, "xorg_rotate", document.getElementById("persistDisplayRotateXorgRemoveMsg"));
   var selectedRotation = "{{ current_rotation }}";
 
   // ── Rotation state per output (จาก server-render + refresh ภายหลัง) ──────────

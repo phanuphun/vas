@@ -1108,6 +1108,29 @@ def create_app() -> Flask:
             "persistDisplayRotateXorg": persist_display_rotate_xorg,
         }
 
+    @app.post("/api/display/persist-remove")
+    def display_persist_remove() -> tuple[dict[str, object], int] | dict[str, object]:
+        """ลบไฟล์ persist เดี่ยวๆ ทันที (ใช้ตอน toggle ในหน้า /display ถูกปิด) — ไม่ต้องรอกด
+        Apply เพราะเป็นการลบ ไม่ใช่การเขียนที่ต้องพึ่งค่าจอ/ทัชปัจจุบัน
+        """
+        payload = request.get_json(silent=True) or {}
+        target = str(payload.get("target", "")).strip()
+
+        configurator = DisplayConfigurator(DisplayCommandRunner())
+        try:
+            if target == "session":
+                configurator.remove_session_persist()
+            elif target == "xorg":
+                configurator.remove_xorg_touch_persist()
+            elif target == "xorg_rotate":
+                configurator.remove_xorg_display_rotate_persist()
+            else:
+                return {"status": "error", "errors": [f"Unknown target: {target}"]}, 400
+        except (CommandExecutionError, OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        return {"status": "ok", "target": target}
+
     @app.post("/api/display/reset")
     def display_reset() -> tuple[dict[str, object], int] | dict[str, object]:
         payload = request.get_json(silent=True) or {}

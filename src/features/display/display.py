@@ -216,6 +216,42 @@ class DisplayConfigurator:
         path.write_text(upsert_managed_block(existing_content, content), encoding="utf-8")
         _chown_to_effective_user(path)
 
+    def remove_session_persist(
+        self,
+        session_path: "Path | None" = None,
+        script_path: "Path | None" = None,
+    ) -> None:
+        """ลบเฉพาะ persist ผ่าน .xprofile (managed block + display-session.sh) — ใช้ตอน toggle
+        "Persist at login" ถูกปิดจากหน้าเว็บ ลบทันทีไม่ต้องรอกด Apply — ต่างจาก
+        reset_touch_mapping() ตรงที่ไม่แตะ runtime xrandr/xinput และไม่ลบไฟล์ Xorg conf.d ทั้งคู่
+        """
+        if session_path is None:
+            session_path = _effective_home_config_path()
+        if script_path is None:
+            script_path = _effective_home_script_path()
+
+        print(f"remove managed block from {session_path.as_posix()}")
+        if not self.runner.dry_run and session_path.exists():
+            existing_content = session_path.read_text(encoding="utf-8")
+            session_path.write_text(remove_managed_block(existing_content), encoding="utf-8")
+            _chown_to_effective_user(session_path)
+
+        print(f"remove {script_path.as_posix()}")
+        if not self.runner.dry_run and script_path.exists():
+            script_path.unlink()
+
+    def remove_xorg_touch_persist(self, path: Path = XORG_TOUCHSCREEN_CONFIG_PATH) -> None:
+        """ลบเฉพาะไฟล์ 99-vending-touchscreen.conf — ใช้ตอน toggle "Persist touch ใน Xorg" ถูกปิด"""
+        print(f"remove {path.as_posix()}")
+        if not self.runner.dry_run and path.exists():
+            path.unlink()
+
+    def remove_xorg_display_rotate_persist(self, path: Path = XORG_DISPLAY_ROTATE_CONFIG_PATH) -> None:
+        """ลบเฉพาะไฟล์ 98-vending-display-rotate.conf — ใช้ตอน toggle "Persist การหมุนจอใน Xorg" ถูกปิด"""
+        print(f"remove {path.as_posix()}")
+        if not self.runner.dry_run and path.exists():
+            path.unlink()
+
     def apply_screen_blank(
         self,
         seconds: int,
