@@ -397,7 +397,7 @@
           <div class="flex flex-col gap-1.5">
             <label class="text-[0.75rem] font-semibold text-muted" for="kioskUrl">URL ที่จะเปิด</label>
             <div class="flex items-center gap-2">
-              <input id="kioskUrl" type="url" value="{{ autostart.url }}" autocomplete="off"
+              <input id="kioskUrl" type="url" value="{{ autostart.url }}" autocomplete="off" oninput="updateScriptPreview()"
                      class="flex-1 min-w-0 px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
               <button type="button" onclick="checkKioskUrl()" id="kioskUrlCheckBtn"
                       class="inline-flex items-center gap-1.5 px-3 py-2 border border-line/15 rounded-lg bg-card text-muted text-[0.8rem] font-semibold hover:bg-surface hover:text-ink transition-colors flex-shrink-0">
@@ -414,16 +414,39 @@
               <p class="text-[0.72rem] text-muted mt-0.5">กันหน้าจอค้างว่างเปล่าถ้า chromium crash</p>
             </div>
             <label class="toggle-switch">
-              <input id="kioskRestartEnabled" type="checkbox" {{ 'checked' if autostart.restart_enabled else '' }}>
+              <input id="kioskRestartEnabled" type="checkbox" {{ 'checked' if autostart.restart_enabled else '' }} onchange="updateScriptPreview()">
               <div class="toggle-track"><div class="toggle-thumb"></div></div>
             </label>
           </div>
 
           <div class="flex flex-col gap-1.5" style="max-width:200px;">
             <label class="text-[0.75rem] font-semibold text-muted" for="kioskRestartDelay">รอกี่วินาทีก่อนเปิดใหม่</label>
-            <input id="kioskRestartDelay" type="number" min="0" value="{{ autostart.restart_delay }}"
+            <input id="kioskRestartDelay" type="number" min="0" value="{{ autostart.restart_delay }}" oninput="updateScriptPreview()"
                    class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
           </div>
+        </div>
+      </div>
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">ปิดฟีเจอร์เบราว์เซอร์ที่ไม่ต้องการให้ user แตะ</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">แต่ละสวิตช์เพิ่ม flag ให้ chromium ตอนเปิด — เปิดไว้ครบจะกันป๊อปอัพ/แถบแจ้งเตือนต่างๆ ที่ user กดโต้ตอบกับตัวเบราว์เซอร์ได้ในโหมด kiosk</p>
+        </div>
+        <div id="chrome-flag-list" class="flex flex-col">
+          {% for f in chrome_flag_defs %}
+          <div class="flex items-center justify-between gap-4 px-4 py-3 {{ '' if loop.last else 'border-b border-line/6' }}">
+            <div class="min-w-0">
+              <span class="text-[0.84rem] font-semibold text-ink">{{ f.label }}</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">{{ f.desc }}</p>
+              <code class="text-[0.66rem] text-faint font-mono">{{ f.flag }}</code>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" class="chrome-flag-toggle" data-flag-key="{{ f.key }}"
+                     {{ 'checked' if autostart.chrome_flags.get(f.key, true) else '' }} onchange="updateScriptPreview()">
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+          {% endfor %}
         </div>
       </div>
 
@@ -434,14 +457,8 @@
           <p id="autostart-preview-desc" class="text-[0.7rem] text-faint mt-1">{% if session_type == 'openbox' %}Openbox ไม่รองรับ autostart แบบ .desktop ของ GNOME — ไฟล์นี้เป็น shell script ที่รันตรงตอน session เริ่ม ไม่ต้องมีไฟล์ .desktop แยก{% else %}ถูกเรียกผ่าน .desktop entry แยกต่างหาก — ดูได้ที่แท็บ Config Files{% endif %}</p>
         </div>
         <div class="p-4">
-          <textarea readonly spellcheck="false"
-                    class="w-full px-3 py-2.5 border-0 bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[160px] outline-none resize-y cursor-default select-all rounded-lg">#!/usr/bin/env bash
-while true; do
-  chromium --kiosk --noerrdialogs \
-    --disable-infobars \
-    {{ autostart.url }}
-  sleep {{ autostart.restart_delay }}
-done</textarea>
+          <textarea id="kioskScriptPreview" readonly spellcheck="false"
+                    class="w-full px-3 py-2.5 border-0 bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[160px] outline-none resize-y cursor-default select-all rounded-lg">{{ autostart_script_preview }}</textarea>
         </div>
       </div>
 
@@ -488,7 +505,7 @@ done</textarea>
         "Openbox ไม่รองรับ .desktop autostart แบบ GNOME — ไฟล์นี้เป็น shell script ที่รันตรงตอน session เริ่ม รวม restart-loop ไว้ในไฟล์เดียว",
         readiness.autostart_ok,
         "พบไฟล์และ executable แล้ว" if readiness.autostart_ok else "ยังไม่ถูกสร้าง",
-        "(ยังไม่ถูกสร้าง)" if not readiness.autostart_ok else ("#!/usr/bin/env bash\nwhile true; do\n  chromium --kiosk " ~ autostart.url ~ "\n  sleep " ~ autostart.restart_delay ~ "\ndone"),
+        "(ยังไม่ถูกสร้าง)" if not readiness.autostart_ok else autostart_script_preview,
         "openbox"
       ) %}
 
@@ -512,7 +529,7 @@ done</textarea>
         "Restart-loop script ที่เปิด chromium เต็มจอ ถูกเรียกจากไฟล์ .desktop ด้านบน",
         readiness.autostart_ok,
         "Script พร้อมใช้งาน" if readiness.autostart_ok else "ยังไม่ถูกสร้าง",
-        "(ยังไม่ถูกสร้าง)" if not readiness.autostart_ok else ("#!/usr/bin/env bash\nwhile true; do\n  chromium --kiosk " ~ autostart.url ~ "\n  sleep " ~ autostart.restart_delay ~ "\ndone"),
+        "(ยังไม่ถูกสร้าง)" if not readiness.autostart_ok else autostart_script_preview,
         "gnome"
       ) %}
 
@@ -653,6 +670,47 @@ done</textarea>
 
   var kioskHome = "{{ home }}";
   var currentSessionType = "{{ session_type }}";
+  var CHROME_FLAG_DEFS = {{ chrome_flag_defs | tojson }};
+
+  // ── Chrome flag toggles → รวมสถานะปัจจุบันของ toggle ทั้งหมด ──────
+  function getChromeFlagsState() {
+    var state = {};
+    document.querySelectorAll(".chrome-flag-toggle").forEach(function (el) {
+      state[el.getAttribute("data-flag-key")] = el.checked;
+    });
+    return state;
+  }
+
+  // ── สร้างข้อความ preview script ให้ตรงกับที่ build_kiosk_launch_script() จะเขียนจริง ──
+  function buildScriptPreviewText() {
+    var urlEl = document.getElementById("kioskUrl");
+    var restartEl = document.getElementById("kioskRestartEnabled");
+    var delayEl = document.getElementById("kioskRestartDelay");
+    var url = (urlEl && urlEl.value.trim()) || "{{ autostart.url }}";
+    var restartEnabled = restartEl ? restartEl.checked : true;
+    var delay = delayEl ? (parseInt(delayEl.value, 10) || 0) : {{ autostart.restart_delay }};
+    var flags = getChromeFlagsState();
+    var tokens = ["--kiosk"];
+    CHROME_FLAG_DEFS.forEach(function (f) {
+      if (flags[f.key]) tokens.push(f.flag);
+    });
+    var command = "chromium " + tokens.join(" ") + " " + url;
+    var lines = ["#!/usr/bin/env bash"];
+    if (restartEnabled) {
+      lines.push("while true; do");
+      lines.push("  " + command);
+      lines.push("  sleep " + Math.max(0, delay));
+      lines.push("done");
+    } else {
+      lines.push(command);
+    }
+    return lines.join("\n");
+  }
+
+  window.updateScriptPreview = function () {
+    var el = document.getElementById("kioskScriptPreview");
+    if (el) el.value = buildScriptPreviewText();
+  };
 
   // ── Readiness state (reactive — อัปเดตแบบ in-place ไม่ reload หน้า) ──
   var readinessState = {
@@ -813,7 +871,8 @@ done</textarea>
       case "kiosk_session_type_changed":
         return details.username + " → " + (details.session_type === "openbox" ? "Openbox" : "GNOME");
       case "kiosk_autostart_saved":
-        return details.url + " (restart " + (details.restart_enabled ? "เปิด" : "ปิด") + ", รอ " + details.restart_delay + " วิ)";
+        return details.url + " (restart " + (details.restart_enabled ? "เปิด" : "ปิด") + ", รอ " + details.restart_delay + " วิ"
+          + (details.chrome_flags_enabled !== undefined ? ", ปิดฟีเจอร์เบราว์เซอร์ " + details.chrome_flags_enabled + " รายการ" : "") + ")";
       case "kiosk_stopped":
         return "user: " + details.username;
       case "kiosk_heartbeat_toggled":
@@ -1018,6 +1077,7 @@ done</textarea>
       url: urlEl ? urlEl.value.trim() : "",
       restart_enabled: restartEl ? restartEl.checked : true,
       restart_delay: delayEl ? parseInt(delayEl.value, 10) || 0 : 2,
+      chrome_flags: getChromeFlagsState(),
     }).then(function (result) {
       if (result.ok) {
         showToast("บันทึกและเปิดใช้งาน autostart แล้ว", "success");
@@ -1034,6 +1094,7 @@ done</textarea>
           updateCfgCardStatus(key, readinessState.autostart_ok, readinessState.autostart_ok ? undefined : "ยังไม่ถูกสร้าง");
           reloadConfigContent(key);
         });
+        updateScriptPreview();
       } else {
         showToast(firstError(result.data), "error");
       }

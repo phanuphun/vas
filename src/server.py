@@ -81,10 +81,12 @@ from features.wireguard.manager import (
 )
 from features.docker import manager as docker_manager
 from features.kiosk.manager import (
+    CHROME_KIOSK_FLAG_DEFS,
     DEFAULT_EXTRA_GROUPS,
     DEFAULT_RESTART_DELAY,
     KioskManager,
     accounts_service_path_for,
+    build_kiosk_launch_script,
     check_url_reachable,
     collect_accounts_service_status,
     collect_gdm_autologin_status,
@@ -95,6 +97,7 @@ from features.kiosk.manager import (
     kiosk_launch_script_path,
     kiosk_openbox_autostart_path,
     list_kiosk_linux_users,
+    normalize_chrome_flags,
     resolve_kiosk_target_user,
     stop_kiosk_mode,
 )
@@ -1337,6 +1340,8 @@ def create_app() -> Flask:
         session_type = str(payload.get("session_type", "gnome")).strip()
         url = str(payload.get("url", "")).strip()
         restart_enabled = bool(payload.get("restart_enabled", True))
+        raw_chrome_flags = payload.get("chrome_flags")
+        chrome_flags = normalize_chrome_flags(raw_chrome_flags if isinstance(raw_chrome_flags, dict) else None)
         try:
             restart_delay = int(payload.get("restart_delay", DEFAULT_RESTART_DELAY))
         except (TypeError, ValueError):
@@ -1363,6 +1368,7 @@ def create_app() -> Flask:
                 url=url,
                 restart_enabled=restart_enabled,
                 restart_delay=restart_delay,
+                chrome_flags=chrome_flags,
             )
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
@@ -1372,11 +1378,18 @@ def create_app() -> Flask:
         _db_audit("kiosk_autostart_saved", {
             "username": username, "url": url,
             "restart_enabled": restart_enabled, "restart_delay": restart_delay,
+            "chrome_flags_enabled": sum(1 for v in chrome_flags.values() if v),
         })
         _db_config(
             "kiosk", f"autostart:{username}",
-            old_value={"url": old_status.url, "restart_enabled": old_status.restart_enabled, "restart_delay": old_status.restart_delay},
-            new_value={"url": status.url, "restart_enabled": status.restart_enabled, "restart_delay": status.restart_delay},
+            old_value={
+                "url": old_status.url, "restart_enabled": old_status.restart_enabled,
+                "restart_delay": old_status.restart_delay, "chrome_flags": old_status.chrome_flags,
+            },
+            new_value={
+                "url": status.url, "restart_enabled": status.restart_enabled,
+                "restart_delay": status.restart_delay, "chrome_flags": status.chrome_flags,
+            },
         )
         return {
             "status": "ok",
@@ -1384,6 +1397,7 @@ def create_app() -> Flask:
             "url": status.url,
             "restart_enabled": status.restart_enabled,
             "restart_delay": status.restart_delay,
+            "chrome_flags": status.chrome_flags,
         }
 
     @app.get("/api/kiosk/config-content")
@@ -3528,6 +3542,10 @@ def _kiosk_page_context() -> dict[str, object]:
 
     autostart_status = collect_kiosk_autostart_status(session_type, home)
     readiness = collect_kiosk_readiness(users, autologin, autostart_status, software)
+    autostart_script_preview = build_kiosk_launch_script(
+        autostart_status.url, autostart_status.restart_enabled,
+        autostart_status.restart_delay, autostart_status.chrome_flags,
+    )
 
     from core.database import list_device_integrations, list_mqtt_brokers
     from features.kiosk.heartbeat import get_heartbeat_thread
@@ -3552,7 +3570,10 @@ def _kiosk_page_context() -> dict[str, object]:
             "restart_enabled": autostart_status.restart_enabled,
             "restart_delay": autostart_status.restart_delay,
             "configured": autostart_status.configured,
+            "chrome_flags": autostart_status.chrome_flags,
         },
+        "autostart_script_preview": autostart_script_preview,
+        "chrome_flag_defs": list(CHROME_KIOSK_FLAG_DEFS),
         "readiness": {
             "software_ok": readiness.software_ok,
             "user_ok": readiness.user_ok,

@@ -39,6 +39,8 @@ PWD_MODULE = cast("Any | None", pwd_module)
 
 __all__ = [
     "ACCOUNTS_SERVICE_DIR",
+    "CHROME_KIOSK_FLAG_DEFS",
+    "DEFAULT_CHROME_FLAGS",
     "DEFAULT_EXTRA_GROUPS",
     "DEFAULT_KIOSK_URL",
     "DEFAULT_RESTART_DELAY",
@@ -69,6 +71,7 @@ __all__ = [
     "kiosk_launch_script_path",
     "kiosk_openbox_autostart_path",
     "list_kiosk_linux_users",
+    "normalize_chrome_flags",
     "print_kiosk_status",
     "resolve_kiosk_target_user",
     "stop_kiosk_mode",
@@ -94,6 +97,69 @@ KIOSK_DESKTOP_SIGNATURE = "# vending-auto-config: kiosk-autostart-desktop"
 
 _KIOSK_MIN_UID = 1000
 _KIOSK_MAX_UID = 60000  # ไม่รวม nobody (65534)
+
+# ── Chromium kiosk flags ที่ปิด/เปิดได้จากหน้าเว็บ ──────────────────────────
+# --kiosk เองบังคับใช้เสมอ (ไม่ใช่ toggle) — รายการนี้คือ flag เสริมที่ปิดฟีเจอร์
+# ของเบราว์เซอร์ที่ไม่อยากให้ user ในโหมด kiosk แตะได้ เช่น แปลภาษา, บันทึกรหัสผ่าน
+# ค่า default ทุกตัว = True เพราะ kiosk mode ควรกัน "browser action" ทุกชนิดโดยปริยาย
+CHROME_KIOSK_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
+    {
+        "key": "no_first_run",
+        "flag": "--no-first-run",
+        "label": "ปิดหน้าจอเริ่มต้นใช้งานครั้งแรก (First Run)",
+        "desc": "กัน Chromium ขึ้นหน้าจอ setup/welcome ตอนรันครั้งแรกหลังสร้าง profile ใหม่",
+    },
+    {
+        "key": "disable_translate",
+        "flag": "--disable-translate",
+        "label": "ปิดป๊อปอัพเสนอแปลภาษา",
+        "desc": "ปิดฟังก์ชัน Google Translate ที่เด้งถามเวลาเจอเว็บภาษาอื่นจากภาษาเครื่อง",
+    },
+    {
+        "key": "disable_infobars",
+        "flag": "--disable-infobars",
+        "label": "ปิดแถบแจ้งเตือนด้านบน (Infobars)",
+        "desc": "ซ่อนแถบแจ้งเตือนใต้ address bar เช่น \"Chrome is being controlled by automated software\"",
+    },
+    {
+        "key": "noerrdialogs",
+        "flag": "--noerrdialogs",
+        "label": "ปิด dialog แจ้ง error ของ Chromium",
+        "desc": "กัน dialog เช่น \"Restore pages?\" เด้งขึ้นมาหลัง chromium ปิดไม่ปกติ/crash",
+    },
+    {
+        "key": "disable_suggestions_service",
+        "flag": "--disable-suggestions-service",
+        "label": "ปิดบริการแนะนำคำค้นหา",
+        "desc": "ปิด suggestion service ของ Chromium ที่เรียก server ภายนอกตอนพิมพ์ในช่อง address bar",
+    },
+    {
+        "key": "disable_save_password_bubble",
+        "flag": "--disable-save-password-bubble",
+        "label": "ปิดป๊อปอัพถามบันทึกรหัสผ่าน",
+        "desc": "กัน Chromium เด้งถามว่าจะบันทึกรหัสผ่านที่กรอกในเว็บฟอร์มไหม",
+    },
+    {
+        "key": "start_maximized",
+        "flag": "--start-maximized",
+        "label": "เปิดหน้าต่างแบบขยายเต็มจอ",
+        "desc": "สำรองไว้เผื่อ --kiosk ไม่เต็มจอเองในบางสภาพแวดล้อม (window manager บางตัว)",
+    },
+)
+
+DEFAULT_CHROME_FLAGS: "dict[str, bool]" = {item["key"]: True for item in CHROME_KIOSK_FLAG_DEFS}
+
+
+def normalize_chrome_flags(chrome_flags: "dict[str, object] | None") -> "dict[str, bool]":
+    """รวมค่าที่ส่งมา (เช่นจาก JSON payload) เข้ากับ default — คีย์ที่ไม่รู้จักถูกทิ้ง
+    คีย์ที่ไม่ได้ส่งมาใช้ค่า default (True) เพื่อไม่ให้ payload เก่า/บางส่วนไปปิด flag อื่นโดยไม่ตั้งใจ"""
+    result = dict(DEFAULT_CHROME_FLAGS)
+    if chrome_flags:
+        valid_keys = {item["key"] for item in CHROME_KIOSK_FLAG_DEFS}
+        for key, value in chrome_flags.items():
+            if key in valid_keys:
+                result[key] = bool(value)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +198,7 @@ class KioskAutostartStatus:
     restart_enabled: bool
     restart_delay: int
     configured: bool
+    chrome_flags: "dict[str, bool]"
 
 
 @dataclass(frozen=True)
@@ -199,8 +266,9 @@ class KioskManager:
         url: str,
         restart_enabled: bool,
         restart_delay: int,
+        chrome_flags: "dict[str, bool] | None" = None,
     ) -> None:
-        script_content = build_kiosk_launch_script(url, restart_enabled, restart_delay)
+        script_content = build_kiosk_launch_script(url, restart_enabled, restart_delay, chrome_flags)
 
         if session_type == "openbox":
             script_path = kiosk_openbox_autostart_path(home)
@@ -382,16 +450,27 @@ def build_accounts_service_config(existing_content: str, session_type: str) -> s
     return "\n".join(new_lines) + "\n"
 
 
-def build_kiosk_launch_script(url: str, restart_enabled: bool, restart_delay: int) -> str:
+def build_kiosk_launch_script(
+    url: str,
+    restart_enabled: bool,
+    restart_delay: int,
+    chrome_flags: "dict[str, bool] | None" = None,
+) -> str:
+    flags = normalize_chrome_flags(chrome_flags)
+    flag_tokens = ["--kiosk"] + [
+        item["flag"] for item in CHROME_KIOSK_FLAG_DEFS if flags.get(item["key"], False)
+    ]
+    command = "chromium " + " ".join(flag_tokens) + " " + shlex.quote(url)
+
     if restart_enabled:
         body = (
             "while true; do\n"
-            f"  chromium --kiosk --noerrdialogs --disable-infobars {shlex.quote(url)}\n"
+            f"  {command}\n"
             f"  sleep {max(0, restart_delay)}\n"
             "done\n"
         )
     else:
-        body = f"chromium --kiosk --noerrdialogs --disable-infobars {shlex.quote(url)}\n"
+        body = f"{command}\n"
 
     return (
         "#!/usr/bin/env bash\n"
@@ -412,13 +491,22 @@ def build_gnome_autostart_desktop(script_path: Path) -> str:
     )
 
 
-def _parse_kiosk_script(content: str) -> "tuple[str, bool, int]":
+def _parse_kiosk_script(content: str) -> "tuple[str, bool, int, dict[str, bool]]":
     restart_enabled = bool(re.search(r"^\s*while\s+true\s*;\s*do", content, re.MULTILINE))
     url_match = re.search(r"chromium[^\n]*?(https?://\S+)", content)
     url = url_match.group(1) if url_match else DEFAULT_KIOSK_URL
     delay_match = re.search(r"sleep\s+(\d+)", content)
     delay = int(delay_match.group(1)) if delay_match else DEFAULT_RESTART_DELAY
-    return url, restart_enabled, delay
+    chrome_flags = _parse_kiosk_flags(content)
+    return url, restart_enabled, delay, chrome_flags
+
+
+def _parse_kiosk_flags(content: str) -> "dict[str, bool]":
+    """หา flag ที่มีอยู่จริงในบรรทัด chromium ของ script — ใช้ตอนอ่านสถานะ toggle
+    กลับมาแสดงในหน้าเว็บ ให้ตรงกับสิ่งที่เขียนไว้บนดิสก์จริง ไม่ใช่ default เสมอ"""
+    chromium_line_match = re.search(r"^\s*chromium\b[^\n]*", content, re.MULTILINE)
+    chromium_line = chromium_line_match.group(0) if chromium_line_match else ""
+    return {item["key"]: (item["flag"] in chromium_line) for item in CHROME_KIOSK_FLAG_DEFS}
 
 
 # ---------------------------------------------------------------------------
@@ -565,7 +653,7 @@ def collect_kiosk_autostart_status(session_type: str, home: Path) -> KioskAutost
         return KioskAutostartStatus(
             session_type=session_type, home=home,
             url=DEFAULT_KIOSK_URL, restart_enabled=True, restart_delay=DEFAULT_RESTART_DELAY,
-            configured=True,
+            configured=True, chrome_flags=dict(DEFAULT_CHROME_FLAGS),
         )
 
     if session_type == "openbox":
@@ -592,14 +680,15 @@ def collect_kiosk_autostart_status(session_type: str, home: Path) -> KioskAutost
         content_for_parse = script_content
 
     if content_for_parse:
-        url, restart_enabled, restart_delay = _parse_kiosk_script(content_for_parse)
+        url, restart_enabled, restart_delay, chrome_flags = _parse_kiosk_script(content_for_parse)
     else:
         url, restart_enabled, restart_delay = DEFAULT_KIOSK_URL, True, DEFAULT_RESTART_DELAY
+        chrome_flags = dict(DEFAULT_CHROME_FLAGS)
 
     return KioskAutostartStatus(
         session_type=session_type, home=home,
         url=url, restart_enabled=restart_enabled, restart_delay=restart_delay,
-        configured=configured,
+        configured=configured, chrome_flags=chrome_flags,
     )
 
 
