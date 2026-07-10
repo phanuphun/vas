@@ -231,7 +231,7 @@
               </label>
             </div>
           </div>
-          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นี้ตั้งไว้แล้วจริง — เปิดเพิ่ม/แก้ไขจะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน แต่ถ้า<strong>ปิด toggle จะลบไฟล์ทันที ไม่ต้องรอกด Apply</strong></p>
+          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นี้ตั้งไว้แล้วจริง — <strong>เปิด toggle = เขียนไฟล์ทันที, ปิด toggle = ลบไฟล์ทันที</strong> โดยใช้ค่าจอ/ทัช/ทิศทางที่เลือกไว้ในการ์ด Monitor Setting ด้านบน ณ ขณะนั้น ไม่ต้องรอกด Apply</p>
         </div>
       </div>
 
@@ -274,7 +274,7 @@
               </div>
             </div>
           </div>
-          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นั้นตั้งไว้แล้วจริง — เปิดเพิ่ม/แก้ไขจะมีผลตอนกดปุ่ม <strong>Apply</strong> ในการ์ด Monitor Setting ด้านบน แต่ถ้า<strong>ปิด toggle จะลบไฟล์ทันที ไม่ต้องรอกด Apply</strong> (ไฟล์ 98-... ถูกโหลดก่อน 99-... เสมอ แต่คนละ toggle กัน ไม่ชนกัน)</p>
+          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นั้นตั้งไว้แล้วจริง — <strong>เปิด toggle = เขียนไฟล์ทันที, ปิด toggle = ลบไฟล์ทันที</strong> โดยใช้ค่าจอ/ทัช/ทิศทางที่เลือกไว้ในการ์ด Monitor Setting ด้านบน ณ ขณะนั้น ไม่ต้องรอกด Apply (ไฟล์ 98-... ถูกโหลดก่อน 99-... เสมอ แต่คนละ toggle กัน ไม่ชนกัน)</p>
         </div>
       </div>
 
@@ -616,36 +616,51 @@
   var persistDisplayRotateXorg = document.getElementById("persistDisplayRotateXorg");
   var applyResult     = document.getElementById("applyResult");
 
-  // ── Persist toggle ปิด = ลบไฟล์ทันที (ไม่ต้องรอกด Apply) ──────────────────────
+  // ── Persist toggle เปิด = เขียนไฟล์ทันที, ปิด = ลบไฟล์ทันที (ไม่ต้องรอกด Apply) ─────
   // ตอน hydrate ค่า checked มาจาก has_signature จริงบนเครื่องอยู่แล้ว (server-render) —
-  // ฟังก์ชันนี้ผูกเฉพาะ event "change" ตอนผู้ใช้กดปิด toggle เอง ไม่ทำงานตอนโหลดหน้าครั้งแรก
-  function bindPersistRemoveToggle(toggleEl, target, msgEl) {
+  // ฟังก์ชันนี้ผูกเฉพาะ event "change" ตอนผู้ใช้กดเอง ไม่ทำงานตอนโหลดหน้าครั้งแรก
+  // ใช้ selectedConfig() (นิยามด้านล่าง แต่เป็น function declaration ถูก hoist แล้ว) เพื่อเอา
+  // ค่าจอ/ทัช/ทิศทางล่าสุดที่เลือกอยู่ในฟอร์มตอนนั้นมาเขียนไฟล์ ไม่ใช่ค่าตอนโหลดหน้าครั้งแรก
+  function bindPersistToggle(toggleEl, target, msgEl) {
     if (!toggleEl) return;
     toggleEl.addEventListener("change", function () {
-      if (toggleEl.checked) return; // เปิด toggle แค่ตั้งสถานะไว้ ยังไม่เขียนไฟล์จนกว่าจะกด Apply
-      if (msgEl) msgEl.textContent = "กำลังลบ...";
+      var turningOn = toggleEl.checked;
       toggleEl.disabled = true;
-      fetch("{{ url_for('display_persist_remove') }}", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: target }),
-      })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        toggleEl.disabled = false;
-        if (msgEl) {
-          msgEl.textContent = d.status === "ok" ? "ลบไฟล์แล้ว" : "Error: " + (d.errors || []).join(", ");
-          setTimeout(function () { msgEl.textContent = ""; }, 3000);
-        }
-      })
-      .catch(function (e) {
-        toggleEl.disabled = false;
-        if (msgEl) msgEl.textContent = "Fetch error: " + e;
-      });
+      if (msgEl) msgEl.textContent = turningOn ? "กำลังบันทึก..." : "กำลังลบ...";
+
+      var request = turningOn
+        ? fetch("{{ url_for('display_persist_write') }}", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(Object.assign({ target: target }, selectedConfig())),
+          })
+        : fetch("{{ url_for('display_persist_remove') }}", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ target: target }),
+          });
+
+      request
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          toggleEl.disabled = false;
+          if (d.status === "ok") {
+            if (msgEl) msgEl.textContent = turningOn ? "บันทึกแล้ว" : "ลบไฟล์แล้ว";
+          } else {
+            // เขียน/ลบไม่สำเร็จ — ย้อน toggle กลับ กัน UI โชว์สถานะไม่ตรงกับไฟล์จริงบนดิสก์
+            toggleEl.checked = !turningOn;
+            if (msgEl) msgEl.textContent = "Error: " + (d.errors || []).join(", ");
+          }
+          if (msgEl) setTimeout(function () { msgEl.textContent = ""; }, 3000);
+        })
+        .catch(function (e) {
+          toggleEl.disabled = false;
+          toggleEl.checked = !turningOn;
+          if (msgEl) msgEl.textContent = "Fetch error: " + e;
+        });
     });
   }
-  bindPersistRemoveToggle(persistSession, "session", document.getElementById("persistSessionRemoveMsg"));
-  bindPersistRemoveToggle(persistXorg, "xorg", document.getElementById("persistXorgRemoveMsg"));
-  bindPersistRemoveToggle(persistDisplayRotateXorg, "xorg_rotate", document.getElementById("persistDisplayRotateXorgRemoveMsg"));
+  bindPersistToggle(persistSession, "session", document.getElementById("persistSessionRemoveMsg"));
+  bindPersistToggle(persistXorg, "xorg", document.getElementById("persistXorgRemoveMsg"));
+  bindPersistToggle(persistDisplayRotateXorg, "xorg_rotate", document.getElementById("persistDisplayRotateXorgRemoveMsg"));
   var selectedRotation = "{{ current_rotation }}";
 
   // ── Rotation state per output (จาก server-render + refresh ภายหลัง) ──────────
@@ -708,17 +723,19 @@
   }
   setTouchRotation(selectedTouchRotation);
 
-  // แสดงทิศทาง touch จริงของ device ที่เลือกอยู่ (ถ้ารู้จัก) — เปิด toggle "แยกทิศทาง" ให้
-  // อัตโนมัติทุกครั้งที่ detect ค่าจริงได้ (ไม่ใช่แค่ตอนต่างจากจอ) เพื่อให้ toggle สะท้อนของจริง
-  // บนเครื่องเสมอ แม้ค่า touch จะบังเอิญตรงกับจอพอดีก็ตาม — เดิมซ่อน/ปิด toggle ทุกครั้งที่ค่า
-  // ตรงกับจอ ทำให้ผู้ใช้เปิด toggle + เลือกทิศทาง + Apply ไปแล้ว พอ refresh หน้าใหม่ toggle
-  // กลับไปปิดเอง (ทั้งที่ค่าจริงยังถูกต้องอยู่) ดูเหมือนการตั้งค่าหายไป
+  // แสดงทิศทาง touch จริงของ device ที่เลือกอยู่ (ถ้ารู้จัก) — เปิด toggle "แยกทิศทาง" เฉพาะ
+  // ตอนที่ค่า touch จริงบนเครื่อง "ต่างจาก" ทิศทางจอปัจจุบันเท่านั้น (ดูเหตุผลเต็มใน
+  // applyTouchRotationForSelectedDevice ด้านล่าง)
   function applyTouchRotationForSelectedDevice() {
     var name = touchSelect ? touchSelect.value : "";
     var known = Object.prototype.hasOwnProperty.call(deviceTouchRotations, name) ? deviceTouchRotations[name] : null;
     var touchValue = known || selectedRotation;
     setTouchRotation(touchValue);
-    var shouldDecouple = !!known;
+    // decouple ต้องเปิดเฉพาะตอนที่ touch จริงบนเครื่อง "ต่างจาก" ทิศทางจอปัจจุบันเท่านั้น —
+    // ห้ามเปิดแค่เพราะอ่านค่า matrix ได้ (known ไม่ null) เพราะ matrix มีค่าอยู่เสมอ (อย่างน้อย
+    // ก็ identity/normal) ทำให้ toggle เปิดเองแทบทุกครั้งที่ refresh ไม่สะท้อนความตั้งใจจริง
+    // ของผู้ใช้ — เคยแก้ไปทางตรงข้าม (เปิดทุกครั้งที่ known) มาก่อน แต่ทำให้เกิดปัญหานี้แทน
+    var shouldDecouple = !!known && touchValue !== selectedRotation;
     if (decoupleTouchRotation) decoupleTouchRotation.checked = shouldDecouple;
     if (touchRotationRow) touchRotationRow.classList.toggle("hidden", !shouldDecouple);
   }

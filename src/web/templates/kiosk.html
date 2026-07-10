@@ -696,6 +696,11 @@
     });
     var command = "chromium " + tokens.join(" ") + " " + url;
     var lines = ["#!/usr/bin/env bash"];
+    lines.push("LOG_FILE=\"$HOME/.config/vending-auto-setup/kiosk-launch.log\"");
+    lines.push("mkdir -p \"$(dirname \"$LOG_FILE\")\"");
+    lines.push("if ! command -v chromium >/dev/null 2>&1 && command -v chromium-browser >/dev/null 2>&1; then");
+    lines.push("  chromium() { chromium-browser \"$@\"; }");
+    lines.push("fi");
     if (restartEnabled) {
       lines.push("while true; do");
       lines.push("  " + command);

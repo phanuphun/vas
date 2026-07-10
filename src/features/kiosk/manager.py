@@ -462,20 +462,46 @@ def build_kiosk_launch_script(
     ]
     command = "chromium " + " ".join(flag_tokens) + " " + shlex.quote(url)
 
+    # เครื่องบางเครื่อง binary ชื่อ chromium-browser (apt) ไม่ใช่ chromium (snap) —
+    # collect_kiosk_software_status() ยอมรับทั้งคู่เป็น "ติดตั้งแล้ว" แต่ก่อนหน้านี้สคริปต์
+    # hardcode เรียก "chromium" ตรงๆ เสมอ ถ้าเครื่องมีแค่ chromium-browser คำสั่งจะ fail
+    # แบบเงียบๆ ทุกครั้ง (ไม่มี error โผล่ที่จอเลย เพราะ Openbox ไม่มี UI ให้เห็น dialog ใดๆ)
+    # แก้โดย define shell function ชื่อ chromium ให้ forward ไป chromium-browser ถ้า chromium
+    # ตัวจริงไม่มีใน PATH — ไม่แตะ "command" ด้านบนเลย เพื่อไม่ให้กระทบ regex parser ด้านล่าง
+    # (_parse_kiosk_script / _parse_kiosk_flags) ที่ต้องอ่านค่ากลับมาแสดงในหน้าเว็บ
+    preamble = (
+        "LOG_FILE=\"$HOME/.config/vending-auto-setup/kiosk-launch.log\"\n"
+        "mkdir -p \"$(dirname \"$LOG_FILE\")\"\n"
+        "if ! command -v chromium >/dev/null 2>&1 && command -v chromium-browser >/dev/null 2>&1; then\n"
+        "  chromium() { chromium-browser \"$@\"; }\n"
+        "fi\n"
+        "if ! command -v chromium >/dev/null 2>&1; then\n"
+        "  echo \"$(date -Iseconds) ERROR: ไม่พบคำสั่ง chromium หรือ chromium-browser ใน PATH\" >> \"$LOG_FILE\"\n"
+        "fi\n"
+    )
+
     if restart_enabled:
         body = (
             "while true; do\n"
+            "  echo \"$(date -Iseconds) เปิด chromium (kiosk mode)\" >> \"$LOG_FILE\"\n"
             f"  {command}\n"
+            "  echo \"$(date -Iseconds) chromium ออกแล้ว (exit code $?) — จะเปิดใหม่ใน "
+            f"{max(0, restart_delay)} วิ\" >> \"$LOG_FILE\"\n"
             f"  sleep {max(0, restart_delay)}\n"
             "done\n"
         )
     else:
-        body = f"{command}\n"
+        body = (
+            "echo \"$(date -Iseconds) เปิด chromium (kiosk mode, restart ปิดอยู่)\" >> \"$LOG_FILE\"\n"
+            f"{command}\n"
+            "echo \"$(date -Iseconds) chromium ออกแล้ว (exit code $?) — restart ปิดอยู่ ไม่เปิดใหม่ให้\" >> \"$LOG_FILE\"\n"
+        )
 
     return (
         "#!/usr/bin/env bash\n"
         f"{KIOSK_SCRIPT_SIGNATURE}\n"
         "# Managed by VAS. Manual edits may be overwritten.\n"
+        f"{preamble}"
         f"{body}"
     )
 
@@ -493,7 +519,10 @@ def build_gnome_autostart_desktop(script_path: Path) -> str:
 
 def _parse_kiosk_script(content: str) -> "tuple[str, bool, int, dict[str, bool]]":
     restart_enabled = bool(re.search(r"^\s*while\s+true\s*;\s*do", content, re.MULTILINE))
-    url_match = re.search(r"chromium[^\n]*?(https?://\S+)", content)
+    # ใช้ "--kiosk" เป็นจุดยึดแทน "chromium" ตรงๆ เพราะ preamble ของ build_kiosk_launch_script()
+    # มีหลายบรรทัดที่ขึ้นต้นด้วยคำว่า chromium เช่นกัน (shell function fallback, log lines) —
+    # "--kiosk" การันตีว่ามีแค่บรรทัดคำสั่งจริงบรรทัดเดียวเท่านั้นที่มี (บังคับใช้เสมอ ดู CHROME_KIOSK_FLAG_DEFS ด้านบน)
+    url_match = re.search(r"--kiosk[^\n]*?(https?://\S+)", content)
     url = url_match.group(1) if url_match else DEFAULT_KIOSK_URL
     delay_match = re.search(r"sleep\s+(\d+)", content)
     delay = int(delay_match.group(1)) if delay_match else DEFAULT_RESTART_DELAY
@@ -502,9 +531,11 @@ def _parse_kiosk_script(content: str) -> "tuple[str, bool, int, dict[str, bool]]
 
 
 def _parse_kiosk_flags(content: str) -> "dict[str, bool]":
-    """หา flag ที่มีอยู่จริงในบรรทัด chromium ของ script — ใช้ตอนอ่านสถานะ toggle
-    กลับมาแสดงในหน้าเว็บ ให้ตรงกับสิ่งที่เขียนไว้บนดิสก์จริง ไม่ใช่ default เสมอ"""
-    chromium_line_match = re.search(r"^\s*chromium\b[^\n]*", content, re.MULTILINE)
+    """หา flag ที่มีอยู่จริงในบรรทัดคำสั่ง chromium ของ script — ใช้ตอนอ่านสถานะ toggle
+    กลับมาแสดงในหน้าเว็บ ให้ตรงกับสิ่งที่เขียนไว้บนดิสก์จริง ไม่ใช่ default เสมอ
+    หาโดยยึด "--kiosk" ไม่ใช่คำว่า "chromium" ที่ขึ้นต้นบรรทัด เพราะ preamble ของ
+    build_kiosk_launch_script() มีบรรทัด shell function/log ที่ขึ้นต้นด้วย "chromium" เหมือนกัน"""
+    chromium_line_match = re.search(r"^.*--kiosk.*$", content, re.MULTILINE)
     chromium_line = chromium_line_match.group(0) if chromium_line_match else ""
     return {item["key"]: (item["flag"] in chromium_line) for item in CHROME_KIOSK_FLAG_DEFS}
 

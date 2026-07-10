@@ -1108,6 +1108,47 @@ def create_app() -> Flask:
             "persistDisplayRotateXorg": persist_display_rotate_xorg,
         }
 
+    @app.post("/api/display/persist-write")
+    def display_persist_write() -> tuple[dict[str, object], int] | dict[str, object]:
+        """เขียนไฟล์ persist เดี่ยวๆ ทันทีตอน toggle ในหน้า /display ถูกเปิด — ใช้ค่าจอ/ทัช/
+        ทิศทางที่เลือกอยู่ในฟอร์มตอนนั้น ไม่ต้องรอกด Apply (คู่กับ persist-remove ตอนปิด toggle)
+        """
+        payload = request.get_json(silent=True) or {}
+        target = str(payload.get("target", "")).strip()
+        output = str(payload.get("output", "")).strip()
+        touch = str(payload.get("touch", "")).strip()
+        rotate = str(payload.get("rotate", "normal")).strip()
+        touch_rotate = str(payload.get("touchRotate", "")).strip() or None
+        x_display = str(payload.get("display", "")).strip() or None
+
+        if rotate not in ROTATION_MATRICES:
+            return {"status": "error", "errors": [f"Unsupported rotation: {rotate}"]}, 400
+        if touch_rotate and touch_rotate not in ROTATION_MATRICES:
+            return {"status": "error", "errors": [f"Unsupported touch rotation: {touch_rotate}"]}, 400
+
+        configurator = DisplayConfigurator(DisplayCommandRunner())
+        try:
+            if target == "session":
+                if not output or not touch:
+                    return {"status": "error", "errors": ["ต้องเลือก Display และ Touchscreen ก่อน"]}, 400
+                configurator.persist_session(
+                    output=output, touch=touch, rotate=rotate, touch_rotate=touch_rotate, x_display=x_display
+                )
+            elif target == "xorg":
+                if not touch:
+                    return {"status": "error", "errors": ["ต้องเลือก Touchscreen ก่อน"]}, 400
+                configurator.persist_xorg(touch=touch, rotate=rotate, touch_rotate=touch_rotate)
+            elif target == "xorg_rotate":
+                if not output:
+                    return {"status": "error", "errors": ["ต้องเลือก Display ก่อน"]}, 400
+                configurator.persist_xorg_display_rotate(output=output, rotate=rotate)
+            else:
+                return {"status": "error", "errors": [f"Unknown target: {target}"]}, 400
+        except (CommandExecutionError, OSError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        return {"status": "ok", "target": target}
+
     @app.post("/api/display/persist-remove")
     def display_persist_remove() -> tuple[dict[str, object], int] | dict[str, object]:
         """ลบไฟล์ persist เดี่ยวๆ ทันที (ใช้ตอน toggle ในหน้า /display ถูกปิด) — ไม่ต้องรอกด
