@@ -146,6 +146,21 @@
               </select>
             </div>
             <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted" for="resolutionSelect">Resolution</label>
+              <select id="resolutionSelect" disabled
+                      class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition disabled:opacity-50">
+                <option value="">กำลังโหลด...</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted" for="refreshRateSelect">Refresh Rate</label>
+              <select id="refreshRateSelect" disabled
+                      class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition disabled:opacity-50">
+                <option value="">—</option>
+              </select>
+              <p class="text-[0.7rem] text-faint" id="resolutionModesHint">กำลังตรวจสอบรายการความละเอียดที่จอรองรับ...</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
               <label class="text-[0.75rem] font-semibold text-muted" for="touchDevice">Touchscreen</label>
               <select id="touchDevice" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
                 {% for t in touch_devices %}<option value="{{ t.name }}">{{ t.name }}{% if t.xinput_id is not none %} (id: {{ t.xinput_id }}){% endif %}</option>{% endfor %}
@@ -635,6 +650,9 @@
   var preview      = document.getElementById("monitorPreview");
   var previewLabel = document.getElementById("previewLabel");
   var outputSelect = document.getElementById("displayOutput");
+  var resolutionSelect = document.getElementById("resolutionSelect");
+  var refreshRateSelect = document.getElementById("refreshRateSelect");
+  var resolutionModesHint = document.getElementById("resolutionModesHint");
   var touchSelect  = document.getElementById("touchDevice");
   var xDisplayInput   = document.getElementById("xDisplay");
   var persistSession  = document.getElementById("persistSession");
@@ -785,6 +803,112 @@
     });
   }
 
+  // ── Resolution + Refresh Rate (ผ่าน GNOME/mutter ApplyMonitorsConfig, ไม่ใช่ xrandr ตรงๆ) ──
+  // mirror ตาม GNOME Settings > Displays: เลือก Resolution ก่อน แล้ว Refresh Rate cascade
+  // ตาม mode จริงที่จอรองรับในความละเอียดนั้น (ไม่ใช่ค่าตายตัว) — resolutionModeId สุดท้าย
+  // ที่ resolve ได้จะถูกส่งไปกับ payload ตอน Apply เท่านั้น (ไม่ส่งถ้าโหลดรายการไม่สำเร็จ
+  // หรือ user ไม่ได้แตะช่องนี้เลยและจอ query ไม่ได้ เช่น session เป็น Openbox)
+  var modesByResolution = {};
+  var monitorModesLoaded = false;
+
+  function formatRate(rate) {
+    var n = parseFloat(rate);
+    return isNaN(n) ? (rate + " Hz") : (n.toFixed(2) + " Hz");
+  }
+
+  function populateRefreshRateOptions(key, preferModeId) {
+    if (!refreshRateSelect) return;
+    refreshRateSelect.innerHTML = "";
+    var modes = (modesByResolution[key] || []).slice().sort(function (a, b) {
+      return parseFloat(b.rate) - parseFloat(a.rate);
+    });
+    modes.forEach(function (m) {
+      var opt = document.createElement("option");
+      opt.value = m.modeId;
+      opt.textContent = formatRate(m.rate);
+      refreshRateSelect.appendChild(opt);
+    });
+    var fallback = modes.filter(function (m) { return m.isCurrent; })[0]
+      || modes.filter(function (m) { return m.isPreferred; })[0]
+      || modes[0];
+    var toSelect = (preferModeId && modes.some(function (m) { return m.modeId === preferModeId; }))
+      ? preferModeId
+      : (fallback ? fallback.modeId : "");
+    if (toSelect) refreshRateSelect.value = toSelect;
+  }
+
+  function populateResolutionOptions(modes) {
+    modesByResolution = {};
+    modes.forEach(function (m) {
+      var key = m.width + "x" + m.height;
+      if (!modesByResolution[key]) modesByResolution[key] = [];
+      modesByResolution[key].push(m);
+    });
+    var keys = Object.keys(modesByResolution).sort(function (a, b) {
+      var pa = a.split("x").map(Number), pb = b.split("x").map(Number);
+      return (pb[0] * pb[1]) - (pa[0] * pa[1]);
+    });
+    if (!resolutionSelect) return;
+    resolutionSelect.innerHTML = "";
+    keys.forEach(function (key) {
+      var parts = key.split("x");
+      var opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = parts[0] + " × " + parts[1];
+      resolutionSelect.appendChild(opt);
+    });
+    var currentMode = modes.filter(function (m) { return m.isCurrent; })[0]
+      || modes.filter(function (m) { return m.isPreferred; })[0]
+      || modes[0];
+    var currentKey = currentMode ? (currentMode.width + "x" + currentMode.height) : keys[0];
+    if (currentKey) resolutionSelect.value = currentKey;
+    populateRefreshRateOptions(resolutionSelect.value, currentMode ? currentMode.modeId : null);
+  }
+
+  function disableResolutionControls(message) {
+    monitorModesLoaded = false;
+    if (resolutionSelect) {
+      resolutionSelect.innerHTML = '<option value="">ไม่พร้อมใช้งาน</option>';
+      resolutionSelect.disabled = true;
+    }
+    if (refreshRateSelect) {
+      refreshRateSelect.innerHTML = '<option value="">—</option>';
+      refreshRateSelect.disabled = true;
+    }
+    if (resolutionModesHint) {
+      resolutionModesHint.textContent = message;
+      resolutionModesHint.className = "text-[0.7rem] text-danger";
+    }
+  }
+
+  function loadMonitorModes() {
+    fetch("{{ url_for('display_monitors_xml_modes') }}")
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, body: d }; }); })
+      .then(function (res) {
+        var body = res.body || {};
+        if (!res.ok || body.status !== "ok" || !body.modes || !body.modes.length) {
+          disableResolutionControls((body.errors && body.errors[0]) || "ไม่พบรายการความละเอียดที่จอรองรับ");
+          return;
+        }
+        monitorModesLoaded = true;
+        if (resolutionSelect) resolutionSelect.disabled = false;
+        if (refreshRateSelect) refreshRateSelect.disabled = false;
+        if (resolutionModesHint) {
+          resolutionModesHint.textContent = "ตั้งค่าผ่าน GNOME/mutter (ApplyMonitorsConfig) — เขียนลง monitors.xml ของ user ที่ login กราฟิกอยู่ตอนนี้" + (body.connector ? " (" + body.connector + ")" : "");
+          resolutionModesHint.className = "text-[0.7rem] text-faint";
+        }
+        populateResolutionOptions(body.modes);
+      })
+      .catch(function () { disableResolutionControls("โหลดรายการความละเอียดไม่สำเร็จ (fetch error)"); });
+  }
+  loadMonitorModes();
+
+  if (resolutionSelect) {
+    resolutionSelect.addEventListener("change", function () {
+      populateRefreshRateOptions(resolutionSelect.value, null);
+    });
+  }
+
   function setResult(msg, status) {
     if (applyResult) {
       applyResult.className = "msg text-[0.82rem] " + (status === "success" || status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
@@ -808,6 +932,9 @@
     };
     if (decoupleTouchRotation && decoupleTouchRotation.checked) {
       config.touchRotate = selectedTouchRotation;
+    }
+    if (monitorModesLoaded && refreshRateSelect && refreshRateSelect.value) {
+      config.resolutionModeId = refreshRateSelect.value;
     }
     return config;
   }

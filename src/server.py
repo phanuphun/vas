@@ -1084,6 +1084,50 @@ def create_app() -> Flask:
             "touchRotations": devices.touch_rotations,
         }
 
+    @app.get("/api/display/monitors-xml/modes")
+    def display_monitors_xml_modes() -> "tuple[dict[str, object], int] | dict[str, object]":
+        """คืนรายการความละเอียด/ความถี่รีเฟรชที่จอรองรับจริง (query ผ่าน D-Bus GetCurrentState
+        ของ mutter — เหตุผลเดียวกับ _write_system_monitors_xml) ใช้เติม dropdown Resolution/
+        Refresh Rate ในหน้าเว็บ — ไม่ได้ apply อะไรจริง แค่ query อ่านค่าอย่างเดียว"""
+        query_user = _desktop_user()
+        if not query_user:
+            return {
+                "status": "error",
+                "errors": ["หา user ที่ login session กราฟิกอยู่ตอนนี้ไม่เจอ — ต้องมี session ที่ active อยู่อย่างน้อย 1 คน"],
+            }, 400
+        session_type = collect_accounts_service_status(query_user).session_type
+        if session_type == "openbox":
+            return {
+                "status": "error",
+                "errors": [
+                    f"user {query_user} ที่ login session กราฟิกอยู่ตอนนี้ตั้ง session เป็น Openbox — "
+                    "Openbox ไม่มี mutter/GNOME Shell ให้เรียก D-Bus"
+                ],
+            }, 400
+        session = find_x_session_for_user(query_user)
+        if session is None:
+            return {"status": "error", "errors": [f"หา DISPLAY ของ user {query_user} ไม่เจอ (ต้องมี X session ที่กำลังทำงานอยู่จริง)"]}, 400
+        x_display, uid = session
+        manager = MonitorsXmlManager(DisplayCommandRunner())
+        serial, connector, modes, error = manager.get_available_modes(query_user, x_display, uid)
+        if error:
+            return {"status": "error", "errors": [f"อ่านรายการความละเอียดที่จอรองรับผ่าน D-Bus (mutter) ไม่สำเร็จ — {error}"]}, 500
+        return {
+            "status": "ok",
+            "connector": connector,
+            "modes": [
+                {
+                    "modeId": m.mode_id,
+                    "width": m.width,
+                    "height": m.height,
+                    "rate": m.rate,
+                    "isCurrent": m.is_current,
+                    "isPreferred": m.is_preferred,
+                }
+                for m in modes
+            ],
+        }
+
     @app.post("/api/display/apply")
     def display_apply() -> tuple[dict[str, object], int] | dict[str, object]:
         payload = request.get_json(silent=True) or {}
@@ -1108,6 +1152,11 @@ def create_app() -> Flask:
         # เขียนทับค่า persistDisplayRotateXorg กลับเป็น normal ถ้า user login ไม่มี
         # ~/.config/monitors.xml ของตัวเอง (ดู docs/kiosk-user-monitor-rotation-investigation.md)
         persist_monitors_xml = bool(payload.get("persistMonitorsXml", False))
+        # resolutionModeId: mode_id ที่ได้จาก /api/display/monitors-xml/modes (เช่น
+        # "1920x1080@60.000") — ถ้ามีค่า จะเปลี่ยนความละเอียด/ความถี่รีเฟรชผ่าน D-Bus ของ
+        # mutter ตรงๆ (ApplyMonitorsConfig) ก่อนเสมอ แทนการยิง xrandr --mode ตรงๆ เหตุผล
+        # เดียวกับที่ persistMonitorsXml ต้องเขียนผ่าน D-Bus แทน xrandr rotate ตรงๆ
+        resolution_mode_id = str(payload.get("resolutionModeId", "")).strip() or None
 
         devices = collect_display_devices(x_display=x_display)
         errors = validate_display_apply(output, touch, rotate, devices)
@@ -1119,6 +1168,10 @@ def create_app() -> Flask:
         runner = DisplayCommandRunner()
         configurator = DisplayConfigurator(runner)
         try:
+            if resolution_mode_id:
+                resolution_error = _apply_monitor_resolution(resolution_mode_id, rotate)
+                if resolution_error:
+                    return {"status": "error", "errors": [resolution_error]}, 500
             configurator.apply_runtime(
                 output=output, touch=touch, rotate=rotate, touch_rotate=touch_rotate, x_display=x_display
             )
@@ -1148,6 +1201,7 @@ def create_app() -> Flask:
             "persistXorg": persist_xorg,
             "persistDisplayRotateXorg": persist_display_rotate_xorg,
             "persistMonitorsXml": persist_monitors_xml,
+            "resolutionModeId": resolution_mode_id,
         }
 
     @app.post("/api/display/persist-write")
@@ -3800,6 +3854,51 @@ def _write_system_monitors_xml(rotate: str) -> "str | None":
         detail_suffix = f" — รายละเอียด: {error_detail}" if error_detail else ""
         return f"อ่านค่าฮาร์ดแวร์จอผ่าน D-Bus (mutter) ไม่สำเร็จ{detail_suffix}"
     manager.write_system_level(state, rotate)
+    return None
+def _apply_monitor_resolution(mode_id: str, rotate: str) -> "str | None":
+    """เปลี่ยนความละเอียด/ความถี่รีเฟรชจอผ่าน D-Bus ของ mutter ตรงๆ (ApplyMonitorsConfig)
+    แทนการยิง `xrandr --mode` ตรงๆ — เหตุผลเดียวกับ _write_system_monitors_xml() ข้างบน
+
+    **ต้อง requery serial ใหม่ทุกครั้งก่อน apply เสมอ** (เรียก get_available_modes() สดๆ ใน
+    ฟังก์ชันนี้เอง ไม่รับ serial จาก caller) — ห้ามใช้ serial ที่ frontend เก็บไว้ตอนโหลด
+    dropdown ครั้งแรก เพราะ mutter invalidate serial ทุกครั้งที่มีการเปลี่ยน config แม้เปลี่ยน
+    จากที่อื่นก็ตาม ถ้า serial ไม่ตรงกับปัจจุบัน ApplyMonitorsConfig จะถูกปฏิเสธ
+
+    คืน error message (str) ถ้าล้มเหลว, None ถ้าสำเร็จ — caller ต้องรายงาน error กลับไปหน้าเว็บ
+    เสมอ เหมือน _write_system_monitors_xml()
+    """
+    query_user = _desktop_user()
+    if not query_user:
+        return "หา user ที่ login session กราฟิกอยู่ตอนนี้ไม่เจอ — ต้องมี session ที่ active อยู่อย่างน้อย 1 คน"
+    session_type = collect_accounts_service_status(query_user).session_type
+    if session_type == "openbox":
+        return (
+            f"user {query_user} ที่ login session กราฟิกอยู่ตอนนี้ตั้ง session เป็น Openbox — "
+            "Openbox ไม่มี mutter/GNOME Shell ให้เรียก D-Bus (เปลี่ยนความละเอียดผ่าน GNOME "
+            "เป็นกลไกของ mutter เท่านั้น ไม่เกี่ยวกับ Openbox) ถ้าต้องการใช้ automation นี้ ต้อง "
+            "เปลี่ยน session ของ kiosk user เป็น GNOME ก่อนชั่วคราว (หน้า Kiosk > ประเภท session) "
+            "แล้ว reboot/re-login ให้ session เป็น GNOME จริงก่อนกลับมาลองใหม่อีกครั้ง"
+        )
+    session = find_x_session_for_user(query_user)
+    if session is None:
+        return f"หา DISPLAY ของ user {query_user} ไม่เจอ (ต้องมี X session ที่กำลังทำงานอยู่จริง)"
+    x_display, uid = session
+    manager = MonitorsXmlManager(DisplayCommandRunner())
+    serial, connector, modes, error = manager.get_available_modes(query_user, x_display, uid)
+    if error or serial is None or connector is None:
+        detail_suffix = f" — รายละเอียด: {error}" if error else ""
+        return f"อ่านรายการความละเอียดที่จอรองรับผ่าน D-Bus (mutter) ไม่สำเร็จ{detail_suffix}"
+    matched = next((m for m in modes if m.mode_id == mode_id), None)
+    if matched is None:
+        return (
+            f"ไม่พบ mode '{mode_id}' ในรายการที่จอรองรับตอนนี้ — อาจมีการเปลี่ยนแปลงฮาร์ดแวร์จอ"
+            "ไปแล้ว ลองโหลดรายการความละเอียดใหม่อีกครั้งก่อน"
+        )
+    apply_error = manager.apply_monitors_config(
+        query_user, x_display, uid, serial, connector, mode_id, rotate,
+    )
+    if apply_error:
+        return f"เปลี่ยนความละเอียดจอผ่าน D-Bus (mutter) ไม่สำเร็จ — {apply_error}"
     return None
 
 
