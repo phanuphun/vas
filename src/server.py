@@ -3735,11 +3735,27 @@ def _xauthority_for_user(username: str) -> str | None:
     try:
         import pwd
 
-        home = Path(pwd.getpwnam(username).pw_dir)  # type: ignore[attr-defined]
+        pw_record = pwd.getpwnam(username)
+        home = Path(pw_record.pw_dir)
+        uid = pw_record.pw_uid
     except (ImportError, KeyError, OSError):
         return None
-    candidate = home / ".Xauthority"
-    return candidate.as_posix() if candidate.exists() else None
+
+    # ลำดับความสำคัญ: session ที่ผ่าน GDM3 (default บน Ubuntu 22.04 desktop/kiosk) ไม่สร้าง
+    # ~/.Xauthority ในโฮมไดเรกทอรีแบบดั้งเดิม (แบบ startx/xinit) เลย — systemd-logind/GDM
+    # เก็บ auth cookie ต่อ session ไว้ที่ /run/user/<uid>/gdm/Xauthority แทน บั๊กจริงที่เจอ:
+    # VAS server รันเป็น root (systemd service, ไม่มี X session ของตัวเอง) เดา path ผิดเป็น
+    # home/.Xauthority ที่ไม่มีอยู่จริง ทำให้ xrandr ต่อ X server ไม่ได้ ("Can't open display")
+    # แล้วหน้าเว็บเข้าใจผิดว่า "ไม่พบจอ" ทั้งที่จอต่ออยู่จริง (ดู docs/kiosk-user-monitor-rotation-investigation.md
+    # สำหรับปัญหาที่เกี่ยวข้องเรื่อง per-session state ของ GNOME/mutter)
+    candidates = (
+        Path(f"/run/user/{uid}/gdm/Xauthority"),
+        home / ".Xauthority",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.as_posix()
+    return None
 
 
 def _desktop_user() -> str | None:
