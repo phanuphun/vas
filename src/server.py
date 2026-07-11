@@ -1021,6 +1021,15 @@ def create_app() -> Flask:
         kiosk_target_has_own_monitors_xml = (
             user_has_own_monitors_xml(kiosk_target.home) if kiosk_target is not None else False
         )
+        # session_type ของ kiosk user เป้าหมาย (gnome/openbox) — ใช้เตือน/ปิดปุ่ม Persist
+        # monitors.xml ล่วงหน้าตั้งแต่หน้าเว็บโหลด แทนที่จะปล่อยให้กดแล้วเจอ error จาก D-Bus
+        # ทีหลัง (Openbox ไม่มี mutter ให้เรียก GetCurrentState ได้เลย — ดู
+        # _write_system_monitors_xml() ที่เช็คจุดเดียวกันนี้ตอน submit ด้วย)
+        kiosk_target_session_type = (
+            collect_accounts_service_status(kiosk_target_username).session_type
+            if kiosk_target_username is not None
+            else "gnome"
+        )
 
         return render_template(
             "display.html",
@@ -1041,6 +1050,7 @@ def create_app() -> Flask:
             monitors_xml=collect_monitors_xml_system_status(),
             kiosk_target_username=kiosk_target_username,
             kiosk_target_has_own_monitors_xml=kiosk_target_has_own_monitors_xml,
+            kiosk_target_session_type=kiosk_target_session_type,
             screen_blank_options=SCREEN_BLANK_OPTIONS,
             screen_blank_config=collect_screen_blank_config_status(),
             current_screen_blank=current_screen_blank,
@@ -3768,14 +3778,27 @@ def _write_system_monitors_xml(rotate: str) -> "str | None":
     query_user = _desktop_user()
     if not query_user:
         return "หา user ที่ login session กราฟิกอยู่ตอนนี้ไม่เจอ — ต้องมี session ที่ active อยู่อย่างน้อย 1 คน"
+    # เช็ค session_type ที่ตั้งค่าไว้ก่อนยิง D-Bus เลย — Openbox ไม่มี mutter/GNOME Shell ให้
+    # เรียก GetCurrentState ได้ตั้งแต่ต้น (พบจริง: ผู้ใช้ตั้ง kiosk-user เป็น Openbox ไว้ทดสอบ
+    # แล้วมาเปิด toggle นี้ ได้ error message เดิมที่ generic เกินไปจนเดาสาเหตุไม่ออก)
+    session_type = collect_accounts_service_status(query_user).session_type
+    if session_type == "openbox":
+        return (
+            f"user {query_user} ที่ login session กราฟิกอยู่ตอนนี้ตั้ง session เป็น Openbox — "
+            "Openbox ไม่มี mutter/GNOME Shell ให้เรียก D-Bus (monitors.xml เป็นกลไกของ "
+            "GNOME/mutter เท่านั้น ไม่เกี่ยวกับ Openbox) ถ้าต้องการใช้ automation นี้ ต้องเปลี่ยน "
+            "session ของ kiosk user เป็น GNOME ก่อนชั่วคราว (หน้า Kiosk > ประเภท session) แล้ว "
+            "reboot/re-login ให้ session เป็น GNOME จริงก่อนกลับมากดปุ่มนี้อีกครั้ง"
+        )
     session = find_x_session_for_user(query_user)
     if session is None:
         return f"หา DISPLAY ของ user {query_user} ไม่เจอ (ต้องมี X session ที่กำลังทำงานอยู่จริง)"
     x_display, uid = session
     manager = MonitorsXmlManager(DisplayCommandRunner())
-    state = manager.get_current_state(query_user, x_display, uid)
+    state, error_detail = manager.get_current_state(query_user, x_display, uid)
     if state is None:
-        return "อ่านค่าฮาร์ดแวร์จอผ่าน D-Bus (mutter) ไม่สำเร็จ — เช็คว่า session ตอนนี้เป็น GNOME/mutter จริงไหม"
+        detail_suffix = f" — รายละเอียด: {error_detail}" if error_detail else ""
+        return f"อ่านค่าฮาร์ดแวร์จอผ่าน D-Bus (mutter) ไม่สำเร็จ{detail_suffix}"
     manager.write_system_level(state, rotate)
     return None
 

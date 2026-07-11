@@ -153,9 +153,17 @@ class MonitorsXmlManager:
     def __init__(self, runner: CommandRunner) -> None:
         self.runner = runner
 
-    def get_current_state(self, username: str, x_display: str, uid: int) -> "MonitorState | None":
+    def get_current_state(
+        self, username: str, x_display: str, uid: int
+    ) -> "tuple[MonitorState | None, str | None]":
         """เรียก GetCurrentState ผ่าน D-Bus ของ session ที่ username เป็นเจ้าของอยู่ตอนนี้
         คืนจอตัวแรกที่เจอ (เครื่อง vending มีจอเดียวเสมอในทางปฏิบัติปัจจุบัน)
+
+        คืน (MonitorState, None) ถ้าสำเร็จ, คืน (None, error_detail) ถ้าล้มเหลว —
+        error_detail เป็นข้อความ diagnostic จริง (stderr ของ gdbus หรือเหตุผลที่ parse
+        ไม่ได้) ต้องส่งกลับให้ผู้ใช้เห็นเสมอ ห้ามคืนแค่ None เฉยๆ เพราะแยกไม่ออกว่าล้มเหลว
+        เพราะ session ไม่ใช่ GNOME/mutter, D-Bus service ยังไม่พร้อม, หรือ parser เอง (best-
+        effort regex, ดู docstring บนสุดของไฟล์) มีปัญหา
 
         DBUS_SESSION_BUS_ADDRESS คำนวณจาก uid ตรงๆ ได้ (/run/user/<uid>/bus เป็น path
         มาตรฐานของ systemd user session ไม่ต้อง query แบบเดียวกับ DISPLAY)
@@ -173,10 +181,18 @@ class MonitorsXmlManager:
             check=False,
         )
         if self.runner.dry_run:
-            return None
+            return None, None
         if result.returncode != 0:
-            return None
-        return parse_get_current_state_output(result.stdout)
+            detail = (result.stderr or result.stdout or "").strip()
+            return None, detail or f"gdbus exit code {result.returncode} (ไม่มี stderr/stdout)"
+        state = parse_get_current_state_output(result.stdout)
+        if state is None:
+            return None, (
+                "เรียก D-Bus สำเร็จ (gdbus exit code 0) แต่ parse ผลลัพธ์ไม่ได้ — "
+                "parser นี้ยังเป็น best-effort regex ยังไม่เคย proof กับ output จริงบนเครื่องนี้ "
+                f"(raw output: {result.stdout.strip()[:300]!r})"
+            )
+        return state, None
 
     def write_system_level(
         self,

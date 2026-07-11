@@ -294,7 +294,12 @@
             (session ที่ active อยู่ตอนนี้) เพื่อ query ค่าฮาร์ดแวร์จอจริง แล้วเขียนไฟล์ระดับเครื่อง
             <code class="text-[0.7rem] bg-surface px-1 rounded font-mono">/etc/xdg/monitors.xml</code> ให้เอง — ไม่ต้องเข้า GNOME Settings บนจอเครื่องจริงเลย
           </p>
-          {% if kiosk_target_username and kiosk_target_has_own_monitors_xml %}
+          {% if kiosk_target_session_type == "openbox" %}
+          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-danger/8 border-danger/25 text-[0.78rem] text-[#9b2226]">
+            <iconify-icon icon="lucide:ban" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+            <span>Kiosk user เป้าหมายตอนนี้ (<strong>{{ kiosk_target_username }}</strong>) ตั้ง session เป็น <strong>Openbox</strong> — Openbox ไม่มี GNOME Shell/mutter รันอยู่ด้วย จึงไม่มี D-Bus ให้ VAS เรียก query ค่าฮาร์ดแวร์จอ ปุ่มด้านล่างถูกปิดใช้งานไว้ — ถ้าต้องการใช้ฟีเจอร์นี้ ต้องสลับ session ของ kiosk user เป็น <strong>GNOME</strong> ก่อนชั่วคราว (หน้า Kiosk &gt; ประเภท session) แล้ว reboot/re-login ก่อน</span>
+          </div>
+          {% elif kiosk_target_username and kiosk_target_has_own_monitors_xml %}
           <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-caution/8 border-caution/25 text-[0.78rem] text-[#92660b]">
             <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
             <span>Kiosk user เป้าหมายตอนนี้ (<strong>{{ kiosk_target_username }}</strong>) มี monitors.xml ของตัวเองอยู่แล้ว — ไฟล์ของตัวเองชนะ system-level เสมอ ดังนั้นค่าที่เขียนที่นี่จะ<strong>ไม่มีผล</strong>กับ user คนนี้จนกว่าจะลบไฟล์ส่วนตัวของเขาออกก่อน</span>
@@ -306,11 +311,11 @@
           </div>
           {% endif %}
           <div class="flex items-center justify-between gap-4">
-            <span class="text-[0.82rem] text-ink">เขียน /etc/xdg/monitors.xml ผ่าน D-Bus (Persist monitors.xml)</span>
+            <span class="text-[0.82rem] {{ 'text-faint' if kiosk_target_session_type == 'openbox' else 'text-ink' }}">เขียน /etc/xdg/monitors.xml ผ่าน D-Bus (Persist monitors.xml)</span>
             <div class="flex items-center gap-2">
               <span class="text-[0.68rem] text-faint" id="persistMonitorsXmlRemoveMsg"></span>
-              <label class="toggle-switch">
-                <input id="persistMonitorsXml" type="checkbox" {{ 'checked' if monitors_xml.has_signature else '' }}>
+              <label class="toggle-switch {{ 'opacity-50 cursor-not-allowed' if kiosk_target_session_type == 'openbox' else '' }}" title="{{ 'ปิดใช้งานเพราะ session ปัจจุบันเป็น Openbox ไม่มี mutter/D-Bus' if kiosk_target_session_type == 'openbox' else '' }}">
+                <input id="persistMonitorsXml" type="checkbox" {{ 'checked' if monitors_xml.has_signature else '' }} {{ 'disabled' if kiosk_target_session_type == 'openbox' else '' }}>
                 <div class="toggle-track"><div class="toggle-thumb"></div></div>
               </label>
             </div>
