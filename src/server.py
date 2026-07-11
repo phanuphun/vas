@@ -3713,10 +3713,55 @@ def _system_snapshot_dir_label() -> str:
 def _default_x_display() -> str:
     session_owner = find_x11_session_owner()
     if session_owner:
-        _name, display = session_owner
+        name, display = session_owner
         if display:
             return display
+        # loginctl ไม่ได้ให้ค่า Display property มา (พบจริงบน Ubuntu 22.04 + GDM3:
+        # `loginctl show-session <id> -p Display` คืนค่าว่างแม้ session เป็น x11/seat0
+        # จริง) — เดิม fallback ไป ":0" เฉยๆ ซึ่งผิดได้ (พิสูจน์แล้วว่า DISPLAY จริงบน
+        # เครื่องทดสอบคือ ":1") หา DISPLAY จริงจาก environment ของ process ที่ user
+        # นั้นเป็นเจ้าของแทนก่อน ค่อย fallback ":0" เป็นทางเลือกสุดท้ายจริงๆ
+        discovered = _find_display_for_user(name)
+        if discovered:
+            return discovered
     return ":0"
+
+
+def _find_display_for_user(username: str) -> str | None:
+    """หาค่า DISPLAY จริงจาก /proc/<pid>/environ ของ process ที่ user นี้เป็นเจ้าของ
+
+    ใช้แทนการเดา ":0" คงที่ตอนที่ loginctl ไม่รายงาน Display property มาให้ (เจอจริงบน
+    Ubuntu 22.04 + GDM3 บาง session) — root (ซึ่ง VAS server รันเป็นอยู่แล้ว) อ่าน
+    /proc/<pid>/environ ของ process ผู้ใช้อื่นได้เสมอไม่ว่า permission ไฟล์จะเป็นอะไร
+    """
+    try:
+        import pwd
+
+        uid = pwd.getpwnam(username).pw_uid
+    except (ImportError, KeyError, OSError):
+        return None
+
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return None
+
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        environ_path = Path(f"/proc/{pid}/environ")
+        try:
+            if environ_path.stat().st_uid != uid:
+                continue
+            data = environ_path.read_bytes()
+        except OSError:
+            continue
+        for field in data.split(b"\x00"):
+            if field.startswith(b"DISPLAY="):
+                value = field[len(b"DISPLAY=") :].decode("utf-8", "ignore").strip()
+                if value:
+                    return value
+    return None
 
 
 def _default_xauthority() -> str | None:
