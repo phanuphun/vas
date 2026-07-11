@@ -201,56 +201,34 @@
         </div>
       </div>
 
-      <!-- Persist หลัง Login (.xprofile) card -->
-      <div class="bg-card border border-line/10 rounded-xl">
+      <!-- Persist หลัง Login (.xprofile) card — under maintenance, disabled -->
+      <div class="bg-card border border-line/10 rounded-xl opacity-60">
         <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-4">
           <div class="flex items-center gap-2">
             <iconify-icon icon="lucide:user" width="14" height="14" class="text-faint"></iconify-icon>
             <h2 class="text-[0.9rem] font-semibold text-ink">การตั้งค่าหลัง Login (.xprofile)</h2>
           </div>
-          <span class="zone {{ 'zone-info' if display_config.has_signature else 'zone-mute' }}">{{ 'ตั้งค่าแล้ว' if display_config.has_signature else 'ยังไม่ได้ตั้งค่า' }}</span>
+          <span class="zone zone-mute">อยู่ระหว่างการปรับปรุง</span>
         </div>
-        <div class="flex flex-col gap-3 p-4">
-          <p class="text-[0.78rem] text-muted leading-relaxed">
-            เขียนสคริปต์ <code class="text-[0.7rem] bg-surface px-1 rounded font-mono">display-session.sh</code> แล้วเรียกจาก
-            <code class="text-[0.7rem] bg-surface px-1 rounded font-mono">~/.xprofile</code> ของ<strong>เฉพาะ user ที่ login อยู่ตอนกด Apply เท่านั้น</strong> —
-            ทำงานหลัง login (รอ 5 วินาที แล้วเช็คซ้ำสูงสุด 30 ครั้งว่าจอ/ทัชพร้อมหรือยัง) ก่อนจะหมุนจอ/ปรับ touch ให้จริง
-            ใช้เมื่อต้องการตั้งค่าเฉพาะ user คนใดคนหนึ่งบนเครื่องที่มีหลาย user (เช่น ค่าของ kiosk-user ต่างจาก hapymed)
-          </p>
-          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-caution/8 border-caution/25 text-[0.78rem] text-[#92660b]">
-            <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>พบว่าถ้าเปิด toggle นี้พร้อมกับ <strong>"Persist touch ใน Xorg"</strong> ในรอบเดียวกัน touch อาจเพี้ยนได้ — เป็นคนละ mechanism ที่เขียนทับ Coordinate Transformation Matrix คนละจังหวะเวลา (ตัวนี้เขียนตอน login, อีกตัวเขียนตอน X server เริ่มก่อน login) จึงตั้งเป็น <strong>optional ต้อง toggle เองเสมอ ไม่มี default เปิดให้</strong> แนะนำให้ทดสอบทีละอย่าง เปิดตัวเดียว reboot เช็คผลก่อน ค่อยเปิดอีกตัว</span>
-          </div>
-          <div class="flex items-center justify-between gap-4">
-            <span class="text-[0.82rem] text-ink">สร้าง .xprofile + display-session.sh (Persist at login)</span>
-            <div class="flex items-center gap-2">
-              <span class="text-[0.68rem] text-faint" id="persistSessionRemoveMsg"></span>
-              <label class="toggle-switch">
-                <input id="persistSession" type="checkbox" {{ 'checked' if display_config.has_signature else '' }}>
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-              </label>
-            </div>
-          </div>
-          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นี้ตั้งไว้แล้วจริง — <strong>เปิด toggle = เขียนไฟล์ทันที, ปิด toggle = ลบไฟล์ทันที</strong> โดยใช้ค่าจอ/ทัช/ทิศทางที่เลือกไว้ในการ์ด Monitor Setting ด้านบน ณ ขณะนั้น ไม่ต้องรอกด Apply</p>
+        <div class="flex items-center justify-between gap-4 p-4">
+          <span class="text-[0.82rem] text-faint">สร้าง .xprofile + display-session.sh (Persist at login)</span>
+          <label class="toggle-switch opacity-50 cursor-not-allowed" title="อยู่ระหว่างการปรับปรุง">
+            <input id="persistSession" type="checkbox" disabled>
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
         </div>
       </div>
 
       <!-- Persist ระดับเครื่อง (Xorg — ก่อน Login) card -->
       <div class="bg-card border border-line/10 rounded-xl">
-        <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-4">
-          <div class="flex items-center gap-2">
-            <iconify-icon icon="lucide:server" width="14" height="14" class="text-faint"></iconify-icon>
-            <h2 class="text-[0.9rem] font-semibold text-ink">ตั้งค่าระดับเครื่อง (Xorg — ก่อน Login)</h2>
-          </div>
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:server" width="14" height="14" class="text-faint"></iconify-icon>
+          <h2 class="text-[0.9rem] font-semibold text-ink">ตั้งค่าระดับเครื่อง (Xorg — ก่อน Login)</h2>
         </div>
         <div class="flex flex-col gap-3 p-4">
-          <p class="text-[0.78rem] text-muted leading-relaxed">
-            ไฟล์ในหมวดนี้ถูก X server อ่าน<strong>ตอนเริ่มทำงานครั้งแรก ก่อนมีใคร login เลย</strong> (ก่อนหน้าจอ GDM greeter จะขึ้นด้วยซ้ำ)
-            มีผลกับ<strong>ทุก user บนเครื่องเหมือนกันหมด</strong> ไม่ผูกกับ home ของใครคนใดคนหนึ่ง และไม่มีการรอ/เช็คซ้ำแบบ script ต่อ user ด้านบน
-          </p>
           <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-accent/6 border-accent/20 text-[0.78rem] text-ink">
             <iconify-icon icon="lucide:info" width="14" height="14" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>ใช้ได้ผลดีที่สุดกับ session ที่ไม่มีตัวจัดการจอของตัวเอง เช่น <strong>Openbox</strong> (แนะนำให้ใช้กับ kiosk-user) — session แบบ <strong>GNOME</strong> (เช่น GDM greeter หรือ user ที่ตั้ง session type เป็น gnome) มี GNOME Shell/mutter คอยเขียนทับค่านี้กลับเป็น normal อีกทีตอน compositor เริ่มทำงาน ถ้าเป็นกรณีนี้ยังต้องพึ่ง ".xprofile" การ์ดด้านบนแทนอยู่ดี</span>
+            <span>เหมาะกับ <strong>Openbox</strong> เท่านั้น — session แบบ <strong>GNOME</strong> จะเขียนทับค่านี้กลับเป็น normal</span>
           </div>
           <div class="flex flex-col gap-3">
             <div class="flex items-center justify-between gap-4">
@@ -274,7 +252,6 @@
               </div>
             </div>
           </div>
-          <p class="text-[0.7rem] text-faint">Toggle เป็น <strong>ON</strong> อัตโนมัติถ้าเครื่องมีไฟล์นั้นตั้งไว้แล้วจริง — <strong>เปิด toggle = เขียนไฟล์ทันที, ปิด toggle = ลบไฟล์ทันที</strong> โดยใช้ค่าจอ/ทัช/ทิศทางที่เลือกไว้ในการ์ด Monitor Setting ด้านบน ณ ขณะนั้น ไม่ต้องรอกด Apply (ไฟล์ 98-... ถูกโหลดก่อน 99-... เสมอ แต่คนละ toggle กัน ไม่ชนกัน)</p>
         </div>
       </div>
 
@@ -288,26 +265,15 @@
           <span class="zone {{ 'zone-info' if monitors_xml.has_signature else 'zone-mute' }}">{{ 'ตั้งค่าแล้ว' if monitors_xml.has_signature else 'ยังไม่ได้ตั้งค่า' }}</span>
         </div>
         <div class="flex flex-col gap-3 p-4">
-          <p class="text-[0.78rem] text-muted leading-relaxed">
-            แก้ปัญหาที่ session แบบ <strong>GNOME</strong> (mutter) เขียนทับค่าหมุนจอกลับเป็น normal เสมอ ถ้า user ที่ login ไม่มี
-            <code class="text-[0.7rem] bg-surface px-1 rounded font-mono">~/.config/monitors.xml</code> ของตัวเอง — VAS เรียก D-Bus ของ mutter
-            (session ที่ active อยู่ตอนนี้) เพื่อ query ค่าฮาร์ดแวร์จอจริง แล้วเขียนไฟล์ระดับเครื่อง
-            <code class="text-[0.7rem] bg-surface px-1 rounded font-mono">/etc/xdg/monitors.xml</code> ให้เอง — ไม่ต้องเข้า GNOME Settings บนจอเครื่องจริงเลย
-          </p>
           {% if kiosk_target_session_type == "openbox" %}
           <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-danger/8 border-danger/25 text-[0.78rem] text-[#9b2226]">
             <iconify-icon icon="lucide:ban" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>Kiosk user เป้าหมายตอนนี้ (<strong>{{ kiosk_target_username }}</strong>) ตั้ง session เป็น <strong>Openbox</strong> — Openbox ไม่มี GNOME Shell/mutter รันอยู่ด้วย จึงไม่มี D-Bus ให้ VAS เรียก query ค่าฮาร์ดแวร์จอ ปุ่มด้านล่างถูกปิดใช้งานไว้ — ถ้าต้องการใช้ฟีเจอร์นี้ ต้องสลับ session ของ kiosk user เป็น <strong>GNOME</strong> ก่อนชั่วคราว (หน้า Kiosk &gt; ประเภท session) แล้ว reboot/re-login ก่อน</span>
+            <span>Kiosk user (<strong>{{ kiosk_target_username }}</strong>) เป็น Openbox — ไม่มี mutter/D-Bus ปิดใช้งานปุ่มนี้ไว้</span>
           </div>
           {% elif kiosk_target_username and kiosk_target_has_own_monitors_xml %}
           <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-caution/8 border-caution/25 text-[0.78rem] text-[#92660b]">
             <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>Kiosk user เป้าหมายตอนนี้ (<strong>{{ kiosk_target_username }}</strong>) มี monitors.xml ของตัวเองอยู่แล้ว — ไฟล์ของตัวเองชนะ system-level เสมอ ดังนั้นค่าที่เขียนที่นี่จะ<strong>ไม่มีผล</strong>กับ user คนนี้จนกว่าจะลบไฟล์ส่วนตัวของเขาออกก่อน</span>
-          </div>
-          {% elif kiosk_target_username %}
-          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-accent/6 border-accent/20 text-[0.78rem] text-ink">
-            <iconify-icon icon="lucide:info" width="14" height="14" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>Kiosk user เป้าหมายตอนนี้คือ <strong>{{ kiosk_target_username }}</strong> — ยังไม่มี monitors.xml ของตัวเอง ค่าระดับเครื่องนี้จะมีผลกับ user คนนี้ทันที</span>
+            <span>Kiosk user (<strong>{{ kiosk_target_username }}</strong>) มี monitors.xml ของตัวเองอยู่แล้ว — ค่านี้จะไม่มีผล</span>
           </div>
           {% endif %}
           <div class="flex items-center justify-between gap-4">
@@ -320,7 +286,6 @@
               </label>
             </div>
           </div>
-          <p class="text-[0.7rem] text-faint">ต้องมี session กราฟิกแบบ GNOME/mutter ที่ active อยู่ตอนนั้นอย่างน้อย 1 คน (ใครก็ได้ ไม่จำเป็นต้องเป็น kiosk user) เพื่อให้ VAS ยิง D-Bus ขอค่าฮาร์ดแวร์จอจริงได้ — <strong>เปิด toggle = เขียนไฟล์ทันที, ปิด toggle = ลบไฟล์ทันที</strong> ใช้ทิศทางที่เลือกไว้ในการ์ด Monitor Setting ด้านบน ณ ขณะนั้น</p>
         </div>
       </div>
 
@@ -537,27 +502,36 @@
 
       <div class="flex flex-col gap-4">
         {% for key, icon, path, title, desc, ok, status_text, cfg_key in cfg_files %}
-        <div class="bg-card border border-line/10 rounded-xl overflow-hidden" id="cfg-card-{{ key }}">
+        {% set is_wip = (key == "xprofile") %}
+        <div class="bg-card border border-line/10 rounded-xl overflow-hidden {{ 'opacity-60' if is_wip else '' }}" id="cfg-card-{{ key }}">
           <!-- Card header -->
-          <button type="button" onclick="toggleConfig('{{ key }}')"
-                  class="w-full flex items-start gap-4 px-4 py-4 text-left hover:bg-surface/50 transition-colors group">
+          <button type="button" onclick="toggleConfig('{{ key }}')" {{ 'disabled aria-disabled="true" title="อยู่ระหว่างการปรับปรุง"' if is_wip else '' }}
+                  class="w-full flex items-start gap-4 px-4 py-4 text-left transition-colors group {{ 'cursor-not-allowed' if is_wip else 'hover:bg-surface/50' }}">
             <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
               <iconify-icon icon="{{ icon }}" width="16" height="16" class="text-muted"></iconify-icon>
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-semibold text-[0.88rem] text-ink font-display">{{ title }}</span>
+                {% if is_wip %}
+                <span class="zone zone-mute">อยู่ระหว่างการปรับปรุง</span>
+                {% else %}
                 <span class="zone {{ 'zone-safe' if ok else 'zone-caution' }}">{{ 'OK' if ok else 'WARN' }}</span>
+                {% endif %}
               </div>
               <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ path }}</code>
+              {% if not is_wip %}
               <p class="text-[0.73rem] text-muted mt-1 leading-snug">{{ desc | safe }}</p>
               <div class="flex items-center gap-1 mt-1.5">
                 <iconify-icon icon="{{ 'lucide:check-circle' if ok else 'lucide:alert-circle' }}" width="11" height="11" class="{{ 'text-safe' if ok else 'text-caution' }}"></iconify-icon>
                 <span class="text-[0.68rem] {{ 'text-safe' if ok else 'text-caution' }}">{{ status_text }}</span>
               </div>
+              {% endif %}
             </div>
+            {% if not is_wip %}
             <iconify-icon icon="lucide:chevron-down" width="15" height="15"
                           class="text-faint flex-shrink-0 mt-1 transition-transform" id="chevron-{{ key }}"></iconify-icon>
+            {% endif %}
           </button>
 
           <!-- File content (hidden initially) -->
