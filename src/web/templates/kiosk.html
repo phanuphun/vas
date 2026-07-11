@@ -155,6 +155,20 @@
           </div>
           <span class="readiness-zone zone {{ 'zone-safe' if readiness.autostart_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autostart_ok else 'ยังไม่ครบ' }}</span>
         </div>
+
+        {# MOCKUP — แถวนี้ยังไม่ผูกกับ readiness object จริง (ไม่นับรวมใน "X จาก Y ขั้นตอน" ด้านบน) #}
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-t border-line/6" data-readiness="os-notifications">
+          <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-surface">
+            <iconify-icon icon="lucide:bell-off" width="15" height="15" class="readiness-icon text-faint"></iconify-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <span class="text-[0.85rem] font-semibold text-ink">แจ้งเตือนระบบปฏิบัติการ</span>
+            <p class="readiness-desc text-[0.72rem] text-muted mt-0.5">
+              ตั้งค่าที่แท็บ <strong class="font-semibold">เปิดแอปอัตโนมัติ</strong> — ยังเป็น mockup UI เท่านั้น
+            </p>
+          </div>
+          <span class="readiness-zone zone zone-mute">Mockup</span>
+        </div>
       </div>
 
       <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
@@ -424,6 +438,13 @@
             <input id="kioskRestartDelay" type="number" min="0" value="{{ autostart.restart_delay }}" oninput="updateScriptPreview()"
                    class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
           </div>
+
+          <div class="flex flex-col gap-1.5" style="max-width:240px;">
+            <label class="text-[0.75rem] font-semibold text-muted" for="kioskAutoReloadMinutes">รีโหลดเบราว์เซอร์อัตโนมัติทุก (นาที)</label>
+            <input id="kioskAutoReloadMinutes" type="number" min="0" value="{{ autostart.auto_reload_minutes }}" oninput="updateScriptPreview()"
+                   class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+            <p class="text-[0.7rem] text-faint">0 = ปิด — มีผลเฉพาะตอน "รีสตาร์ทอัตโนมัติ" เปิดอยู่ด้วยเท่านั้น กันเคสหน้าเว็บ error ค้าง (เช่น client-side exception) ที่ไม่ทำให้เบราว์เซอร์ปิดเองจนตรวจจับไม่ได้</p>
+          </div>
         </div>
       </div>
 
@@ -447,6 +468,50 @@
             </label>
           </div>
           {% endfor %}
+        </div>
+      </div>
+
+      {# ══════════ MOCKUP — UI เท่านั้น ยังไม่เชื่อม backend/logic จริง ══════════
+         ปิด popup/แจ้งเตือนระดับ Ubuntu (แยกจาก chrome flags ด้านบนซึ่งเป็นของจริง) #}
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-[0.88rem] font-semibold text-ink">ปิดการแจ้งเตือนของระบบปฏิบัติการ</h3>
+            <p class="text-[0.72rem] text-faint mt-0.5">ป้องกัน popup/แจ้งเตือนระดับ Ubuntu ที่ user อาจกดโต้ตอบได้ระหว่างใช้งาน kiosk (เช่น อัปเกรดเวอร์ชัน, update-notifier)</p>
+          </div>
+          <span class="zone zone-mute flex-shrink-0">Mockup</span>
+        </div>
+        <div id="os-notify-list" class="flex flex-col">
+          {% set os_notify_defs = [
+            ("release_upgrade", "ปิด popup แจ้งอัปเกรดเวอร์ชัน Ubuntu", "ตั้ง Prompt=never ที่ /etc/update-manager/release-upgrades", true),
+            ("update_notifier_autostart", "ปิด icon/แจ้งเตือน update-notifier ตอน runtime", "ปิด autostart entry ของ update-notifier สำหรับ user คีออสที่เลือกไว้", true),
+            ("needrestart_prompt", "ปิด prompt ของ needrestart ตอน apt upgrade", "ตั้งค่าให้ restart service ที่จำเป็นอัตโนมัติแบบเงียบ ไม่ถามระหว่างใช้งาน", false),
+            ("hold_packages", "กันแพ็กเกจที่เกี่ยวข้องถูกอัปเดตพฤติกรรมเปลี่ยน", "apt-mark hold บน update-notifier และ update-manager", false),
+          ] %}
+          {% for key, label, desc, mock_checked in os_notify_defs %}
+          <div class="flex items-center justify-between gap-4 px-4 py-3 {{ '' if loop.last else 'border-b border-line/6' }}">
+            <div class="min-w-0">
+              <span class="text-[0.84rem] font-semibold text-ink">{{ label }}</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">{{ desc }}</p>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" class="os-notify-toggle" data-notify-key="{{ key }}"
+                     {{ 'checked' if mock_checked else '' }} onchange="updateOsNotifyMockNote()">
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="px-4 py-3 border-t border-line/8 bg-accent/5 flex items-start gap-2">
+          <iconify-icon icon="lucide:info" width="13" height="13" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+          <p id="os-notify-mock-note" class="text-[0.72rem] text-muted">ตอนนี้เป็นแค่ UI mockup — สวิตช์และปุ่มด้านล่างยังไม่บันทึกค่าจริงหรือแก้ไฟล์ใดๆ ในระบบ</p>
+        </div>
+        <div class="px-4 pb-4 pt-1">
+          <button type="button" onclick="mockSaveOsNotifySettings()"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-line/15 rounded-lg bg-card text-muted text-[0.82rem] font-semibold hover:bg-surface transition-colors cursor-pointer">
+            <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>
+            บันทึก (mockup — ยังไม่ implement)
+          </button>
         </div>
       </div>
 
@@ -533,7 +598,20 @@
         "gnome"
       ) %}
 
-      {% set cfg_files = [gdm_card, accounts_service_card, openbox_autostart_card, autostart_desktop_card, kiosk_launch_script_card] %}
+      {# MOCKUP — ค่าทั้งหมดในนี้ hardcode ไว้เพื่อดู UI เท่านั้น ยังไม่อ่านไฟล์จริงจากเครื่อง #}
+      {% set release_upgrades_card = (
+        "release_upgrades",
+        "lucide:bell-off",
+        "/etc/update-manager/release-upgrades",
+        "Release Upgrade Prompt (Mockup)",
+        "ตัวอย่างไฟล์หลังปิดการแจ้งเตือนอัปเกรดเวอร์ชัน — เนื้อหานี้เป็น mockup แบบ hardcode ยังไม่ได้อ่านจากเครื่องจริง",
+        true,
+        "ตัวอย่าง: Prompt=never (mockup)",
+        "[DEFAULT]\nPrompt=never",
+        "all"
+      ) %}
+
+      {% set cfg_files = [gdm_card, accounts_service_card, openbox_autostart_card, autostart_desktop_card, kiosk_launch_script_card, release_upgrades_card] %}
 
       <div class="flex flex-col gap-4">
         {% for key, icon, path, title, desc, ok, status_text, mock_content, scope in cfg_files %}
@@ -681,20 +759,34 @@
     return state;
   }
 
+  // ── MOCKUP: "ปิดการแจ้งเตือนของระบบปฏิบัติการ" — UI เท่านั้น ไม่มีการเรียก API/บันทึกจริง ──
+  function updateOsNotifyMockNote() {
+    var note = document.getElementById("os-notify-mock-note");
+    if (note) note.textContent = "ตอนนี้เป็นแค่ UI mockup — การเปลี่ยนสวิตช์นี้ยังไม่ถูกบันทึกหรือส่งไป backend จริง";
+  }
+  function mockSaveOsNotifySettings() {
+    alert("Mockup เท่านั้น — ยังไม่เชื่อมต่อ API หรือ logic จริง");
+  }
+
   // ── สร้างข้อความ preview script ให้ตรงกับที่ build_kiosk_launch_script() จะเขียนจริง ──
   function buildScriptPreviewText() {
     var urlEl = document.getElementById("kioskUrl");
     var restartEl = document.getElementById("kioskRestartEnabled");
     var delayEl = document.getElementById("kioskRestartDelay");
+    var autoReloadEl = document.getElementById("kioskAutoReloadMinutes");
     var url = (urlEl && urlEl.value.trim()) || "{{ autostart.url }}";
     var restartEnabled = restartEl ? restartEl.checked : true;
     var delay = delayEl ? (parseInt(delayEl.value, 10) || 0) : {{ autostart.restart_delay }};
+    var autoReloadMinutes = autoReloadEl ? Math.max(0, parseInt(autoReloadEl.value, 10) || 0) : 0;
     var flags = getChromeFlagsState();
     var tokens = ["--kiosk"];
     CHROME_FLAG_DEFS.forEach(function (f) {
       if (flags[f.key]) tokens.push(f.flag);
     });
     var command = "chromium " + tokens.join(" ") + " " + url;
+    if (restartEnabled && autoReloadMinutes > 0) {
+      command = "timeout " + (autoReloadMinutes * 60) + "s " + command;
+    }
     var lines = ["#!/usr/bin/env bash"];
     lines.push("LOG_FILE=\"$HOME/.config/vending-auto-setup/kiosk-launch.log\"");
     lines.push("mkdir -p \"$(dirname \"$LOG_FILE\")\"");
@@ -1076,12 +1168,14 @@
     var urlEl = document.getElementById("kioskUrl");
     var restartEl = document.getElementById("kioskRestartEnabled");
     var delayEl = document.getElementById("kioskRestartDelay");
+    var autoReloadEl = document.getElementById("kioskAutoReloadMinutes");
     apiRequest("POST", "/api/kiosk/autostart", {
       username: username,
       session_type: currentSessionType,
       url: urlEl ? urlEl.value.trim() : "",
       restart_enabled: restartEl ? restartEl.checked : true,
       restart_delay: delayEl ? parseInt(delayEl.value, 10) || 0 : 2,
+      auto_reload_minutes: autoReloadEl ? Math.max(0, parseInt(autoReloadEl.value, 10) || 0) : 0,
       chrome_flags: getChromeFlagsState(),
     }).then(function (result) {
       if (result.ok) {

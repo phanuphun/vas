@@ -213,41 +213,31 @@ EndSection
 
 ## 7. Checklist สิ่งที่ยัง "ไม่ยืนยัน" — ต้องทำก่อนแก้โค้ดจริง
 
-- [ ] **Proof B** (ให้ไว้แล้วในบทสนทนา ยังไม่ได้รัน): ทดสอบว่า raw `xrandr --rotate` (แบบที่ `display-session.sh` เรียก) เขียน `monitors.xml` ให้ `kiosk-user` เองหรือไม่ — คาดว่า "ไม่" (สมมติฐานจากเอกสารหัวข้อ 4.2) แต่ยังไม่ได้ทดสอบจริง
-  ```bash
-  sudo -u kiosk-user env DISPLAY=:0 XAUTHORITY=/home/kiosk-user/.Xauthority \
-    xrandr --output HDMI-1 --rotate left
-  sleep 3
-  sudo test -f /home/kiosk-user/.config/monitors.xml && echo "ถูกสร้าง" || echo "ยังไม่ถูกสร้าง"
-  ```
+> **อัปเดต 2026-07-11**: proof รอบใหม่ทำบนเครื่องทดสอบ `ubuntu2204-first-test` (VirtualBox VM, user `first` แทน `hapymed` เดิม, `kiosk-user` ยังคงเป็นชื่อเดียวกัน) **ไม่ใช่เครื่อง `hapymed-sterile-00` ต้นฉบับ** — กลไกที่พิสูจน์ (mutter/monitors.xml fallback) เป็นพฤติกรรมระดับ OS/GNOME ไม่ผูกกับ hardware เครื่องใดเครื่องหนึ่ง จึงเชื่อถือได้ข้ามเครื่อง แต่ **ค่า vendor/product/serial/rate ที่ query ได้ยังเป็นค่าเฉพาะของเครื่องทดสอบนี้เท่านั้น** ต้อง query ใหม่ทุกครั้งที่ deploy เครื่องจริง — รายละเอียดคำสั่งฉบับเต็มทุกขั้นตอน (รวม log ผลลัพธ์จริง) ย้ายไปอยู่ที่ `docs/monitors-xml/proof-2026-07-11-option-c-system-level.md` แล้ว เอกสารนี้เก็บไว้แค่สรุปผล
 
-- [ ] **Proof C** (D-Bus): ยืนยันว่า mutter คุม session ของ `kiosk-user` อยู่จริงผ่าน D-Bus interface
+- [x] **Proof B**: raw `xrandr --rotate` (ทดสอบผ่านปุ่ม "Left" + Apply ในหน้าเว็บ VAS ซึ่งเรียก `xrandr` ตรงๆ แบบเดียวกับที่ `display-session.sh` ทำ) **ไม่เขียน `monitors.xml` ของ user นั้นเลย** ตามที่คาดไว้ — ยืนยันด้วย `cat ~/.config/monitors.xml | grep -A3 transform` ไม่มี `<transform>` เพิ่มเข้ามาหลังกด Apply แม้จอจะหมุนจริงบนหน้าจอ (และ touch ก็เพี้ยนเป็น Normal พร้อมกัน ตรงกับ symptom เดิมของปัญหานี้ทั้งหมด)
+
+- [x] **ทดสอบตัวเลือก C** (system-level file) — **สำเร็จ** copy `~/.config/monitors.xml` ของ user ที่มี rotation ตั้งไว้แล้ว (ผ่าน GNOME Settings > Displays > Apply > Keep Changes ซึ่งเป็นช่องทางเดียวที่เขียน `<transform>` เข้าไฟล์ได้จริง) ไปที่ `/etc/xdg/monitors.xml` แล้วสลับไป session ของ `kiosk-user` (GDM fast user switch) — `kiosk-user` **ไม่มี** `~/.config/monitors.xml` เป็นของตัวเองเลย แต่ `xrandr --query` ในฐานะ `kiosk-user` แสดง `Virtual1 connected primary 1080x1920+0+0 left` (สลับ width/height + keyword `left` = หมุนถูกต้องจริง) — พิสูจน์ว่า mutter fallback ไปอ่าน `/etc/xdg/monitors.xml` ได้จริงตามเอกสารต้นฉบับของ mutter (หัวข้อ 4)
+
+- [ ] **Proof C** (D-Bus): ยืนยันว่า mutter คุม session ของ `kiosk-user` อยู่จริงผ่าน D-Bus interface โดยตรง — ยังไม่ได้รันคำสั่งนี้แยก (อนุมานว่า mutter คุมอยู่จริงจากผลตัวเลือก C ข้างบนทางอ้อม แต่ยังไม่ได้ proof ตรงๆ ผ่าน `gdbus introspect`)
   ```bash
   sudo -u kiosk-user env DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u kiosk-user)/bus \
     gdbus introspect --session --dest org.gnome.Mutter.DisplayConfig \
     --object-path /org/gnome/Mutter/DisplayConfig
   ```
+  ⚠️ **DISPLAY กับ user id ในคำสั่งข้างบนเป็นแค่ตัวอย่าง ห้าม hardcode `:0`** — พิสูจน์แล้วรอบนี้ว่า DISPLAY ของแต่ละ session เปลี่ยนไปมาได้จริง (เจอทั้ง `:0` และ `:1` สลับกันไปมาระหว่าง user บนเครื่องเดียวกัน) ต้อง query แบบ dynamic ก่อนเสมอ (ดูวิธีใน `docs/monitors-xml/proof-2026-07-11-option-c-system-level.md`)
 
-- [ ] **เช็คค่า rate จริง** ผ่าน D-Bus ก่อนจะเอาไปเขียนไฟล์ใดๆ (อย่าเชื่อเลขกลม `60` จากไฟล์ที่แคปมา)
+- [ ] **เช็คค่า rate จริง** ผ่าน D-Bus `GetCurrentState` ก่อนจะเอาไปเขียนไฟล์ใดๆ แบบ automated — รอบนี้ proof ผ่านการ **copy ไฟล์ที่มีอยู่แล้วตรงๆ** (ค่าจริงจาก mutter เขียนเองตอน user กด Apply ผ่าน Settings ไม่ใช่พิมพ์มือ) จึงไม่ต้อง query D-Bus แยกในรอบนี้ — แต่ถ้าจะทำ automation (เขียนไฟล์ใหม่ทุกครั้งตอน provision เครื่อง) ยังต้อง query ค่าจริงผ่าน D-Bus เสมอ ห้ามพิมพ์ค่าตายตัว
   ```bash
-  sudo -u kiosk-user env DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u kiosk-user)/bus \
+  sudo -u <reference-user> env DISPLAY=<display-จริง> DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u <reference-user>)/bus \
     gdbus call --session --dest org.gnome.Mutter.DisplayConfig \
     --object-path /org/gnome/Mutter/DisplayConfig \
     --method org.gnome.Mutter.DisplayConfig.GetCurrentState
   ```
 
-- [ ] **ทดสอบตัวเลือก A** (copy user-level file): copy `/home/hapymed/.config/monitors.xml` → `/home/kiosk-user/.config/monitors.xml` (พร้อม chown) แล้ว reboot เช็คว่า `kiosk-user` หมุนจอถูกตั้งแต่ login แรกไหม
+- [ ] **ทดสอบตัวเลือก A** (copy user-level file) — ข้ามไปเพราะตัวเลือก C สำเร็จแล้วและดีกว่า (ไม่ต้องผูกกับ user แต่ละคน) ยังไม่มีความจำเป็นต้องทดสอบ A เพิ่ม เว้นแต่เจอเคสที่ C ใช้ไม่ได้ในอนาคต
 
-- [ ] **ทดสอบตัวเลือก C** (system-level file) — ยังไม่เคยทดสอบเลย เป็นตัวเลือกที่มีโอกาสสูงสุดที่จะเป็นทางแก้ระยะยาวที่ถูกต้อง (ไม่ต้อง maintain ต่อ user)
-  ```bash
-  sudo cat /etc/xdg/monitors.xml 2>/dev/null || echo "ยังไม่มี"
-  sudo cp /home/hapymed/.config/monitors.xml /etc/xdg/monitors.xml
-  sudo chmod 644 /etc/xdg/monitors.xml
-  sudo reboot
-  # เช็ค xrandr ของ kiosk-user หลัง reboot ว่าหมุนเองไหม โดยที่ kiosk-user ยังไม่มี user-level monitors.xml เลย
-  ```
-
-- [ ] เช็ค policy จริงบนเครื่อง (ว่า user-level ชนะ system-level จริงตามเอกสารไหม) — ยังไม่มีคำสั่งตรงๆ ที่ทดสอบเรื่องนี้แยก ต้องดูผลจาก Proof ข้อ system-level ด้านบนประกอบ
+- [ ] เช็ค policy จริงบนเครื่องว่า **user-level ชนะ system-level จริงไหม** (กรณี user ที่มีไฟล์ของตัวเองอยู่แล้ว เช่น `first`/`hapymed` ควรใช้ไฟล์ตัวเองต่อไป ไม่ถูก `/etc/xdg/monitors.xml` แทนที่) — proof รอบนี้ยังไม่ได้เช็คแยกเรื่องนี้ตรงๆ (เช็คแค่ฝั่ง `kiosk-user` ที่ไม่มี user-level file) ควร proof เพิ่มก่อนขึ้น production จริง
 
 ---
 
@@ -258,7 +248,7 @@ EndSection
 - **ทางเลือกที่น่าจะคุ้มที่สุดให้ proof ก่อน**: ตัวเลือก C (`/etc/xdg/monitors.xml` ระดับเครื่อง) เพราะแก้ปัญหาแบบเดียวกับที่ `99-vending-touchscreen.conf` ทำสำเร็จอยู่แล้ว (ระดับเครื่อง ไม่ผูก user) โดยไม่ต้องเพิ่ม logic ต่อ user เลย
 - **ห้าม hardcode ค่า vendor/product/serial/rate จากเครื่อง `hapymed-sterile-00` ไปใช้ตรงๆ กับเครื่องอื่น** — ต้อง query ค่าจริงผ่าน D-Bus (`GetCurrentState`) ของแต่ละเครื่องก่อนเขียนไฟล์เสมอ ถ้าจะทำ automation ให้ query แบบ dynamic ไม่ใช้ template คงที่
 - ไฟล์ที่เกี่ยวข้องในโค้ด: `src/features/display/display.py` (มี comment อธิบายพฤติกรรม compositor override ไว้แล้วที่บรรทัด 154-163), `src/features/kiosk/manager.py` (จุดที่สร้าง user ใหม่ ถ้าจะเพิ่ม logic ตัวเลือก A/B ต้องแก้ตรงนี้)
-- เอกสารที่เกี่ยวข้องในโปรเจกต์ที่ควรอ่านประกอบ: `docs/kiosk-display-touch-order-guide.md`, `docs/display-touchscreen-kiosk-session.md`
+- เอกสารที่เกี่ยวข้องในโปรเจกต์ที่ควรอ่านประกอบ: `docs/kiosk-display-touch-order-guide.md`, `docs/display-touchscreen-kiosk-session.md`, `docs/monitors-xml/proof-2026-07-11-option-c-system-level.md`
 
 ## อ้างอิง
 

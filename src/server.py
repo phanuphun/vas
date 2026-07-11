@@ -83,6 +83,7 @@ from features.wireguard.manager import (
 from features.docker import manager as docker_manager
 from features.kiosk.manager import (
     CHROME_KIOSK_FLAG_DEFS,
+    DEFAULT_AUTO_RELOAD_MINUTES,
     DEFAULT_EXTRA_GROUPS,
     DEFAULT_RESTART_DELAY,
     KioskManager,
@@ -101,6 +102,13 @@ from features.kiosk.manager import (
     normalize_chrome_flags,
     resolve_kiosk_target_user,
     stop_kiosk_mode,
+)
+from features.display.monitors_xml import (
+    MonitorsXmlManager,
+    SYSTEM_MONITORS_XML_PATH,
+    collect_monitors_xml_system_status,
+    find_x_session_for_user,
+    user_has_own_monitors_xml,
 )
 from system.status import GDM_CUSTOM_CONFIG_PATH
 
@@ -1003,6 +1011,17 @@ def create_app() -> Flask:
         current_rotation = devices.rotations.get(default_output, "normal") if default_output else "normal"
         default_touch = devices.touch_devices[0].name if devices.touch_devices else None
         current_touch_rotation = devices.touch_rotations.get(default_touch, "normal") if default_touch else "normal"
+
+        # เช็คว่า kiosk user เป้าหมาย (ตัวเดียวกับที่หน้า "คีออส" ใช้) มี ~/.config/monitors.xml
+        # ของตัวเองอยู่แล้วไหม — ถ้ามี การเขียน system-level (/etc/xdg/monitors.xml) จะไม่มีผล
+        # กับ user คนนี้เลย (user-level ชนะเสมอ) ต้องเตือนในหน้าเว็บ ไม่ใช่ให้เข้าใจผิดเงียบๆ
+        kiosk_users = list_kiosk_linux_users()
+        kiosk_target = resolve_kiosk_target_user(kiosk_users)
+        kiosk_target_username = kiosk_target.username if kiosk_target is not None else None
+        kiosk_target_has_own_monitors_xml = (
+            user_has_own_monitors_xml(kiosk_target.home) if kiosk_target is not None else False
+        )
+
         return render_template(
             "display.html",
             outputs=devices.outputs,
@@ -1019,6 +1038,9 @@ def create_app() -> Flask:
             display_script=collect_display_session_script_status(),
             xorg_touchscreen=collect_xorg_touchscreen_config_status(),
             xorg_display_rotate=collect_xorg_display_rotate_config_status(),
+            monitors_xml=collect_monitors_xml_system_status(),
+            kiosk_target_username=kiosk_target_username,
+            kiosk_target_has_own_monitors_xml=kiosk_target_has_own_monitors_xml,
             screen_blank_options=SCREEN_BLANK_OPTIONS,
             screen_blank_config=collect_screen_blank_config_status(),
             current_screen_blank=current_screen_blank,
@@ -1071,6 +1093,11 @@ def create_app() -> Flask:
         # rotate.conf) คู่กับ persistXorg (99-vending-touchscreen.conf) — ทั้งคู่ X server อ่าน
         # ตอนเริ่มทำงานครั้งแรกก่อน login ไม่ผูก user คนไหน
         persist_display_rotate_xorg = bool(payload.get("persistDisplayRotateXorg", False))
+        # persistMonitorsXml: เขียน /etc/xdg/monitors.xml ระดับเครื่อง ผ่าน D-Bus ของ mutter
+        # ตรงๆ (ไม่ต้องเข้า GNOME Settings บนจอเครื่องจริง) — แก้ปัญหาที่ session แบบ GNOME
+        # เขียนทับค่า persistDisplayRotateXorg กลับเป็น normal ถ้า user login ไม่มี
+        # ~/.config/monitors.xml ของตัวเอง (ดู docs/kiosk-user-monitor-rotation-investigation.md)
+        persist_monitors_xml = bool(payload.get("persistMonitorsXml", False))
 
         devices = collect_display_devices(x_display=x_display)
         errors = validate_display_apply(output, touch, rotate, devices)
@@ -1093,6 +1120,10 @@ def create_app() -> Flask:
                 configurator.persist_xorg(touch=touch, rotate=rotate, touch_rotate=touch_rotate)
             if persist_display_rotate_xorg:
                 configurator.persist_xorg_display_rotate(output=output, rotate=rotate)
+            if persist_monitors_xml:
+                error_message = _write_system_monitors_xml(rotate)
+                if error_message:
+                    return {"status": "error", "errors": [error_message]}, 500
         except (CommandExecutionError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
@@ -1106,6 +1137,7 @@ def create_app() -> Flask:
             "persistSession": persist_session,
             "persistXorg": persist_xorg,
             "persistDisplayRotateXorg": persist_display_rotate_xorg,
+            "persistMonitorsXml": persist_monitors_xml,
         }
 
     @app.post("/api/display/persist-write")
@@ -1142,6 +1174,10 @@ def create_app() -> Flask:
                 if not output:
                     return {"status": "error", "errors": ["ต้องเลือก Display ก่อน"]}, 400
                 configurator.persist_xorg_display_rotate(output=output, rotate=rotate)
+            elif target == "monitors_xml":
+                error_message = _write_system_monitors_xml(rotate)
+                if error_message:
+                    return {"status": "error", "errors": [error_message]}, 500
             else:
                 return {"status": "error", "errors": [f"Unknown target: {target}"]}, 400
         except (CommandExecutionError, OSError, ValueError) as error:
@@ -1165,6 +1201,8 @@ def create_app() -> Flask:
                 configurator.remove_xorg_touch_persist()
             elif target == "xorg_rotate":
                 configurator.remove_xorg_display_rotate_persist()
+            elif target == "monitors_xml":
+                MonitorsXmlManager(DisplayCommandRunner()).remove_system_level()
             else:
                 return {"status": "error", "errors": [f"Unknown target: {target}"]}, 400
         except (CommandExecutionError, OSError, ValueError) as error:
@@ -1205,6 +1243,9 @@ def create_app() -> Flask:
                     configurator.reset_touch_mapping(touch=touch, output=output_name, x_display=x_display)
             else:
                 configurator.reset_touch_mapping(touch=touch, output=None, x_display=x_display)
+            # ล้าง monitors.xml ระดับเครื่องด้วย ให้ Reset กลับไป "ไม่มี VAS ตั้งค่าอะไรเลย"
+            # จริงๆ ทุกที่ในคราวเดียว เหมือนไฟล์ persist อื่นๆ ด้านบน
+            MonitorsXmlManager(runner).remove_system_level()
         except (CommandExecutionError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
@@ -1427,6 +1468,10 @@ def create_app() -> Flask:
             restart_delay = int(payload.get("restart_delay", DEFAULT_RESTART_DELAY))
         except (TypeError, ValueError):
             restart_delay = DEFAULT_RESTART_DELAY
+        try:
+            auto_reload_minutes = max(0, int(payload.get("auto_reload_minutes", DEFAULT_AUTO_RELOAD_MINUTES)))
+        except (TypeError, ValueError):
+            auto_reload_minutes = DEFAULT_AUTO_RELOAD_MINUTES
 
         if session_type not in ("gnome", "openbox"):
             return {"status": "error", "errors": [f"Unknown session type: {session_type}"]}, 400
@@ -1450,6 +1495,7 @@ def create_app() -> Flask:
                 restart_enabled=restart_enabled,
                 restart_delay=restart_delay,
                 chrome_flags=chrome_flags,
+                auto_reload_minutes=auto_reload_minutes,
             )
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
@@ -1460,16 +1506,19 @@ def create_app() -> Flask:
             "username": username, "url": url,
             "restart_enabled": restart_enabled, "restart_delay": restart_delay,
             "chrome_flags_enabled": sum(1 for v in chrome_flags.values() if v),
+            "auto_reload_minutes": auto_reload_minutes,
         })
         _db_config(
             "kiosk", f"autostart:{username}",
             old_value={
                 "url": old_status.url, "restart_enabled": old_status.restart_enabled,
                 "restart_delay": old_status.restart_delay, "chrome_flags": old_status.chrome_flags,
+                "auto_reload_minutes": old_status.auto_reload_minutes,
             },
             new_value={
                 "url": status.url, "restart_enabled": status.restart_enabled,
                 "restart_delay": status.restart_delay, "chrome_flags": status.chrome_flags,
+                "auto_reload_minutes": status.auto_reload_minutes,
             },
         )
         return {
@@ -1479,6 +1528,7 @@ def create_app() -> Flask:
             "restart_enabled": status.restart_enabled,
             "restart_delay": status.restart_delay,
             "chrome_flags": status.chrome_flags,
+            "auto_reload_minutes": status.auto_reload_minutes,
         }
 
     @app.get("/api/kiosk/config-content")
@@ -3626,6 +3676,7 @@ def _kiosk_page_context() -> dict[str, object]:
     autostart_script_preview = build_kiosk_launch_script(
         autostart_status.url, autostart_status.restart_enabled,
         autostart_status.restart_delay, autostart_status.chrome_flags,
+        autostart_status.auto_reload_minutes,
     )
 
     from core.database import list_device_integrations, list_mqtt_brokers
@@ -3652,6 +3703,7 @@ def _kiosk_page_context() -> dict[str, object]:
             "restart_delay": autostart_status.restart_delay,
             "configured": autostart_status.configured,
             "chrome_flags": autostart_status.chrome_flags,
+            "auto_reload_minutes": autostart_status.auto_reload_minutes,
         },
         "autostart_script_preview": autostart_script_preview,
         "chrome_flag_defs": list(CHROME_KIOSK_FLAG_DEFS),
@@ -3704,7 +3756,28 @@ def _allowed_config_paths() -> dict[str, Path]:
         "display_script": _effective_home_script_path(),
         "xorg_touchscreen": Path(XORG_TOUCHSCREEN_CONFIG_PATH),
         "xorg_display_rotate": Path(XORG_DISPLAY_ROTATE_CONFIG_PATH),
+        "monitors_xml": SYSTEM_MONITORS_XML_PATH,
     }
+
+
+def _write_system_monitors_xml(rotate: str) -> "str | None":
+    """เขียน /etc/xdg/monitors.xml ผ่าน D-Bus ของ session ที่ active อยู่ตอนนี้ (แทนที่ขั้นตอน
+    เข้า GNOME Settings > Displays > Apply > Keep Changes บนจอเครื่องจริง — ดู
+    docs/monitors-xml/proof-2026-07-11-option-c-system-level.md) คืน error message (str) ถ้า
+    ล้มเหลว, None ถ้าสำเร็จ — caller ต้องรายงาน error กลับไปหน้าเว็บเสมอ ไม่ใช่เงียบๆ"""
+    query_user = _desktop_user()
+    if not query_user:
+        return "หา user ที่ login session กราฟิกอยู่ตอนนี้ไม่เจอ — ต้องมี session ที่ active อยู่อย่างน้อย 1 คน"
+    session = find_x_session_for_user(query_user)
+    if session is None:
+        return f"หา DISPLAY ของ user {query_user} ไม่เจอ (ต้องมี X session ที่กำลังทำงานอยู่จริง)"
+    x_display, uid = session
+    manager = MonitorsXmlManager(DisplayCommandRunner())
+    state = manager.get_current_state(query_user, x_display, uid)
+    if state is None:
+        return "อ่านค่าฮาร์ดแวร์จอผ่าน D-Bus (mutter) ไม่สำเร็จ — เช็คว่า session ตอนนี้เป็น GNOME/mutter จริงไหม"
+    manager.write_system_level(state, rotate)
+    return None
 
 
 def _system_snapshot_dir_label() -> str:

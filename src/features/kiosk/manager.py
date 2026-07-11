@@ -26,7 +26,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence, cast
 
+from urllib.parse import urlparse
+
 from core.runner import CommandRunner
+from features.display.display import DISPLAY_READY_MARKER_NAME
 from system.status import GDM_CUSTOM_CONFIG_PATH
 from system.utils import dev_fake_installed
 
@@ -40,9 +43,12 @@ PWD_MODULE = cast("Any | None", pwd_module)
 __all__ = [
     "ACCOUNTS_SERVICE_DIR",
     "CHROME_KIOSK_FLAG_DEFS",
+    "DEFAULT_AUTO_RELOAD_MINUTES",
     "DEFAULT_CHROME_FLAGS",
+    "DEFAULT_DISPLAY_WAIT_SECONDS",
     "DEFAULT_EXTRA_GROUPS",
     "DEFAULT_KIOSK_URL",
+    "DEFAULT_NETWORK_WAIT_SECONDS",
     "DEFAULT_RESTART_DELAY",
     "GNOME_XSESSION_ID",
     "KIOSK_MANAGED_COMMENT",
@@ -59,6 +65,7 @@ __all__ = [
     "build_gdm_autologin_config",
     "build_gnome_autostart_desktop",
     "build_kiosk_launch_script",
+    "build_openbox_autostart_preamble",
     "check_url_reachable",
     "collect_accounts_service_status",
     "collect_gdm_autologin_status",
@@ -94,6 +101,16 @@ DEFAULT_RESTART_DELAY = 2
 
 KIOSK_SCRIPT_SIGNATURE = "# vending-auto-config: kiosk-launch"
 KIOSK_DESKTOP_SIGNATURE = "# vending-auto-config: kiosk-autostart-desktop"
+KIOSK_OPENBOX_PREAMBLE_SIGNATURE = "# vending-auto-config: kiosk-openbox-preamble"
+
+# ── Openbox autostart preamble — แก้ปัญหาจอเทาทะมึน + client-side exception ──
+# Openbox ไม่มี compositor/session manager คอยจัดการเหมือน GNOME เลย ทำให้ (1) ไม่มีพื้นหลัง
+# ของตัวเอง เห็นสีเทาดิบของ X root window ตรงๆ เวลา chromium ยังไม่ขึ้น และ (2) chromium
+# autostart ยิงทันทีไม่รอเครือข่าย/จอหมุนเสร็จก่อนเหมือน GNOME session ทำให้บางครั้งเจอ
+# client-side exception ของเว็บแอป (โหลดเร็วกว่าที่เน็ตจะพร้อม) หรือจอ/ทัชไม่ตรงกันชั่วขณะ
+DEFAULT_NETWORK_WAIT_SECONDS = 20
+DEFAULT_DISPLAY_WAIT_SECONDS = 10
+DEFAULT_AUTO_RELOAD_MINUTES = 0  # 0 = ปิด (ไม่รีโหลดเป็นระยะ)
 
 _KIOSK_MIN_UID = 1000
 _KIOSK_MAX_UID = 60000  # ไม่รวม nobody (65534)
@@ -199,6 +216,7 @@ class KioskAutostartStatus:
     restart_delay: int
     configured: bool
     chrome_flags: "dict[str, bool]"
+    auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES
 
 
 @dataclass(frozen=True)
@@ -267,12 +285,16 @@ class KioskManager:
         restart_enabled: bool,
         restart_delay: int,
         chrome_flags: "dict[str, bool] | None" = None,
+        auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES,
     ) -> None:
-        script_content = build_kiosk_launch_script(url, restart_enabled, restart_delay, chrome_flags)
+        script_content = build_kiosk_launch_script(
+            url, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes,
+        )
 
         if session_type == "openbox":
+            preamble = build_openbox_autostart_preamble(url, home)
             script_path = kiosk_openbox_autostart_path(home)
-            self._write_executable(script_path, script_content)
+            self._write_executable(script_path, _insert_after_shebang(script_content, preamble))
             _chown_to_user(script_path, username)
             _chown_to_user(script_path.parent, username)
             return
@@ -324,6 +346,16 @@ class KioskManager:
             path.unlink()
         except FileNotFoundError:
             pass
+
+
+def _insert_after_shebang(script_content: str, extra: str) -> str:
+    """แทรก extra (เช่น openbox preamble) เข้าไปหลัง shebang line แรกของสคริปต์เสมอ — ต้อง
+    รักษา '#!/usr/bin/env bash' ให้เป็นบรรทัดแรกสุดของไฟล์ ไม่งั้น exec ตรงๆ (เช่น
+    Openbox เรียก ./autostart แบบ executable) จะหา interpreter ไม่เจอ"""
+    if script_content.startswith("#!"):
+        first_newline = script_content.index("\n") + 1
+        return script_content[:first_newline] + extra + "\n" + script_content[first_newline:]
+    return extra + "\n" + script_content
 
 
 def _chown_to_user(path: Path, username: str) -> None:
@@ -450,17 +482,72 @@ def build_accounts_service_config(existing_content: str, session_type: str) -> s
     return "\n".join(new_lines) + "\n"
 
 
+def build_openbox_autostart_preamble(
+    url: str,
+    home: Path,
+    network_wait_seconds: int = DEFAULT_NETWORK_WAIT_SECONDS,
+    display_wait_seconds: int = DEFAULT_DISPLAY_WAIT_SECONDS,
+) -> str:
+    """Preamble ที่ใส่ไว้ก่อนเปิด chromium เฉพาะ session แบบ Openbox เท่านั้น (GNOME ไม่ต้อง
+    เพราะ gnome-session/mutter จัดการเรื่องพวกนี้ให้อยู่แล้ว) แก้ 3 อาการที่พบกับ Openbox:
+
+    1. `xsetroot -solid` — Openbox ไม่ paint พื้นหลังของตัวเองเลย ถ้าไม่ตั้งไว้จะเห็นสีเทาดิบ
+       ของ X root window ตอน chromium ยังไม่ขึ้นจอ/กำลังรอ restart
+    2. รอไฟล์ marker ที่ display-session.sh (features/display/display.py) touch ไว้หลังหมุน
+       จอ+ปรับ touch สำเร็จ — กัน chromium เปิด fullscreen ไปก่อนจอจะหมุนเสร็จ (ไม่มี
+       session manager คอยรอเหมือน GNOME) มี timeout กันค้างถ้า marker ไม่มาเลย
+    3. รอ DNS/เครือข่ายพร้อมก่อน (เช็คว่า resolve hostname ของ URL ที่จะเปิดได้ไหม) — กัน
+       เว็บแอปฝั่ง client เจอ error เพราะ chromium โหลดเร็วกว่าที่เน็ตจะพร้อมตอน boot
+    """
+    marker_path = (home / ".config" / "vending-auto-setup" / DISPLAY_READY_MARKER_NAME).as_posix()
+    hostname = urlparse(url).hostname or ""
+
+    network_wait_block = ""
+    if hostname:
+        network_wait_block = (
+            f"# รอ DNS/เครือข่ายพร้อมก่อนเปิดเบราว์เซอร์ (โฮสต์: {hostname}) สูงสุด "
+            f"{network_wait_seconds} วิ\n"
+            f"for _i in $(seq 1 {network_wait_seconds}); do\n"
+            f"  getent hosts {shlex.quote(hostname)} >/dev/null 2>&1 && break\n"
+            "  sleep 1\n"
+            "done\n"
+        )
+
+    return (
+        f"{KIOSK_OPENBOX_PREAMBLE_SIGNATURE}\n"
+        "# Managed by VAS. Manual edits may be overwritten.\n"
+        'xsetroot -solid "#000000" 2>/dev/null || true\n'
+        "\n"
+        f"# รอไฟล์ marker ที่ display-session.sh เขียนตอนหมุนจอเสร็จ (ถ้ามี) สูงสุด "
+        f"{display_wait_seconds} วิ\n"
+        f"for _i in $(seq 1 {display_wait_seconds}); do\n"
+        f"  [ -f {shlex.quote(marker_path)} ] && break\n"
+        "  sleep 1\n"
+        "done\n"
+        "\n"
+        f"{network_wait_block}"
+    )
+
+
 def build_kiosk_launch_script(
     url: str,
     restart_enabled: bool,
     restart_delay: int,
     chrome_flags: "dict[str, bool] | None" = None,
+    auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES,
 ) -> str:
     flags = normalize_chrome_flags(chrome_flags)
     flag_tokens = ["--kiosk"] + [
         item["flag"] for item in CHROME_KIOSK_FLAG_DEFS if flags.get(item["key"], False)
     ]
     command = "chromium " + " ".join(flag_tokens) + " " + shlex.quote(url)
+    # auto_reload_minutes: ปิด chromium เองเป็นระยะแม้ไม่ crash จริง ให้ restart loop ด้านล่าง
+    # เปิดใหม่ให้ — เป็นตาข่ายรองสุดท้ายกันเคส client-side exception ที่ไม่ทำให้ chromium
+    # process ตาย (restart_enabled เดิมช่วยไม่ได้เพราะ process ยังรันอยู่ปกติ) มีผลเฉพาะตอน
+    # restart_enabled เปิดอยู่เท่านั้น — ถ้าปิด restart ไว้ การ kill โดยไม่มีอะไรมาเปิดใหม่ให้
+    # จะยิ่งแย่กว่าเดิม จึงไม่ wrap ให้
+    if restart_enabled and auto_reload_minutes > 0:
+        command = f"timeout {int(auto_reload_minutes) * 60}s {command}"
 
     # เครื่องบางเครื่อง binary ชื่อ chromium-browser (apt) ไม่ใช่ chromium (snap) —
     # collect_kiosk_software_status() ยอมรับทั้งคู่เป็น "ติดตั้งแล้ว" แต่ก่อนหน้านี้สคริปต์
@@ -517,7 +604,14 @@ def build_gnome_autostart_desktop(script_path: Path) -> str:
     )
 
 
-def _parse_kiosk_script(content: str) -> "tuple[str, bool, int, dict[str, bool]]":
+def _parse_kiosk_script(content: str) -> "tuple[str, bool, int, dict[str, bool], int]":
+    # ตัด Openbox preamble (build_openbox_autostart_preamble) ออกก่อนเสมอถ้ามี — preamble มี
+    # for-loop รอ marker/เครือข่ายที่มีบรรทัด "sleep 1" ของตัวเอง ถ้าไม่ตัดออกก่อน regex ด้านล่าง
+    # (โดยเฉพาะ delay_match) อาจไปจับ "sleep 1" ของ preamble แทนที่จะเป็น restart delay จริง
+    sig_index = content.find(KIOSK_SCRIPT_SIGNATURE)
+    if sig_index != -1:
+        content = content[sig_index:]
+
     restart_enabled = bool(re.search(r"^\s*while\s+true\s*;\s*do", content, re.MULTILINE))
     # ใช้ "--kiosk" เป็นจุดยึดแทน "chromium" ตรงๆ เพราะ preamble ของ build_kiosk_launch_script()
     # มีหลายบรรทัดที่ขึ้นต้นด้วยคำว่า chromium เช่นกัน (shell function fallback, log lines) —
@@ -527,7 +621,11 @@ def _parse_kiosk_script(content: str) -> "tuple[str, bool, int, dict[str, bool]]
     delay_match = re.search(r"sleep\s+(\d+)", content)
     delay = int(delay_match.group(1)) if delay_match else DEFAULT_RESTART_DELAY
     chrome_flags = _parse_kiosk_flags(content)
-    return url, restart_enabled, delay, chrome_flags
+    # auto_reload_minutes: อ่านกลับจาก "timeout <seconds>s chromium --kiosk ..." ที่บรรทัดเดียวกับ
+    # --kiosk (ดู build_kiosk_launch_script) — หาไม่เจอ = ปิดอยู่ (ค่า default)
+    reload_match = re.search(r"timeout\s+(\d+)s\s+chromium[^\n]*--kiosk", content)
+    auto_reload_minutes = int(reload_match.group(1)) // 60 if reload_match else DEFAULT_AUTO_RELOAD_MINUTES
+    return url, restart_enabled, delay, chrome_flags, auto_reload_minutes
 
 
 def _parse_kiosk_flags(content: str) -> "dict[str, bool]":
@@ -711,15 +809,17 @@ def collect_kiosk_autostart_status(session_type: str, home: Path) -> KioskAutost
         content_for_parse = script_content
 
     if content_for_parse:
-        url, restart_enabled, restart_delay, chrome_flags = _parse_kiosk_script(content_for_parse)
+        url, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes = _parse_kiosk_script(content_for_parse)
     else:
         url, restart_enabled, restart_delay = DEFAULT_KIOSK_URL, True, DEFAULT_RESTART_DELAY
         chrome_flags = dict(DEFAULT_CHROME_FLAGS)
+        auto_reload_minutes = DEFAULT_AUTO_RELOAD_MINUTES
 
     return KioskAutostartStatus(
         session_type=session_type, home=home,
         url=url, restart_enabled=restart_enabled, restart_delay=restart_delay,
         configured=configured, chrome_flags=chrome_flags,
+        auto_reload_minutes=auto_reload_minutes,
     )
 
 

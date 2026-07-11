@@ -43,6 +43,11 @@ DISPLAY_SESSION_END = f"{DISPLAY_SESSION_SIGNATURE} END"
 SCREEN_BLANK_BEGIN = f"{SCREEN_BLANK_SIGNATURE} BEGIN"
 SCREEN_BLANK_END = f"{SCREEN_BLANK_SIGNATURE} END"
 
+# ไฟล์ marker ที่ display-session.sh touch ไว้หลังหมุนจอ+ปรับ touch สำเร็จ — ใช้เป็นสัญญาณ
+# ให้ autostart script ฝั่ง Openbox (kiosk/manager.py) รอก่อนค่อยเปิด chromium กันเคส chromium
+# เปิด fullscreen ไปก่อนที่จอจะหมุนเสร็จ (Openbox ไม่มี session manager คอยรอเหมือน GNOME)
+DISPLAY_READY_MARKER_NAME = ".display-ready"
+
 # ค่า timeout (วินาที) + label ภาษาไทย — เทียบเท่า GNOME Settings > Power > Screen Blank
 # 0 = ไม่ปิดหน้าจอ (Never) -> xset s off + xset -dpms
 SCREEN_BLANK_OPTIONS: "tuple[tuple[int, str], ...]" = (
@@ -57,6 +62,7 @@ SCREEN_BLANK_OPTIONS: "tuple[tuple[int, str], ...]" = (
 )
 
 __all__ = [
+    "DISPLAY_READY_MARKER_NAME",
     "DISPLAY_SESSION_SIGNATURE",
     "ROTATION_MATRICES",
     "SCREEN_BLANK_OPTIONS",
@@ -71,6 +77,7 @@ __all__ = [
     "build_screen_blank_commands",
     "build_xorg_display_rotate_config",
     "build_xorg_touchscreen_config",
+    "display_ready_marker_path",
     "get_screen_blank_seconds",
     "get_udevadm_touchscreen_names",
     "list_touch_devices",
@@ -240,6 +247,11 @@ class DisplayConfigurator:
         if not self.runner.dry_run and script_path.exists():
             script_path.unlink()
 
+        marker_path = display_ready_marker_path(script_path)
+        print(f"remove {marker_path.as_posix()}")
+        if not self.runner.dry_run and marker_path.exists():
+            marker_path.unlink()
+
     def remove_xorg_touch_persist(self, path: Path = XORG_TOUCHSCREEN_CONFIG_PATH) -> None:
         """ลบเฉพาะไฟล์ 99-vending-touchscreen.conf — ใช้ตอน toggle "Persist touch ใน Xorg" ถูกปิด"""
         print(f"remove {path.as_posix()}")
@@ -346,6 +358,11 @@ class DisplayConfigurator:
         print(f"remove {script_path.as_posix()}")
         if not self.runner.dry_run and script_path.exists():
             script_path.unlink()
+
+        marker_path = display_ready_marker_path(script_path)
+        print(f"remove {marker_path.as_posix()}")
+        if not self.runner.dry_run and marker_path.exists():
+            marker_path.unlink()
 
         print(f"remove {xorg_path.as_posix()}")
         if not self.runner.dry_run and xorg_path.exists():
@@ -527,6 +544,11 @@ def build_xorg_touchscreen_config(touch: str, matrix: str) -> str:
     )
 
 
+def display_ready_marker_path(script_path: Path) -> Path:
+    """path ของ marker file — วางไว้ข้างๆ display-session.sh เสมอ (โฟลเดอร์เดียวกัน)"""
+    return script_path.parent / DISPLAY_READY_MARKER_NAME
+
+
 def build_xorg_display_rotate_config(output: str, rotate: str) -> str:
     """Machine-level Monitor section — X server อ่านตอนเริ่มทำงานครั้งแรก (ก่อน login)
 
@@ -567,8 +589,12 @@ def build_display_session_script(
         # เพราะสคริปต์นี้ถูกสั่งรันแบบ background (`&`) จาก .xprofile ตอน login — ถ้า fail
         # แบบเงียบๆ (หา output/touch ไม่เจอ, permission error ฯลฯ) จะไม่มีร่องรอยให้ debug เลย
         'LOG_FILE="$(cd "$(dirname "$0")" && pwd)/display-session.log"\n'
+        f'MARKER_FILE="$(cd "$(dirname "$0")" && pwd)/{DISPLAY_READY_MARKER_NAME}"\n'
         'exec >>"$LOG_FILE" 2>&1\n'
         'echo "---- $(date -Iseconds) run start (pid $$) ----"\n'
+        # ลบ marker เก่าทิ้งก่อนเสมอ — กัน autostart ฝั่ง Openbox (kiosk/manager.py) เข้าใจผิด
+        # ว่าจอหมุนเสร็จแล้วจากรอบก่อนหน้า ทั้งที่รอบนี้ยังไม่เสร็จ/ยัง fail อยู่
+        'rm -f "$MARKER_FILE"\n'
         f"sleep {delay_seconds}\n"
         f"{display_line}"
         f"OUTPUT={shlex.quote(output)}\n"
@@ -597,6 +623,9 @@ def build_display_session_script(
         '  if xinput list --name-only | grep -Fxq "$TOUCH_DEVICE"; then\n'
         f'    xinput set-prop "$TOUCH_DEVICE" "{COORDINATE_TRANSFORMATION_MATRIX}" $MATRIX\n'
         '    echo "applied OK: output=$OUTPUT rotate=$ROTATE touch=$TOUCH_DEVICE touch_rotate=$TOUCH_ROTATE"\n'
+        # touch marker หลังสำเร็จจริงเท่านั้น — kiosk-launch script ฝั่ง Openbox
+        # (kiosk/manager.py::build_openbox_autostart_preamble) รอไฟล์นี้ก่อนเปิด chromium
+        '    touch "$MARKER_FILE"\n'
         "    exit 0\n"
         "  fi\n"
         '  echo "Waiting for touchscreen ${TOUCH_DEVICE} (${attempt}/${RETRIES})"\n'
