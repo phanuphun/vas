@@ -161,6 +161,15 @@
               <p class="text-[0.7rem] text-faint" id="resolutionModesHint">กำลังตรวจสอบรายการความละเอียดที่จอรองรับ...</p>
             </div>
             <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-muted" for="screenBlankSelect">ปิดหน้าจอเมื่อไม่ใช้งานเกิน</label>
+              <select id="screenBlankSelect" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+                {% for seconds, label in screen_blank_options %}
+                <option value="{{ seconds }}" {{ 'selected' if seconds == current_screen_blank else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <p class="text-[0.7rem] text-faint">ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> (screensaver + DPMS) — เทียบเท่า Ubuntu Settings &gt; Power &gt; Screen Blank</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
               <label class="text-[0.75rem] font-semibold text-muted" for="touchDevice">Touchscreen</label>
               <select id="touchDevice" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
                 {% for t in touch_devices %}<option value="{{ t.name }}">{{ t.name }}{% if t.xinput_id is not none %} (id: {{ t.xinput_id }}){% endif %}</option>{% endfor %}
@@ -213,40 +222,6 @@
               <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
             </button>
           </div>
-        </div>
-
-        <!-- Screen Blank sub-section (รวมเข้ามาจากการ์ดแยกเดิม — คนละ endpoint กับ Apply ด้านบน จึงมี footer/ผลลัพธ์ของตัวเอง) -->
-        <div class="px-4 py-4 border-t border-line/10 flex flex-col gap-4">
-          <div class="flex items-center justify-between gap-4">
-            <div class="flex items-center gap-2">
-              <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
-              <h3 class="text-[0.82rem] font-semibold text-ink">การปิดหน้าจออัตโนมัติ (Screen Blank)</h3>
-            </div>
-            <span id="screenBlankStatus" class="zone {{ 'zone-mute' if current_screen_blank is none else 'zone-info' }}">{{ current_screen_blank_label }}</span>
-          </div>
-          <div class="flex flex-col gap-1.5 max-w-sm">
-            <label class="text-[0.75rem] font-semibold text-muted" for="screenBlankSelect">ปิดหน้าจอเมื่อไม่ใช้งานเกิน</label>
-            <select id="screenBlankSelect" class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
-              {% for seconds, label in screen_blank_options %}
-              <option value="{{ seconds }}" {{ 'selected' if seconds == current_screen_blank else '' }}>{{ label }}</option>
-              {% endfor %}
-            </select>
-            <p class="text-[0.7rem] text-faint">ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> (screensaver + DPMS) — เทียบเท่า Ubuntu Settings &gt; Power &gt; Screen Blank</p>
-          </div>
-          <div class="flex items-center justify-between gap-4">
-            <span class="text-[0.82rem] text-ink">จำค่านี้ไว้หลัง reboot (บันทึกลง .xprofile)</span>
-            <label class="toggle-switch">
-              <input id="persistScreenBlank" type="checkbox" checked>
-              <div class="toggle-track"><div class="toggle-thumb"></div></div>
-            </label>
-          </div>
-        </div>
-        <div class="px-4 py-4 flex items-center justify-between gap-4 border-t border-line/10">
-          <div class="msg text-[0.82rem]" id="screenBlankResult" aria-live="polite"></div>
-          <button id="applyScreenBlank" type="button"
-                  class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
-            <iconify-icon icon="lucide:check" width="14" height="14"></iconify-icon>Apply
-          </button>
         </div>
       </div>
 
@@ -658,6 +633,7 @@
   var persistDisplayRotateXorg = document.getElementById("persistDisplayRotateXorg");
   var persistMonitorsXml = document.getElementById("persistMonitorsXml");
   var applyResult     = document.getElementById("applyResult");
+  var screenBlankSelect = document.getElementById("screenBlankSelect");
 
   // ── Persist toggle เปิด = เขียนไฟล์ทันที, ปิด = ลบไฟล์ทันที (ไม่ต้องรอกด Apply) ─────
   // ตอน hydrate ค่า checked มาจาก has_signature จริงบนเครื่องอยู่แล้ว (server-render) —
@@ -968,25 +944,51 @@
       });
   });
 
+  // Screen Blank เดิมมีปุ่ม Apply แยกของตัวเอง (endpoint /api/display/screen-blank คนละตัวกับ
+  // /api/display/apply) — ผู้ใช้ขอรวม selection ขึ้นมาไว้กับฟิลด์อื่นๆ ด้านบน แล้วตัด section/
+  // ปุ่ม Apply แยกออกไป แต่ให้ "logic การทำงานเหมือนเดิม" คือยังยิงสอง endpoint เดิมเหมือนเดิม
+  // ไม่ได้รวม backend เข้าด้วยกัน แค่ให้ปุ่ม Apply เดียวด้านล่างยิงพร้อมกันทั้งคู่ผ่าน Promise.all
+  // แล้วรวมผลลัพธ์/error เป็นข้อความเดียว — persist เป็น true เสมอ (ค่า default เดิมของ toggle
+  // "จำค่านี้ไว้หลัง reboot" ที่ถูกตัดออกไปพร้อมกับ section นี้)
   function doApply() {
     setResult("Applying...", "");
     var payload = selectedConfig();
-    fetch("{{ url_for('display_apply') }}", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      if (d.status === "ok") {
-        deviceRotations[payload.output] = payload.rotate;
-        if (payload.touch) deviceTouchRotations[payload.touch] = d.touchRotate || payload.rotate;
-        setResult("Applied successfully", "ok");
-        setTimeout(function () { setResult("", ""); }, 3000);
-      } else {
-        setResult("Error: " + (d.errors || []).join(", "), "error");
-      }
-    })
-    .catch(function (e) { setResult("Fetch error: " + e, "error"); });
+    var requests = [
+      fetch("{{ url_for('display_apply') }}", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(function (r) { return r.json(); }),
+    ];
+    if (screenBlankSelect) {
+      requests.push(
+        fetch("{{ url_for('display_screen_blank') }}", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            seconds: parseInt(screenBlankSelect.value, 10) || 0,
+            display: (xDisplayInput ? xDisplayInput.value.trim() : ":0") || ":0",
+            persist: true,
+          }),
+        }).then(function (r) { return r.json(); })
+      );
+    }
+    Promise.all(requests)
+      .then(function (results) {
+        var displayResult = results[0];
+        var blankResult = results[1];
+        var errors = [];
+        if (displayResult.status !== "ok") errors = errors.concat(displayResult.errors || []);
+        if (blankResult && blankResult.status !== "ok") errors = errors.concat(blankResult.errors || []);
+
+        if (errors.length === 0) {
+          deviceRotations[payload.output] = payload.rotate;
+          if (payload.touch) deviceTouchRotations[payload.touch] = displayResult.touchRotate || payload.rotate;
+          setResult("Applied successfully", "ok");
+          setTimeout(function () { setResult("", ""); }, 3000);
+        } else {
+          setResult("Error: " + errors.join(", "), "error");
+        }
+      })
+      .catch(function (e) { setResult("Fetch error: " + e, "error"); });
   }
 
   var applyBtn = document.getElementById("applyDisplayInline");
@@ -1100,62 +1102,6 @@
           btn.disabled = false;
           setWaylandResult("Fetch error: " + e, "error");
         });
-    });
-  });
-
-  // ── Screen Blank (screensaver / DPMS) ────────────────────────────────────
-  var screenBlankSelect  = document.getElementById("screenBlankSelect");
-  var persistScreenBlank = document.getElementById("persistScreenBlank");
-  var screenBlankResult  = document.getElementById("screenBlankResult");
-  var screenBlankStatus  = document.getElementById("screenBlankStatus");
-  var screenBlankLabels  = {};
-  if (screenBlankSelect) {
-    Array.prototype.forEach.call(screenBlankSelect.options, function (opt) {
-      screenBlankLabels[opt.value] = opt.textContent;
-    });
-  }
-
-  function setScreenBlankResult(msg, status) {
-    if (screenBlankResult) {
-      screenBlankResult.className = "msg text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
-      screenBlankResult.textContent = msg;
-    }
-    if (msg && (status === "ok" || status === "error") && window.showToast) {
-      window.showToast(msg, status);
-    }
-  }
-
-  var applyScreenBlankBtn = document.getElementById("applyScreenBlank");
-  if (applyScreenBlankBtn) applyScreenBlankBtn.addEventListener("click", function () {
-    if (!screenBlankSelect) return;
-    var seconds = parseInt(screenBlankSelect.value, 10) || 0;
-    setScreenBlankResult("Applying...", "");
-    applyScreenBlankBtn.disabled = true;
-    fetch("{{ url_for('display_screen_blank') }}", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        seconds: seconds,
-        display: (xDisplayInput ? xDisplayInput.value.trim() : ":0") || ":0",
-        persist: persistScreenBlank ? persistScreenBlank.checked : true,
-      }),
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      applyScreenBlankBtn.disabled = false;
-      if (d.status === "ok") {
-        setScreenBlankResult("Applied successfully", "ok");
-        if (screenBlankStatus) {
-          screenBlankStatus.textContent = screenBlankLabels[String(seconds)] || (seconds + " วินาที");
-          screenBlankStatus.className = "zone zone-info";
-        }
-        setTimeout(function () { setScreenBlankResult("", ""); }, 3000);
-      } else {
-        setScreenBlankResult("Error: " + (d.errors || []).join(", "), "error");
-      }
-    })
-    .catch(function (e) {
-      applyScreenBlankBtn.disabled = false;
-      setScreenBlankResult("Fetch error: " + e, "error");
     });
   });
 
