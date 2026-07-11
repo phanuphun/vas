@@ -3714,16 +3714,19 @@ def _default_x_display() -> str:
     session_owner = find_x11_session_owner()
     if session_owner:
         name, display = session_owner
-        if display:
-            return display
-        # loginctl ไม่ได้ให้ค่า Display property มา (พบจริงบน Ubuntu 22.04 + GDM3:
-        # `loginctl show-session <id> -p Display` คืนค่าว่างแม้ session เป็น x11/seat0
-        # จริง) — เดิม fallback ไป ":0" เฉยๆ ซึ่งผิดได้ (พิสูจน์แล้วว่า DISPLAY จริงบน
-        # เครื่องทดสอบคือ ":1") หา DISPLAY จริงจาก environment ของ process ที่ user
-        # นั้นเป็นเจ้าของแทนก่อน ค่อย fallback ":0" เป็นทางเลือกสุดท้ายจริงๆ
+        # loginctl "Display" property พิสูจน์แล้วว่าเชื่อถือไม่ได้บนเครื่องทดสอบ (Ubuntu
+        # 22.04 + GDM3): บางครั้งคืนค่าว่างเปล่า บางครั้งคืน ":0" (display ของ GDM greeter)
+        # ทั้งที่ user session จริงหลัง login ย้ายไปรันที่ ":1" แล้ว — ใช้ค่านี้ตรงๆ ทำให้
+        # xrandr ต่อ X server ผิดตัว ("Can't open display") แล้วเข้าใจผิดว่าไม่มีจอต่ออยู่
+        # (บั๊กจริงที่เจอ: เดิม trust ค่า loginctl ก่อนเสมอถ้าไม่ว่าง เลยไม่เคยเรียก
+        # _find_display_for_user() ที่หา DISPLAY จริงจาก process environ เลย) — ลอง
+        # หา DISPLAY จริงจาก process environ ก่อนเสมอ เชื่อถือได้กว่า ใช้ค่า loginctl
+        # เป็นแค่ fallback รอง แล้ว ":0" เป็นทางเลือกสุดท้ายจริงๆ
         discovered = _find_display_for_user(name)
         if discovered:
             return discovered
+        if display:
+            return display
     return ":0"
 
 
