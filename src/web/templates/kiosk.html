@@ -433,7 +433,7 @@
             <div class="min-w-0">
               <span class="text-[0.84rem] font-semibold text-ink">{{ f.label }}</span>
               <p class="text-[0.72rem] text-muted mt-0.5">{{ f.desc }}</p>
-              <code class="text-[0.66rem] text-faint font-mono">{{ f.flag }}</code>
+              <code class="text-[0.66rem] text-faint font-mono">{{ f.flag }}{% if f.features %} --disable-features={{ f.features | join(',') }}{% endif %}</code>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" class="chrome-flag-toggle" data-flag-key="{{ f.key }}"
@@ -442,6 +442,59 @@
             </label>
           </div>
           {% endfor %}
+        </div>
+      </div>
+
+      {% if session_type == 'gnome' %}
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">ล็อกทางหลุดออกจาก kiosk ของ GNOME Shell</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">รัน gsettings ตอนเปิดเบราว์เซอร์ทุกครั้ง — เฉพาะ session แบบ GNOME เท่านั้น (Openbox ไม่มีผล)</p>
+        </div>
+        <div id="gnome-lockdown-list" class="flex flex-col">
+          {% for f in gnome_lockdown_flag_defs %}
+          <div class="flex items-center justify-between gap-4 px-4 py-3 {{ '' if loop.last else 'border-b border-line/6' }}">
+            <div class="min-w-0">
+              <span class="text-[0.84rem] font-semibold text-ink">{{ f.label }}</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">{{ f.desc }}</p>
+              <code class="text-[0.66rem] text-faint font-mono">{{ f.command }}</code>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" class="gnome-lockdown-toggle" data-lockdown-key="{{ f.key }}"
+                     {{ 'checked' if autostart.gnome_lockdown_flags.get(f.key, true) else '' }}>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="px-4 py-3 border-t border-line/8 bg-accent/5 flex items-start gap-2">
+          <iconify-icon icon="lucide:info" width="13" height="13" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+          <p class="text-[0.72rem] text-muted">บันทึกพร้อมกับปุ่ม "บันทึกและเปิดใช้งาน" ด้านล่าง — คำสั่งจะถูกแทรกไว้ก่อนเปิด chromium ใน kiosk-launch.sh</p>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-line/8 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-[0.88rem] font-semibold text-ink">ปิดเมนูคลิกขวาบนหน้าเว็บ (Context Menu)</h3>
+            <p class="text-[0.72rem] text-faint mt-0.5">พฤติกรรมของ --kiosk ต่อเมนูคลิกขวาเปลี่ยนไปมาในแต่ละเวอร์ชัน Chromium — ต้องตรวจสอบบนเครื่องจริงก่อนเปิดใช้งานจริง</p>
+          </div>
+          <span class="zone zone-mute flex-shrink-0">Mockup</span>
+        </div>
+        <div class="flex items-center justify-between gap-4 px-4 py-3">
+          <div class="min-w-0">
+            <span class="text-[0.84rem] font-semibold text-ink">ปิดเมนูคลิกขวา (Back/Forward/Reload/Inspect)</span>
+            <p class="text-[0.72rem] text-muted mt-0.5">สำรองไว้เผื่ออนาคต — ยังไม่มี logic จริงเบื้องหลัง</p>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="contextMenuMockToggle" onchange="updateContextMenuMockNote()">
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
+        </div>
+        <div class="px-4 py-3 border-t border-line/8 bg-accent/5 flex items-start gap-2">
+          <iconify-icon icon="lucide:info" width="13" height="13" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+          <p id="context-menu-mock-note" class="text-[0.72rem] text-muted">ตอนนี้เป็นแค่ UI mockup — สวิตช์นี้ยังไม่บันทึกค่าจริงหรือแก้ไฟล์ใดๆ ในระบบ</p>
         </div>
       </div>
 
@@ -789,12 +842,22 @@
   var kioskHome = "{{ home }}";
   var currentSessionType = "{{ session_type }}";
   var CHROME_FLAG_DEFS = {{ chrome_flag_defs | tojson }};
+  var GNOME_LOCKDOWN_DEFS = {{ gnome_lockdown_flag_defs | tojson }};
 
   // ── Chrome flag toggles → รวมสถานะปัจจุบันของ toggle ทั้งหมด ──────
   function getChromeFlagsState() {
     var state = {};
     document.querySelectorAll(".chrome-flag-toggle").forEach(function (el) {
       state[el.getAttribute("data-flag-key")] = el.checked;
+    });
+    return state;
+  }
+
+  // ── GNOME lockdown toggles → รวมสถานะปัจจุบันของ toggle ทั้งหมด (เฉพาะ session gnome) ──
+  function getGnomeLockdownFlagsState() {
+    var state = {};
+    document.querySelectorAll(".gnome-lockdown-toggle").forEach(function (el) {
+      state[el.getAttribute("data-lockdown-key")] = el.checked;
     });
     return state;
   }
@@ -806,6 +869,12 @@
   }
   function mockSaveOsNotifySettings() {
     alert("Mockup เท่านั้น — ยังไม่เชื่อมต่อ API หรือ logic จริง");
+  }
+
+  // ── MOCKUP: "ปิดเมนูคลิกขวาบนหน้าเว็บ" — UI เท่านั้น ไม่มีการเรียก API/บันทึกจริง ──
+  function updateContextMenuMockNote() {
+    var note = document.getElementById("context-menu-mock-note");
+    if (note) note.textContent = "ตอนนี้เป็นแค่ UI mockup — การเปลี่ยนสวิตช์นี้ยังไม่ถูกบันทึกหรือส่งไป backend จริง";
   }
 
   // ── สร้างข้อความ preview script ให้ตรงกับที่ build_kiosk_launch_script() จะเขียนจริง ──
@@ -820,9 +889,15 @@
     var autoReloadMinutes = autoReloadEl ? Math.max(0, parseInt(autoReloadEl.value, 10) || 0) : 0;
     var flags = getChromeFlagsState();
     var tokens = ["--kiosk"];
+    var featureNames = [];
     CHROME_FLAG_DEFS.forEach(function (f) {
-      if (flags[f.key]) tokens.push(f.flag);
+      if (!flags[f.key]) return;
+      tokens.push(f.flag);
+      (f.features || []).forEach(function (name) { featureNames.push(name); });
     });
+    // รวม features ของทุก toggle ที่เปิดอยู่เป็น --disable-features=A,B,C ตัวเดียว —
+    // mirror ตรรกะเดียวกับ build_kiosk_launch_script() ฝั่ง Python (ดูคอมเมนต์ที่นั่น)
+    if (featureNames.length > 0) tokens.push("--disable-features=" + featureNames.join(","));
     var command = "chromium " + tokens.join(" ") + " " + url;
     if (restartEnabled && autoReloadMinutes > 0) {
       command = "timeout " + (autoReloadMinutes * 60) + "s " + command;
@@ -1218,6 +1293,7 @@
       restart_delay: delayEl ? parseInt(delayEl.value, 10) || 0 : 2,
       auto_reload_minutes: autoReloadEl ? Math.max(0, parseInt(autoReloadEl.value, 10) || 0) : 0,
       chrome_flags: getChromeFlagsState(),
+      gnome_lockdown_flags: getGnomeLockdownFlagsState(),
     }).then(function (result) {
       if (result.ok) {
         showToast("บันทึกและเปิดใช้งาน autostart แล้ว", "success");

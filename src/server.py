@@ -86,6 +86,7 @@ from features.kiosk.manager import (
     DEFAULT_AUTO_RELOAD_MINUTES,
     DEFAULT_EXTRA_GROUPS,
     DEFAULT_RESTART_DELAY,
+    GNOME_LOCKDOWN_FLAG_DEFS,
     KioskManager,
     accounts_service_path_for,
     build_kiosk_launch_script,
@@ -100,6 +101,7 @@ from features.kiosk.manager import (
     kiosk_openbox_autostart_path,
     list_kiosk_linux_users,
     normalize_chrome_flags,
+    normalize_gnome_lockdown_flags,
     resolve_kiosk_target_user,
     stop_kiosk_mode,
 )
@@ -1528,6 +1530,10 @@ def create_app() -> Flask:
         restart_enabled = bool(payload.get("restart_enabled", True))
         raw_chrome_flags = payload.get("chrome_flags")
         chrome_flags = normalize_chrome_flags(raw_chrome_flags if isinstance(raw_chrome_flags, dict) else None)
+        raw_gnome_lockdown_flags = payload.get("gnome_lockdown_flags")
+        gnome_lockdown_flags = normalize_gnome_lockdown_flags(
+            raw_gnome_lockdown_flags if isinstance(raw_gnome_lockdown_flags, dict) else None
+        )
         try:
             restart_delay = int(payload.get("restart_delay", DEFAULT_RESTART_DELAY))
         except (TypeError, ValueError):
@@ -1560,6 +1566,7 @@ def create_app() -> Flask:
                 restart_delay=restart_delay,
                 chrome_flags=chrome_flags,
                 auto_reload_minutes=auto_reload_minutes,
+                gnome_lockdown_flags=gnome_lockdown_flags,
             )
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
@@ -1571,6 +1578,7 @@ def create_app() -> Flask:
             "restart_enabled": restart_enabled, "restart_delay": restart_delay,
             "chrome_flags_enabled": sum(1 for v in chrome_flags.values() if v),
             "auto_reload_minutes": auto_reload_minutes,
+            "gnome_lockdown_flags_enabled": sum(1 for v in gnome_lockdown_flags.values() if v),
         })
         _db_config(
             "kiosk", f"autostart:{username}",
@@ -1578,11 +1586,13 @@ def create_app() -> Flask:
                 "url": old_status.url, "restart_enabled": old_status.restart_enabled,
                 "restart_delay": old_status.restart_delay, "chrome_flags": old_status.chrome_flags,
                 "auto_reload_minutes": old_status.auto_reload_minutes,
+                "gnome_lockdown_flags": old_status.gnome_lockdown_flags,
             },
             new_value={
                 "url": status.url, "restart_enabled": status.restart_enabled,
                 "restart_delay": status.restart_delay, "chrome_flags": status.chrome_flags,
                 "auto_reload_minutes": status.auto_reload_minutes,
+                "gnome_lockdown_flags": status.gnome_lockdown_flags,
             },
         )
         return {
@@ -1593,6 +1603,7 @@ def create_app() -> Flask:
             "restart_delay": status.restart_delay,
             "chrome_flags": status.chrome_flags,
             "auto_reload_minutes": status.auto_reload_minutes,
+            "gnome_lockdown_flags": status.gnome_lockdown_flags,
         }
 
     @app.get("/api/kiosk/config-content")
@@ -3768,9 +3779,11 @@ def _kiosk_page_context() -> dict[str, object]:
             "configured": autostart_status.configured,
             "chrome_flags": autostart_status.chrome_flags,
             "auto_reload_minutes": autostart_status.auto_reload_minutes,
+            "gnome_lockdown_flags": autostart_status.gnome_lockdown_flags,
         },
         "autostart_script_preview": autostart_script_preview,
         "chrome_flag_defs": list(CHROME_KIOSK_FLAG_DEFS),
+        "gnome_lockdown_flag_defs": list(GNOME_LOCKDOWN_FLAG_DEFS),
         "readiness": {
             "software_ok": readiness.software_ok,
             "user_ok": readiness.user_ok,

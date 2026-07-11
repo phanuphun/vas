@@ -21,10 +21,10 @@ import re
 import shlex
 import socket
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence, cast
+from typing import Any, Mapping, Sequence, cast
 
 from urllib.parse import urlparse
 
@@ -47,9 +47,11 @@ __all__ = [
     "DEFAULT_CHROME_FLAGS",
     "DEFAULT_DISPLAY_WAIT_SECONDS",
     "DEFAULT_EXTRA_GROUPS",
+    "DEFAULT_GNOME_LOCKDOWN_FLAGS",
     "DEFAULT_KIOSK_URL",
     "DEFAULT_NETWORK_WAIT_SECONDS",
     "DEFAULT_RESTART_DELAY",
+    "GNOME_LOCKDOWN_FLAG_DEFS",
     "GNOME_XSESSION_ID",
     "KIOSK_MANAGED_COMMENT",
     "OPENBOX_XSESSION_ID",
@@ -64,6 +66,7 @@ __all__ = [
     "build_accounts_service_config",
     "build_gdm_autologin_config",
     "build_gnome_autostart_desktop",
+    "build_gnome_lockdown_preamble",
     "build_kiosk_launch_script",
     "build_openbox_autostart_preamble",
     "check_url_reachable",
@@ -79,6 +82,7 @@ __all__ = [
     "kiosk_openbox_autostart_path",
     "list_kiosk_linux_users",
     "normalize_chrome_flags",
+    "normalize_gnome_lockdown_flags",
     "print_kiosk_status",
     "resolve_kiosk_target_user",
     "stop_kiosk_mode",
@@ -119,57 +123,100 @@ _KIOSK_MAX_UID = 60000  # ไม่รวม nobody (65534)
 # --kiosk เองบังคับใช้เสมอ (ไม่ใช่ toggle) — รายการนี้คือ flag เสริมที่ปิดฟีเจอร์
 # ของเบราว์เซอร์ที่ไม่อยากให้ user ในโหมด kiosk แตะได้ เช่น แปลภาษา, บันทึกรหัสผ่าน
 # ค่า default ทุกตัว = True เพราะ kiosk mode ควรกัน "browser action" ทุกชนิดโดยปริยาย
-CHROME_KIOSK_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
+#
+# แต่ละ item มี 2 ช่องสำหรับ command-line:
+#   - "flag": switch เดี่ยวๆ ที่แปะเข้า command line ตรงๆ (เช่น --no-first-run)
+#   - "features": ชื่อ Chromium feature ที่ต้องปิดผ่าน --disable-features=... — เก็บแยกจาก
+#     "flag" เพราะ Chromium สนใจแค่ occurrence สุดท้ายของ --disable-features บน command line
+#     เดียวกัน (ไม่ merge ให้อัตโนมัติ) ถ้าแต่ละ item ยิง --disable-features ของตัวเองแยกกัน
+#     ตัวที่มาทีหลังจะทับตัวก่อนหน้าเงียบๆ — build_kiosk_launch_script() จึงรวม features จาก
+#     ทุก item ที่เปิดอยู่เป็น --disable-features=A,B,C ตัวเดียวตอนท้ายคำสั่งแทน
+CHROME_KIOSK_FLAG_DEFS: "tuple[dict[str, object], ...]" = (
     {
         "key": "no_first_run",
         "flag": "--no-first-run",
+        "features": (),
         "label": "ปิดหน้าจอเริ่มต้นใช้งานครั้งแรก (First Run)",
         "desc": "กัน Chromium ขึ้นหน้าจอ setup/welcome ตอนรันครั้งแรกหลังสร้าง profile ใหม่",
     },
     {
         "key": "disable_translate",
         "flag": "--disable-translate",
+        "features": ("Translate",),
         "label": "ปิดป๊อปอัพเสนอแปลภาษา",
-        "desc": "ปิดฟังก์ชัน Google Translate ที่เด้งถามเวลาเจอเว็บภาษาอื่นจากภาษาเครื่อง",
+        "desc": (
+            "ปิดฟังก์ชัน Google Translate ที่เด้งถามเวลาเจอเว็บภาษาอื่นจากภาษาเครื่อง — ใส่ทั้ง "
+            "--disable-translate (switch เดิม) และ --disable-features=Translate (วิธีที่ใช้แทนใน "
+            "Chromium รุ่นที่ถอด switch เดิมออกไปแล้ว, อ้างอิง Chromium issue 41347677) เพราะไม่รู้แน่ชัด"
+            "ว่าเครื่องรัน Chromium เวอร์ชันไหน ใส่ไว้ทั้งคู่ไม่มีผลเสีย — ตัวที่เครื่องไม่รู้จักจะถูกมองข้ามเฉยๆ"
+        ),
     },
     {
         "key": "disable_infobars",
         "flag": "--disable-infobars",
+        "features": (),
         "label": "ปิดแถบแจ้งเตือนด้านบน (Infobars)",
         "desc": "ซ่อนแถบแจ้งเตือนใต้ address bar เช่น \"Chrome is being controlled by automated software\"",
     },
     {
         "key": "noerrdialogs",
         "flag": "--noerrdialogs",
+        "features": (),
         "label": "ปิด dialog แจ้ง error ของ Chromium",
         "desc": "กัน dialog เช่น \"Restore pages?\" เด้งขึ้นมาหลัง chromium ปิดไม่ปกติ/crash",
     },
     {
         "key": "disable_suggestions_service",
         "flag": "--disable-suggestions-service",
+        "features": (),
         "label": "ปิดบริการแนะนำคำค้นหา",
         "desc": "ปิด suggestion service ของ Chromium ที่เรียก server ภายนอกตอนพิมพ์ในช่อง address bar",
     },
     {
         "key": "disable_save_password_bubble",
         "flag": "--disable-save-password-bubble",
+        "features": (),
         "label": "ปิดป๊อปอัพถามบันทึกรหัสผ่าน",
         "desc": "กัน Chromium เด้งถามว่าจะบันทึกรหัสผ่านที่กรอกในเว็บฟอร์มไหม",
     },
     {
         "key": "start_maximized",
         "flag": "--start-maximized",
+        "features": (),
         "label": "เปิดหน้าต่างแบบขยายเต็มจอ",
         "desc": "สำรองไว้เผื่อ --kiosk ไม่เต็มจอเองในบางสภาพแวดล้อม (window manager บางตัว)",
     },
+    {
+        "key": "disable_swipe_navigation",
+        "flag": "--overscroll-history-navigation=0",
+        "features": ("OverscrollHistoryNavigation", "TouchpadOverscrollHistoryNavigation"),
+        "label": "ปิดปัดซ้าย/ขวาเพื่อย้อนกลับ-ไปหน้าถัดไป",
+        "desc": (
+            "กันนิ้ว/touchpad ปัดซ้ายขวาบนจอสัมผัสแล้วเบราว์เซอร์เผลอย้อนกลับ/ไปหน้าถัดไประหว่างใช้งานเว็บแอป — "
+            "ชื่อ flag ของฟีเจอร์นี้เปลี่ยนไปมาในแต่ละเวอร์ชัน Chromium จึงใส่ไว้ทั้ง switch เดิมและ "
+            "--disable-features สำรอง เผื่อเวอร์ชันบนเครื่องไม่รองรับตัวใดตัวหนึ่ง"
+        ),
+    },
+    {
+        "key": "disable_pinch_zoom",
+        "flag": "--disable-pinch",
+        "features": (),
+        "label": "ปิด pinch-to-zoom",
+        "desc": "กันนิ้วบีบ/ขยายจอสัมผัสแล้ว layout ของเว็บแอปเพี้ยนไปจากที่ออกแบบไว้",
+    },
 )
 
-DEFAULT_CHROME_FLAGS: "dict[str, bool]" = {item["key"]: True for item in CHROME_KIOSK_FLAG_DEFS}
+DEFAULT_CHROME_FLAGS: "dict[str, bool]" = {cast(str, item["key"]): True for item in CHROME_KIOSK_FLAG_DEFS}
 
 
-def normalize_chrome_flags(chrome_flags: "dict[str, object] | None") -> "dict[str, bool]":
+def normalize_chrome_flags(chrome_flags: "Mapping[str, object] | None") -> "dict[str, bool]":
     """รวมค่าที่ส่งมา (เช่นจาก JSON payload) เข้ากับ default — คีย์ที่ไม่รู้จักถูกทิ้ง
-    คีย์ที่ไม่ได้ส่งมาใช้ค่า default (True) เพื่อไม่ให้ payload เก่า/บางส่วนไปปิด flag อื่นโดยไม่ตั้งใจ"""
+    คีย์ที่ไม่ได้ส่งมาใช้ค่า default (True) เพื่อไม่ให้ payload เก่า/บางส่วนไปปิด flag อื่นโดยไม่ตั้งใจ
+
+    รับ Mapping (ไม่ใช่ dict ตรงๆ) เพราะพารามิเตอร์นี้มักถูกเรียกด้วยค่าที่ type แคบกว่า เช่น
+    dict[str, bool] จาก build_kiosk_launch_script() — dict ไม่ covariant ใน value type ทำให้
+    mypy strict มองว่า dict[str, bool] ไม่ใช่ subtype ของ dict[str, object] แต่ Mapping เป็น
+    covariant จึงรับได้ถูกต้องโดยไม่ต้อง cast ที่ทุก call site"""
     result = dict(DEFAULT_CHROME_FLAGS)
     if chrome_flags:
         valid_keys = {item["key"] for item in CHROME_KIOSK_FLAG_DEFS}
@@ -177,6 +224,70 @@ def normalize_chrome_flags(chrome_flags: "dict[str, object] | None") -> "dict[st
             if key in valid_keys:
                 result[key] = bool(value)
     return result
+
+
+# ── GNOME lockdown (gsettings) — ปิดทางหลุดออกจาก kiosk ที่มากับ GNOME Shell ────────
+# ใช้ได้เฉพาะ session_type == "gnome" เท่านั้น (Openbox ไม่มี GNOME Shell ให้ตั้งค่าพวกนี้
+# อยู่แล้วโดยธรรมชาติ — ดู build_openbox_autostart_preamble ด้านบนสำหรับ Openbox)
+# รันเป็นคำสั่ง gsettings ใน preamble ของ kiosk-launch.sh (รันตอน user login เข้า GNOME
+# session จริง มี D-Bus/X session ให้ gsettings เขียนค่าได้) แทนที่จะเรียกจาก VAS server
+# ตรงๆ เพราะ VAS server รันเป็น root แบบไม่ผูกกับ session กราฟิกของใคร — เรียก gsettings
+# จาก root โดยไม่มี DBUS_SESSION_BUS_ADDRESS/DISPLAY ของ user เป้าหมายจะ fail เงียบๆ
+GNOME_LOCKDOWN_SIGNATURE = "# vending-auto-config: kiosk-gnome-lockdown"
+
+GNOME_LOCKDOWN_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
+    {
+        "key": "disable_hot_corner",
+        "command": "gsettings set org.gnome.desktop.interface enable-hot-corners false",
+        "label": "ปิด Hot Corner (มุมจอเปิด Activities Overview)",
+        "desc": "กันนิ้ว/เมาส์แตะมุมจอแล้วหลุดจาก kiosk ไปหน้า Activities Overview ของ GNOME Shell",
+    },
+    {
+        "key": "disable_terminal_shortcut",
+        "command": 'gsettings set org.gnome.settings-daemon.plugins.media-keys terminal "[]"',
+        "label": "ปิดคีย์ลัดเปิด Terminal (Ctrl+Alt+T)",
+        "desc": "ถอดคีย์ลัดเปิด terminal เริ่มต้นของ Ubuntu กันเผลอกดหลุดออกจาก kiosk ถ้ามีคีย์บอร์ดต่ออยู่",
+    },
+    {
+        "key": "disable_super_key",
+        "command": "gsettings set org.gnome.mutter overlay-key ''",
+        "label": "ปิดปุ่ม Super (เปิด Activities Overview)",
+        "desc": "กันปุ่ม Super บนคีย์บอร์ดเปิดหน้า Activities Overview หลุดออกจาก kiosk",
+    },
+)
+
+DEFAULT_GNOME_LOCKDOWN_FLAGS: "dict[str, bool]" = {item["key"]: True for item in GNOME_LOCKDOWN_FLAG_DEFS}
+
+
+def normalize_gnome_lockdown_flags(flags: "Mapping[str, object] | None") -> "dict[str, bool]":
+    """เหมือน normalize_chrome_flags() แต่สำหรับชุด gsettings lockdown ของ GNOME —
+    คีย์ที่ไม่รู้จักถูกทิ้ง คีย์ที่ไม่ได้ส่งมาใช้ default (True) — ใช้ Mapping ด้วยเหตุผลเดียวกับ
+    normalize_chrome_flags() (ดูคอมเมนต์ที่นั่น)"""
+    result = dict(DEFAULT_GNOME_LOCKDOWN_FLAGS)
+    if flags:
+        valid_keys = {item["key"] for item in GNOME_LOCKDOWN_FLAG_DEFS}
+        for key, value in flags.items():
+            if key in valid_keys:
+                result[key] = bool(value)
+    return result
+
+
+def build_gnome_lockdown_preamble(gnome_lockdown_flags: "dict[str, bool] | None" = None) -> str:
+    """สร้าง preamble ที่รัน gsettings ปิดทางหลุดออกจาก kiosk ของ GNOME Shell (hot corner,
+    คีย์ลัด terminal, ปุ่ม Super) — แทรกก่อนเปิด chromium ใน kiosk-launch.sh เฉพาะตอน
+    session_type == "gnome" เท่านั้น (ดู KioskManager.write_autostart)"""
+    flags = normalize_gnome_lockdown_flags(gnome_lockdown_flags)
+    lines = [GNOME_LOCKDOWN_SIGNATURE, "# Managed by VAS. Manual edits may be overwritten."]
+    for item in GNOME_LOCKDOWN_FLAG_DEFS:
+        if flags.get(item["key"], False):
+            lines.append(f"{item['command']} 2>/dev/null || true")
+    return "\n".join(lines) + "\n"
+
+
+def _parse_gnome_lockdown_flags(content: str) -> "dict[str, bool]":
+    """หา gsettings command ที่มีอยู่จริงใน preamble ของสคริปต์ — ใช้ตอนอ่านสถานะ toggle
+    กลับมาแสดงในหน้าเว็บ คล้าย _parse_kiosk_flags() ด้านล่างสำหรับ Chrome flags"""
+    return {item["key"]: (item["command"] in content) for item in GNOME_LOCKDOWN_FLAG_DEFS}
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +328,9 @@ class KioskAutostartStatus:
     configured: bool
     chrome_flags: "dict[str, bool]"
     auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES
+    # เฉพาะ session_type == "gnome" เท่านั้นที่มีความหมายจริง (ดู GNOME_LOCKDOWN_FLAG_DEFS) —
+    # Openbox ไม่มี GNOME Shell ให้ตั้งค่าพวกนี้ จึงคงค่า default ไว้เฉยๆ ไม่ถูกอ่าน/เขียนจริง
+    gnome_lockdown_flags: "dict[str, bool]" = field(default_factory=lambda: dict(DEFAULT_GNOME_LOCKDOWN_FLAGS))
 
 
 @dataclass(frozen=True)
@@ -286,6 +400,7 @@ class KioskManager:
         restart_delay: int,
         chrome_flags: "dict[str, bool] | None" = None,
         auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES,
+        gnome_lockdown_flags: "dict[str, bool] | None" = None,
     ) -> None:
         script_content = build_kiosk_launch_script(
             url, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes,
@@ -299,8 +414,13 @@ class KioskManager:
             _chown_to_user(script_path.parent, username)
             return
 
+        # GNOME session เท่านั้นที่มี GNOME Shell ให้ gsettings lockdown ทำงาน — แทรก preamble
+        # เข้าไปหลัง shebang เหมือน Openbox preamble ด้านบน (รูปแบบเดียวกัน) เพื่อให้ gsettings
+        # รันก่อนเปิด chromium ทุกครั้งที่ script นี้ถูกเรียก (ทั้งตอน login ครั้งแรก และตอน
+        # restart loop วนกลับมา — เขียนซ้ำไม่มีผลเสียเพราะเป็นแค่ gsettings set ค่าเดิม)
+        gnome_preamble = build_gnome_lockdown_preamble(gnome_lockdown_flags)
         script_path = kiosk_launch_script_path(home)
-        self._write_executable(script_path, script_content)
+        self._write_executable(script_path, _insert_after_shebang(script_content, gnome_preamble))
         _chown_to_user(script_path, username)
         _chown_to_user(script_path.parent, username)
 
@@ -537,9 +657,14 @@ def build_kiosk_launch_script(
     auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES,
 ) -> str:
     flags = normalize_chrome_flags(chrome_flags)
-    flag_tokens = ["--kiosk"] + [
-        item["flag"] for item in CHROME_KIOSK_FLAG_DEFS if flags.get(item["key"], False)
-    ]
+    enabled_defs = [item for item in CHROME_KIOSK_FLAG_DEFS if flags.get(cast(str, item["key"]), False)]
+    flag_tokens = ["--kiosk"] + [cast(str, item["flag"]) for item in enabled_defs]
+    # รวม "features" ของทุก item ที่เปิดอยู่เป็น --disable-features=A,B,C ตัวเดียวตอนท้าย —
+    # ห้ามให้แต่ละ item ยิง --disable-features ของตัวเองแยกกันหลายครั้ง เพราะ Chromium ใช้แค่
+    # occurrence สุดท้ายของ switch ซ้ำบน command line เดียวกัน (ดูคอมเมนต์ที่ CHROME_KIOSK_FLAG_DEFS)
+    feature_names = [name for item in enabled_defs for name in cast("Sequence[str]", item["features"])]
+    if feature_names:
+        flag_tokens.append("--disable-features=" + ",".join(feature_names))
     command = "chromium " + " ".join(flag_tokens) + " " + shlex.quote(url)
     # auto_reload_minutes: ปิด chromium เองเป็นระยะแม้ไม่ crash จริง ให้ restart loop ด้านล่าง
     # เปิดใหม่ให้ — เป็นตาข่ายรองสุดท้ายกันเคส client-side exception ที่ไม่ทำให้ chromium
@@ -635,7 +760,10 @@ def _parse_kiosk_flags(content: str) -> "dict[str, bool]":
     build_kiosk_launch_script() มีบรรทัด shell function/log ที่ขึ้นต้นด้วย "chromium" เหมือนกัน"""
     chromium_line_match = re.search(r"^.*--kiosk.*$", content, re.MULTILINE)
     chromium_line = chromium_line_match.group(0) if chromium_line_match else ""
-    return {item["key"]: (item["flag"] in chromium_line) for item in CHROME_KIOSK_FLAG_DEFS}
+    return {
+        cast(str, item["key"]): (cast(str, item["flag"]) in chromium_line)
+        for item in CHROME_KIOSK_FLAG_DEFS
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -783,6 +911,7 @@ def collect_kiosk_autostart_status(session_type: str, home: Path) -> KioskAutost
             session_type=session_type, home=home,
             url=DEFAULT_KIOSK_URL, restart_enabled=True, restart_delay=DEFAULT_RESTART_DELAY,
             configured=True, chrome_flags=dict(DEFAULT_CHROME_FLAGS),
+            gnome_lockdown_flags=dict(DEFAULT_GNOME_LOCKDOWN_FLAGS),
         )
 
     if session_type == "openbox":
@@ -815,11 +944,19 @@ def collect_kiosk_autostart_status(session_type: str, home: Path) -> KioskAutost
         chrome_flags = dict(DEFAULT_CHROME_FLAGS)
         auto_reload_minutes = DEFAULT_AUTO_RELOAD_MINUTES
 
+    # gnome_lockdown_flags มีความหมายเฉพาะ session_type == "gnome" เท่านั้น (Openbox ไม่มี
+    # preamble นี้เลย เพราะ write_autostart ไม่แทรกให้ — ดู KioskManager.write_autostart)
+    if session_type == "gnome" and content_for_parse:
+        gnome_lockdown_flags = _parse_gnome_lockdown_flags(content_for_parse)
+    else:
+        gnome_lockdown_flags = dict(DEFAULT_GNOME_LOCKDOWN_FLAGS)
+
     return KioskAutostartStatus(
         session_type=session_type, home=home,
         url=url, restart_enabled=restart_enabled, restart_delay=restart_delay,
         configured=configured, chrome_flags=chrome_flags,
         auto_reload_minutes=auto_reload_minutes,
+        gnome_lockdown_flags=gnome_lockdown_flags,
     )
 
 
