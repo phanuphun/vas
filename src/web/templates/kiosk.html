@@ -31,10 +31,10 @@
   .toggle-thumb { position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.15); transition:left 0.2s; }
   .toggle-switch input:checked + .toggle-track .toggle-thumb { left:18px; }
 
-  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
-  #confirm-modal.is-open { display:flex; }
-  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
-  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+  #confirm-modal, #create-user-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open, #create-user-modal.is-open { display:flex; }
+  #confirm-backdrop, #create-user-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box, #create-user-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
 
   /* ── Payload example button (สไตล์เดียวกับหน้า QR500) ── */
   .scan-mode-btn {
@@ -280,9 +280,16 @@
     <div id="tab-user" class="tab-panel flex flex-col gap-4">
 
       <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
-        <div class="px-4 py-3 border-b border-line/8">
-          <h3 class="text-[0.88rem] font-semibold text-ink">เลือก user สำหรับ Kiosk</h3>
-          <p class="text-[0.72rem] text-faint mt-0.5">user ที่เลือกจะถูกใช้ auto-login เข้าเครื่องตอนบูต</p>
+        <div class="px-4 py-3 border-b border-line/8 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-[0.88rem] font-semibold text-ink">เลือก user สำหรับ Kiosk</h3>
+            <p class="text-[0.72rem] text-faint mt-0.5">user ที่เลือกจะถูกใช้ auto-login เข้าเครื่องตอนบูต</p>
+          </div>
+          <button type="button" onclick="openCreateUserModal()"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.78rem] font-semibold hover:bg-blue-700 transition-colors flex-shrink-0">
+            <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>
+            เพิ่ม
+          </button>
         </div>
         <div id="kiosk-user-list" class="p-4 flex flex-col gap-2">
           {% for u in kiosk_users %}
@@ -305,36 +312,6 @@
                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.78rem] font-semibold text-danger hover:bg-danger/8 transition-colors flex-shrink-0">
             <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
             ลบ user นี้
-          </button>
-        </div>
-      </div>
-
-      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
-        <div class="px-4 py-3 border-b border-line/8">
-          <h3 class="text-[0.88rem] font-semibold text-ink">สร้าง user ใหม่</h3>
-          <p class="text-[0.72rem] text-faint mt-0.5">สร้าง Linux user แยกสำหรับ kiosk โดยเฉพาะ (แนะนำ — แยกสิทธิ์จาก admin)</p>
-        </div>
-        <div class="p-4 flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
-            <label class="text-[0.75rem] font-semibold text-muted" for="newKioskUsername">ชื่อ user</label>
-            <input id="newKioskUsername" type="text" placeholder="kiosk-user" autocomplete="off"
-                   class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
-            <p class="text-[0.7rem] text-faint">ตัวพิมพ์เล็ก ตัวเลข และ - เท่านั้น</p>
-          </div>
-          <div class="flex items-center justify-between gap-4">
-            <div class="min-w-0">
-              <span class="text-[0.84rem] font-semibold text-ink">เพิ่มเข้ากลุ่ม video, input, plugdev</span>
-              <p class="text-[0.72rem] text-muted mt-0.5">จำเป็นสำหรับจอ/touchscreen</p>
-            </div>
-            <label class="toggle-switch">
-              <input id="newKioskGroups" type="checkbox" checked>
-              <div class="toggle-track"><div class="toggle-thumb"></div></div>
-            </label>
-          </div>
-          <button type="button" onclick="createKioskUser()"
-                  class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
-            <iconify-icon icon="lucide:plus" width="14" height="14"></iconify-icon>
-            สร้าง user
           </button>
         </div>
       </div>
@@ -375,18 +352,15 @@
               <p class="text-[0.72rem] text-faint mt-0.5">ใช้ desktop เดิมของเครื่อง — รองรับทุกฟีเจอร์ของ vas (จอ/touchscreen) เต็มที่ ไม่ต้องติดตั้งอะไรเพิ่ม</p>
             </div>
           </label>
-          <label id="session-row-openbox" class="kuser-row flex items-start gap-3 px-3.5 py-3 border border-line/10 rounded-lg {{ 'is-selected' if session_type == 'openbox' else '' }}">
-            <input type="radio" name="session-type" value="openbox" {{ 'checked' if session_type == 'openbox' else '' }} onchange="setSessionType('openbox')" class="accent-accent flex-shrink-0 mt-0.5">
+          <label id="session-row-openbox" title="อยู่ระหว่างการปรับปรุง" style="cursor:not-allowed" class="kuser-row flex items-start gap-3 px-3.5 py-3 border border-line/10 rounded-lg opacity-60 {{ 'is-selected' if session_type == 'openbox' else '' }}">
+            <input type="radio" name="session-type" value="openbox" {{ 'checked' if session_type == 'openbox' else '' }} disabled class="accent-accent flex-shrink-0 mt-0.5">
             <img src="/public/images/logo/openbox-logo.png" alt="Openbox" class="w-9 h-9 object-contain rounded-lg flex-shrink-0">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-[0.84rem] font-semibold text-ink font-display">Openbox</span>
-                {% if openbox_installed %}<span class="zone zone-safe">ติดตั้งแล้ว</span>{% else %}<span class="zone zone-caution">ยังไม่ได้ติดตั้ง</span>{% endif %}
+                <span class="zone zone-mute">อยู่ระหว่างการปรับปรุง</span>
               </div>
-              <p class="text-[0.72rem] text-faint mt-0.5">
-                เบาที่สุด ไม่มี desktop UI ให้ user หลุดออกไปเล่นได้เลย
-                {% if not openbox_installed %} — ต้องติดตั้งที่ <a href="{{ url_for('apps_page') }}" class="text-accent underline underline-offset-2">หน้าซอฟต์แวร์ระบบ</a> ก่อน{% endif %}
-              </p>
+              <p class="text-[0.72rem] text-faint mt-0.5">เบาที่สุด ไม่มี desktop UI ให้ user หลุดออกไปเล่นได้เลย</p>
             </div>
           </label>
         </div>
@@ -687,6 +661,51 @@
   </div>
 </div>
 
+<!-- ── Create Kiosk User Modal ──────────────────────────────────── -->
+<div id="create-user-modal" role="dialog" aria-modal="true" aria-labelledby="create-user-title">
+  <div id="create-user-backdrop" onclick="closeCreateUserModal()"></div>
+  <div id="create-user-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-accent/8 border border-accent/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:user-plus" width="16" height="16" class="text-accent"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="create-user-title" class="text-[0.95rem] font-semibold text-ink leading-snug">สร้าง user ใหม่</h2>
+        <p class="text-[0.78rem] text-muted mt-1 leading-relaxed">สร้าง Linux user แยกสำหรับ kiosk โดยเฉพาะ (แนะนำ — แยกสิทธิ์จาก admin)</p>
+      </div>
+    </div>
+    <div class="flex flex-col gap-4">
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted" for="newKioskUsername">ชื่อ user</label>
+        <input id="newKioskUsername" type="text" placeholder="kiosk-user" autocomplete="off"
+               class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+        <p class="text-[0.7rem] text-faint">ตัวพิมพ์เล็ก ตัวเลข และ - เท่านั้น</p>
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <span class="text-[0.84rem] font-semibold text-ink">เพิ่มเข้ากลุ่ม video, input, plugdev</span>
+          <p class="text-[0.72rem] text-muted mt-0.5">จำเป็นสำหรับจอ/touchscreen</p>
+        </div>
+        <label class="toggle-switch">
+          <input id="newKioskGroups" type="checkbox" checked>
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-line/10">
+      <button type="button" onclick="closeCreateUserModal()"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors">
+        ยกเลิก
+      </button>
+      <button type="button" onclick="createKioskUser()"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors">
+        <iconify-icon icon="lucide:plus" width="13" height="13"></iconify-icon>
+        สร้าง user
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Confirm Modal (ลบ Kiosk user) ────────────────────────────── -->
 <div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
   <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
@@ -745,6 +764,27 @@
     modal.classList.add("is-open");
     document.getElementById("confirm-cancel").focus();
   };
+
+  // ── Create Kiosk User modal ─────────────────────────────────────
+  window.openCreateUserModal = function () {
+    var modal = document.getElementById("create-user-modal");
+    if (!modal) return;
+    modal.classList.add("is-open");
+    var usernameEl = document.getElementById("newKioskUsername");
+    if (usernameEl) usernameEl.focus();
+  };
+  window.closeCreateUserModal = function () {
+    var modal = document.getElementById("create-user-modal");
+    if (modal) modal.classList.remove("is-open");
+  };
+
+  // Escape key ปิด modal ที่เปิดอยู่ (confirm-modal หรือ create-user-modal)
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (window._confirmModal) { window._confirmModal.cancel(); return; }
+    var createModal = document.getElementById("create-user-modal");
+    if (createModal && createModal.classList.contains("is-open")) closeCreateUserModal();
+  });
 
   var kioskHome = "{{ home }}";
   var currentSessionType = "{{ session_type }}";
@@ -1101,6 +1141,7 @@
           readinessState.user_ok = true;
           updateReadinessRow("user", true);
           updateReadinessSummary();
+          closeCreateUserModal();
         } else {
           showToast(firstError(result.data), "error");
         }

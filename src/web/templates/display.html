@@ -226,10 +226,6 @@
           <h2 class="text-[0.9rem] font-semibold text-ink">ตั้งค่าระดับเครื่อง (Xorg — ก่อน Login)</h2>
         </div>
         <div class="flex flex-col gap-3 p-4">
-          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-accent/6 border-accent/20 text-[0.78rem] text-ink">
-            <iconify-icon icon="lucide:info" width="14" height="14" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>เหมาะกับ <strong>Openbox</strong> เท่านั้น — session แบบ <strong>GNOME</strong> จะเขียนทับค่านี้กลับเป็น normal</span>
-          </div>
           <div class="flex flex-col gap-3">
             <div class="flex items-center justify-between gap-4">
               <span class="text-[0.82rem] text-ink">Persist touch ใน Xorg <span class="text-faint">(99-vending-touchscreen.conf)</span></span>
@@ -502,7 +498,7 @@
 
       <div class="flex flex-col gap-4">
         {% for key, icon, path, title, desc, ok, status_text, cfg_key in cfg_files %}
-        {% set is_wip = (key == "xprofile") %}
+        {% set is_wip = (key in ("xprofile", "display_script")) %}
         <div class="bg-card border border-line/10 rounded-xl overflow-hidden {{ 'opacity-60' if is_wip else '' }}" id="cfg-card-{{ key }}">
           <!-- Card header -->
           <button type="button" onclick="toggleConfig('{{ key }}')" {{ 'disabled aria-disabled="true" title="อยู่ระหว่างการปรับปรุง"' if is_wip else '' }}
@@ -675,10 +671,13 @@
           toggleEl.disabled = false;
           if (d.status === "ok") {
             if (msgEl) msgEl.textContent = turningOn ? "บันทึกแล้ว" : "ลบไฟล์แล้ว";
+            if (window.showToast) window.showToast(turningOn ? "บันทึกแล้ว" : "ลบไฟล์แล้ว", "ok");
           } else {
             // เขียน/ลบไม่สำเร็จ — ย้อน toggle กลับ กัน UI โชว์สถานะไม่ตรงกับไฟล์จริงบนดิสก์
             toggleEl.checked = !turningOn;
-            if (msgEl) msgEl.textContent = "Error: " + (d.errors || []).join(", ");
+            var errMsg = "Error: " + (d.errors || []).join(", ");
+            if (msgEl) msgEl.textContent = errMsg;
+            if (window.showToast) window.showToast(errMsg, "error");
           }
           if (msgEl) setTimeout(function () { msgEl.textContent = ""; }, 3000);
         })
@@ -686,6 +685,7 @@
           toggleEl.disabled = false;
           toggleEl.checked = !turningOn;
           if (msgEl) msgEl.textContent = "Fetch error: " + e;
+          if (window.showToast) window.showToast("Fetch error: " + e, "error");
         });
     });
   }
@@ -786,9 +786,13 @@
   }
 
   function setResult(msg, status) {
-    if (!applyResult) return;
-    applyResult.className = "msg text-[0.82rem] " + (status === "success" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
-    applyResult.textContent = msg;
+    if (applyResult) {
+      applyResult.className = "msg text-[0.82rem] " + (status === "success" || status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+      applyResult.textContent = msg;
+    }
+    if (msg && (status === "ok" || status === "success" || status === "error") && window.showToast) {
+      window.showToast(msg, status === "error" ? "error" : "ok");
+    }
   }
 
   function selectedConfig() {
@@ -921,9 +925,13 @@
   var wlBtn      = document.getElementById("waylandSwitchBtn");
 
   function setWaylandResult(msg, status) {
-    if (!waylandResult) return;
-    waylandResult.className = "text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
-    waylandResult.textContent = msg;
+    if (waylandResult) {
+      waylandResult.className = "text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+      waylandResult.textContent = msg;
+    }
+    if (msg && (status === "ok" || status === "error") && window.showToast) {
+      window.showToast(msg, status);
+    }
   }
 
   // อัปเดต UI ของ protocol cards ทันทีตามค่า disabled ล่าสุด (true = X11 active)
@@ -983,9 +991,13 @@
   }
 
   function setScreenBlankResult(msg, status) {
-    if (!screenBlankResult) return;
-    screenBlankResult.className = "msg text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
-    screenBlankResult.textContent = msg;
+    if (screenBlankResult) {
+      screenBlankResult.className = "msg text-[0.82rem] " + (status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+      screenBlankResult.textContent = msg;
+    }
+    if (msg && (status === "ok" || status === "error") && window.showToast) {
+      window.showToast(msg, status);
+    }
   }
 
   var applyScreenBlankBtn = document.getElementById("applyScreenBlank");

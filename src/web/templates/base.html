@@ -660,8 +660,8 @@
       var t = document.createElement('div');
       var isOk = (type === 'ok' || type === 'success');
       var color = isOk
-        ? 'bg-safe/10 border-safe/30 text-[#0f766e]'
-        : 'bg-danger/10 border-danger/30 text-danger';
+        ? 'bg-safe border-safe text-white'
+        : 'bg-danger border-danger text-white';
       t.className = 'px-4 py-2.5 rounded-lg border text-[0.82rem] font-medium shadow-md ' + color;
       t.textContent = msg;
       wrap.appendChild(t);
