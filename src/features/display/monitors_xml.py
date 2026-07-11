@@ -270,12 +270,15 @@ def _xml_escape(value: str) -> str:
 def parse_get_current_state_output(output: str) -> "MonitorState | None":
     """Parse ผลลัพธ์ดิบจาก `gdbus call ... GetCurrentState` (GVariant text format)
 
-    หา monitor ตัวแรก + mode ที่มี flag 'is-current': <true> มาเป็น MonitorState — ยัง
-    เป็น best-effort regex parser (ไม่ใช่ full GVariant grammar parser) เพราะยังไม่มี
-    เครื่องจริงให้ทดสอบผลลัพธ์ดิบในรอบนี้ (ดู checklist "Proof C" ที่ยังค้างอยู่ใน
-    docs/kiosk-user-monitor-rotation-investigation.md หัวข้อ 7) — ต้องทดสอบกับ output
-    จริงบนเครื่อง production ก่อนพึ่งพาแบบเต็มรูปแบบ คืน None ถ้า parse ไม่ได้ (caller
-    ต้องรายงาน error ให้ผู้ใช้ ไม่ใช่เขียนไฟล์ด้วยค่าที่เดาไว้)
+    หา monitor ตัวแรก + mode ที่มี flag 'is-current': <true> มาเป็น MonitorState
+
+    **proof แล้วกับ output จริงบนเครื่อง production** (2026-07-11) — เดิม parser คิดว่า
+    ตัวเลขทุกตัวใน mode tuple จะมี type annotation กำกับเสมอ (เช่น `uint32 800`, `double 60.0`)
+    แต่ output จริงจาก `gdbus call` ไม่ print annotation ซ้ำสำหรับสมาชิกที่ type ซ้ำกันใน
+    โครงสร้างซ้อน (nested tuple) เลย ได้ตัวเลขดิบๆ ล้วน เช่น
+    `('800x600@60', 800, 600, 60.0, 1.0, [1.0], {'is-preferred': <true>})` — รูปแบบจริงของ
+    mode entry คือ `(mode_id, width, height, rate, preferred_scale, [supported_scales],
+    {properties})` regex ด้านล่างอิง shape นี้แทน ไม่พึ่ง type annotation อีกต่อไป
     """
     monitor_match = re.search(
         r"'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)'",
@@ -285,18 +288,25 @@ def parse_get_current_state_output(output: str) -> "MonitorState | None":
         return None
     connector, vendor, product, serial = monitor_match.groups()
 
-    mode_match = re.search(
-        r"uint32 (\d+),\s*uint32 (\d+),\s*double ([0-9.]+)[^)]*?'is-current':\s*<true>",
-        output,
-        re.DOTALL,
+    # mode entry: ('<mode_id>', <width>, <height>, <rate>, <preferred_scale>,
+    # [<supported_scales>], {<properties>}) — ตัวเลขไม่มี "uint32"/"double" กำกับใน output จริง
+    mode_pattern = re.compile(
+        r"'[^']*',\s*(\d+),\s*(\d+),\s*([0-9.]+),\s*[0-9.]+,\s*\[[^\]]*\],\s*\{([^}]*)\}"
     )
-    if not mode_match:
-        # fallback: เอา mode แรกที่เจอแทนถ้าหา flag 'is-current' ไม่เจอ (ยังได้ค่าที่พอใช้ได้
-        # แม้ไม่การันตีว่าตรงกับ mode ที่ใช้งานอยู่จริง ณ ขณะนั้น)
-        mode_match = re.search(r"uint32 (\d+),\s*uint32 (\d+),\s*double ([0-9.]+)", output)
-    if not mode_match:
+    modes = mode_pattern.findall(output)
+    if not modes:
         return None
-    width, height, rate = mode_match.groups()
+
+    selected: "tuple[str, str, str] | None" = None
+    for mode_width, mode_height, mode_rate, props in modes:
+        if "'is-current': <true>" in props:
+            selected = (mode_width, mode_height, mode_rate)
+            break
+    if selected is None:
+        # fallback: เอา mode แรกที่เจอแทนถ้าหา flag 'is-current' ไม่เจอเลยในทุก mode (ยังได้
+        # ค่าที่พอใช้ได้ แม้ไม่การันตีว่าตรงกับ mode ที่ใช้งานอยู่จริง ณ ขณะนั้น)
+        selected = (modes[0][0], modes[0][1], modes[0][2])
+    width, height, rate = selected
 
     return MonitorState(
         connector=connector,
