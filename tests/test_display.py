@@ -22,7 +22,7 @@ def test_xorg_config_includes_signature_and_touch_name() -> None:
 
     assert XORG_TOUCHSCREEN_SIGNATURE in config
     assert 'MatchProduct "Vending Virtual Touchscreen"' in config
-    assert 'Option "CalibrationMatrix" "1 0 0 0 1 0 0 0 1"' in config
+    assert 'Option "TransformationMatrix" "1 0 0 0 1 0 0 0 1"' in config
 
 
 def test_display_session_script_includes_retry_rotation_and_mapping() -> None:

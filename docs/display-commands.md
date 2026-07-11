@@ -149,7 +149,7 @@ sudo vas display persist-xorg \
 Section "InputClass"
     Identifier "vending-touchscreen-calibration"
     MatchProduct "Vending Virtual Touchscreen"
-    Option "CalibrationMatrix" "1 0 0 0 1 0 0 0 1"
+    Option "TransformationMatrix" "1 0 0 0 1 0 0 0 1"
 EndSection
 ```
 

@@ -142,6 +142,10 @@ EndSection
 ```
 ทั้งสองไฟล์ตั้ง `left` ไว้ถูกต้อง ไม่ว่า user ไหน login — ยืนยันว่าไฟล์ conf ไม่ใช่ตัวแปร
 
+> **แก้ไขภายหลัง (2026-07-12)**: ตัวอย่างข้างบนใช้ `Option "CalibrationMatrix"` ตามโค้ดที่ใช้ตอนสืบสวนรอบนี้ แต่ภายหลังพบว่านี่คือ option เฉพาะของ driver libinput ที่ตั้งค่า property คนละตัว
+> (`libinput Calibration Matrix`) ไม่ใช่ `Coordinate Transformation Matrix` ที่ระบบใช้จริงกำหนดการแมพพิกัดสัมผัสกับจอที่หมุน — แปลว่าไฟล์นี้ "ตั้งค่าถูกต้องแล้วไม่ใช่ตัวแปร" ตามที่สรุปไว้ข้างบนนั้นไม่จริงทั้งหมด
+> มันคือ **ตัวแปรจริงของปัญหา touch เพี้ยนหลัง reboot** เพียงแต่ตอนนั้นยังไม่ถูกจับได้เพราะโฟกัสอยู่ที่ปัญหาจอ (rotate) เป็นหลัก ดู `CHANGELOG.md` วันที่ 2026-07-12 และโค้ด `build_xorg_touchscreen_config()` (แก้เป็น `Option "TransformationMatrix"` แล้ว)
+
 ### 3.5 สรุป root cause
 
 `kiosk-user` ไม่เคยมี `~/.config/monitors.xml` เพราะไฟล์นี้ถูกสร้าง/เขียนโดย mutter **เฉพาะตอนมีการเปลี่ยนค่าจอผ่านช่องทางที่ mutter รู้จักและยืนยัน (confirm) เท่านั้น** (ดูรายละเอียดกลไกในหัวข้อ 4) — `hapymed` มีไฟล์นี้เพราะเคยมีคนเข้า GNOME Settings > Displays แล้วกด Apply + Keep Changes ด้วยตัวเองในอดีต ส่วน `kiosk-user` เป็น user ใหม่ที่สร้างผ่าน `useradd` แล้ว auto-login เข้าเฉยๆ ไม่เคยผ่านขั้นตอนนั้นเลย

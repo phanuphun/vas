@@ -533,13 +533,27 @@ def matrix_for_rotation(rotate: str) -> "tuple[str, ...]":
 
 
 def build_xorg_touchscreen_config(touch: str, matrix: str) -> str:
+    """สร้าง Xorg InputClass config ที่ตั้งค่า "Coordinate Transformation Matrix" ของ touch
+    device ให้ตรงกับทิศทางจอที่หมุนไว้ — ต้องใช้ `Option "TransformationMatrix"` เท่านั้น
+
+    **บั๊กที่แก้แล้ว (proof บนเครื่องจริงผ่าน VirtualBox, 2026-07-12)**: เดิมใช้
+    `Option "CalibrationMatrix"` ซึ่งเป็น option เฉพาะของ driver libinput ที่ map ไปตั้งค่า
+    property คนละตัวคือ "libinput Calibration Matrix" (ใช้สำหรับ calibrate touch แบบ
+    raw-sensor-to-normalized ไม่เกี่ยวกับทิศทางจอ) ไม่ใช่ "Coordinate Transformation Matrix"
+    ที่ apply_runtime()/display-session.sh ใช้จริงตอน set ค่า live ผ่าน `xinput set-prop`
+    ผลคือหลัง reboot ไฟล์นี้ถูกอ่านและ apply ค่าเข้า property ที่ไม่มีผลอะไรกับการแมพจอ-ทัชเลย
+    ("Coordinate Transformation Matrix" ยังเป็น identity ค้างอยู่ที่ค่า default เสมอ) ทำให้ toggle
+    "Persist touch ใน Xorg" ไม่เคยมีผลจริงหลัง reboot ทั้งที่หน้าเว็บโชว์สถานะ "ตั้งค่าแล้ว" —
+    proof ยืนยันด้วย `xinput list-props` บนเครื่องจริง: ก่อนแก้ `libinput Calibration Matrix`
+    มีค่าที่ถูกต้องตามไฟล์ conf แต่ `Coordinate Transformation Matrix` ยังเป็น identity ตลอด
+    """
     return (
         f"{XORG_TOUCHSCREEN_SIGNATURE}\n"
         "# Managed by vending-auto-setup. Manual edits may be overwritten.\n"
         'Section "InputClass"\n'
         '    Identifier "vending-touchscreen-calibration"\n'
         f'    MatchProduct "{touch}"\n'
-        f'    Option "CalibrationMatrix" "{matrix}"\n'
+        f'    Option "TransformationMatrix" "{matrix}"\n'
         "EndSection\n"
     )
 
