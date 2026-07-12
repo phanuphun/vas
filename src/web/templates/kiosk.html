@@ -156,18 +156,18 @@
           <span class="readiness-zone zone {{ 'zone-safe' if readiness.autostart_ok else 'zone-caution' }}">{{ 'พร้อม' if readiness.autostart_ok else 'ยังไม่ครบ' }}</span>
         </div>
 
-        {# MOCKUP — แถวนี้ยังไม่ผูกกับ readiness object จริง (ไม่นับรวมใน "X จาก Y ขั้นตอน" ด้านบน) #}
+        {% set os_notify_all_ok = os_notify_status.values() | select | list | length == os_notify_status | length %}
         <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-t border-line/6" data-readiness="os-notifications">
-          <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-surface">
-            <iconify-icon icon="lucide:bell-off" width="15" height="15" class="readiness-icon text-faint"></iconify-icon>
+          <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if os_notify_all_ok else 'bg-caution/10' }}">
+            <iconify-icon icon="lucide:bell-off" width="15" height="15" class="readiness-icon {{ 'text-safe' if os_notify_all_ok else 'text-caution' }}"></iconify-icon>
           </div>
           <div class="flex-1 min-w-0">
             <span class="text-[0.85rem] font-semibold text-ink">แจ้งเตือนระบบปฏิบัติการ</span>
             <p class="readiness-desc text-[0.72rem] text-muted mt-0.5">
-              ตั้งค่าที่แท็บ <strong class="font-semibold">เปิดแอปอัตโนมัติ</strong> — ยังเป็น mockup UI เท่านั้น
+              {{ os_notify_status.values() | select | list | length }} จาก {{ os_notify_status | length }} รายการปิดแล้ว — ตั้งค่าที่แท็บ <strong class="font-semibold">เปิดแอปอัตโนมัติ</strong>
             </p>
           </div>
-          <span class="readiness-zone zone zone-mute">Mockup</span>
+          <span class="readiness-zone zone {{ 'zone-safe' if os_notify_all_ok else 'zone-caution' }}">{{ 'พร้อม' if os_notify_all_ok else 'ยังไม่ครบ' }}</span>
         </div>
       </div>
 
@@ -498,46 +498,35 @@
         </div>
       </div>
 
-      {# ══════════ MOCKUP — UI เท่านั้น ยังไม่เชื่อม backend/logic จริง ══════════
-         ปิด popup/แจ้งเตือนระดับ Ubuntu (แยกจาก chrome flags ด้านบนซึ่งเป็นของจริง) #}
+      {# ปิด popup/แจ้งเตือนระดับ Ubuntu — system-wide (ไม่ผูกกับ user ที่เลือก), เขียนไฟล์จริง
+         ผ่าน /api/kiosk/os-notifications (ดู features/kiosk/os_notifications.py) #}
       <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
-        <div class="px-4 py-3 border-b border-line/8 flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <h3 class="text-[0.88rem] font-semibold text-ink">ปิดการแจ้งเตือนของระบบปฏิบัติการ</h3>
-            <p class="text-[0.72rem] text-faint mt-0.5">ป้องกัน popup/แจ้งเตือนระดับ Ubuntu ที่ user อาจกดโต้ตอบได้ระหว่างใช้งาน kiosk (เช่น อัปเกรดเวอร์ชัน, update-notifier)</p>
-          </div>
-          <span class="zone zone-mute flex-shrink-0">Mockup</span>
+        <div class="px-4 py-3 border-b border-line/8">
+          <h3 class="text-[0.88rem] font-semibold text-ink">ปิดการแจ้งเตือนของระบบปฏิบัติการ</h3>
+          <p class="text-[0.72rem] text-faint mt-0.5">ป้องกัน popup/แจ้งเตือนระดับ Ubuntu ที่ user อาจกดโต้ตอบได้ระหว่างใช้งาน kiosk — ตั้งค่าเดียวมีผลกับทุก user บนเครื่อง ไม่ต้องเลือก user</p>
         </div>
         <div id="os-notify-list" class="flex flex-col">
-          {% set os_notify_defs = [
-            ("release_upgrade", "ปิด popup แจ้งอัปเกรดเวอร์ชัน Ubuntu", "ตั้ง Prompt=never ที่ /etc/update-manager/release-upgrades", true),
-            ("update_notifier_autostart", "ปิด icon/แจ้งเตือน update-notifier ตอน runtime", "ปิด autostart entry ของ update-notifier สำหรับ user คีออสที่เลือกไว้", true),
-            ("needrestart_prompt", "ปิด prompt ของ needrestart ตอน apt upgrade", "ตั้งค่าให้ restart service ที่จำเป็นอัตโนมัติแบบเงียบ ไม่ถามระหว่างใช้งาน", false),
-            ("hold_packages", "กันแพ็กเกจที่เกี่ยวข้องถูกอัปเดตพฤติกรรมเปลี่ยน", "apt-mark hold บน update-notifier และ update-manager", false),
-          ] %}
-          {% for key, label, desc, mock_checked in os_notify_defs %}
+          {% for f in os_notify_flag_defs %}
           <div class="flex items-center justify-between gap-4 px-4 py-3 {{ '' if loop.last else 'border-b border-line/6' }}">
             <div class="min-w-0">
-              <span class="text-[0.84rem] font-semibold text-ink">{{ label }}</span>
-              <p class="text-[0.72rem] text-muted mt-0.5">{{ desc }}</p>
+              <span class="text-[0.84rem] font-semibold text-ink">{{ f.label }}</span>
+              <p class="text-[0.72rem] text-muted mt-0.5">{{ f.desc }}</p>
+              <code class="text-[0.66rem] text-faint font-mono">{{ f.path }}</code>
             </div>
             <label class="toggle-switch">
-              <input type="checkbox" class="os-notify-toggle" data-notify-key="{{ key }}"
-                     {{ 'checked' if mock_checked else '' }} onchange="updateOsNotifyMockNote()">
+              <input type="checkbox" class="os-notify-toggle" data-notify-key="{{ f.key }}"
+                     {{ 'checked' if os_notify_status.get(f.key, false) else '' }}>
               <div class="toggle-track"><div class="toggle-thumb"></div></div>
             </label>
           </div>
           {% endfor %}
         </div>
-        <div class="px-4 py-3 border-t border-line/8 bg-accent/5 flex items-start gap-2">
-          <iconify-icon icon="lucide:info" width="13" height="13" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
-          <p id="os-notify-mock-note" class="text-[0.72rem] text-muted">ตอนนี้เป็นแค่ UI mockup — สวิตช์และปุ่มด้านล่างยังไม่บันทึกค่าจริงหรือแก้ไฟล์ใดๆ ในระบบ</p>
-        </div>
-        <div class="px-4 pb-4 pt-1">
-          <button type="button" onclick="mockSaveOsNotifySettings()"
-                  class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-line/15 rounded-lg bg-card text-muted text-[0.82rem] font-semibold hover:bg-surface transition-colors cursor-pointer">
+        <div class="px-4 py-3 border-t border-line/8 flex items-center justify-between gap-3">
+          <p id="os-notify-save-note" class="text-[0.72rem] text-faint">แต่ละสวิตช์บันทึกทันทีที่กด "บันทึก" — ไม่ต้องรอปุ่ม "บันทึกและเปิดใช้งาน" ด้านล่างของแท็บนี้</p>
+          <button type="button" onclick="saveOsNotifySettings()"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors flex-shrink-0">
             <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>
-            บันทึก (mockup — ยังไม่ implement)
+            บันทึก
           </button>
         </div>
       </div>
@@ -625,20 +614,57 @@
         "gnome"
       ) %}
 
-      {# MOCKUP — ค่าทั้งหมดในนี้ hardcode ไว้เพื่อดู UI เท่านั้น ยังไม่อ่านไฟล์จริงจากเครื่อง #}
+      {# การ์ดของ "ปิดการแจ้งเตือนของระบบปฏิบัติการ" — system-wide ทั้งหมด scope='all' —
+         status/ok มาจาก os_notify_status จริง (อ่านจากเครื่องผ่าน collect_os_notification_status) #}
       {% set release_upgrades_card = (
         "release_upgrades",
         "lucide:bell-off",
         "/etc/update-manager/release-upgrades",
-        "Release Upgrade Prompt (Mockup)",
-        "ตัวอย่างไฟล์หลังปิดการแจ้งเตือนอัปเกรดเวอร์ชัน — เนื้อหานี้เป็น mockup แบบ hardcode ยังไม่ได้อ่านจากเครื่องจริง",
-        true,
-        "ตัวอย่าง: Prompt=never (mockup)",
-        "[DEFAULT]\nPrompt=never",
+        "Release Upgrade Prompt",
+        "ตั้ง Prompt=never กันไม่ให้ Ubuntu ถาม upgrade เวอร์ชันตอน boot",
+        os_notify_status.release_upgrade,
+        "Prompt=never ตั้งไว้แล้ว" if os_notify_status.release_upgrade else "ยังไม่ได้ปิด (Prompt=normal/lts)",
+        "[DEFAULT]\nPrompt=never" if os_notify_status.release_upgrade else "(ยังไม่ได้ปิด — กด Reload เพื่อดูเนื้อหาจริง)",
         "all"
       ) %}
 
-      {% set cfg_files = [gdm_card, accounts_service_card, openbox_autostart_card, autostart_desktop_card, kiosk_launch_script_card, release_upgrades_card] %}
+      {% set update_notifier_autostart_card = (
+        "update_notifier_autostart",
+        "lucide:bell-off",
+        "/etc/xdg/autostart/update-notifier.desktop",
+        "update-notifier Autostart",
+        "ปิด icon แจ้งเตือน update ที่ system tray ทุก user บนเครื่อง",
+        os_notify_status.update_notifier_autostart,
+        "ปิดแล้ว" if os_notify_status.update_notifier_autostart else "ยังเปิดอยู่",
+        "(กด Reload เพื่อดูเนื้อหาจริง)",
+        "all"
+      ) %}
+
+      {% set needrestart_conf_card = (
+        "needrestart_conf",
+        "lucide:bell-off",
+        "/etc/needrestart/needrestart.conf",
+        "needrestart Prompt",
+        "ตั้งให้ restart service ที่จำเป็นอัตโนมัติแบบเงียบตอน apt upgrade ไม่ถามระหว่างใช้งาน",
+        os_notify_status.needrestart_prompt,
+        "อัตโนมัติแล้ว ($nrconf{restart} = 'a')" if os_notify_status.needrestart_prompt else "ยังถามอยู่ ($nrconf{restart} = 'i' — ค่า default)",
+        "(กด Reload เพื่อดูเนื้อหาจริง)",
+        "all"
+      ) %}
+
+      {% set gnome_initial_setup_autostart_card = (
+        "gnome_initial_setup_autostart",
+        "lucide:bell-off",
+        "/etc/xdg/autostart/gnome-initial-setup-first-login.desktop",
+        "gnome-initial-setup Autostart",
+        "ปิด First Login Wizard ('Connect Your Online Accounts' ฯลฯ) ที่โผล่ตอน user ใหม่ล็อกอินครั้งแรก",
+        os_notify_status.gnome_initial_setup,
+        "ปิดแล้ว" if os_notify_status.gnome_initial_setup else "ยังเปิดอยู่",
+        "(กด Reload เพื่อดูเนื้อหาจริง)",
+        "all"
+      ) %}
+
+      {% set cfg_files = [gdm_card, accounts_service_card, openbox_autostart_card, autostart_desktop_card, kiosk_launch_script_card, release_upgrades_card, update_notifier_autostart_card, needrestart_conf_card, gnome_initial_setup_autostart_card] %}
 
       <div class="flex flex-col gap-4">
         {% for key, icon, path, title, desc, ok, status_text, mock_content, scope in cfg_files %}
@@ -862,14 +888,62 @@
     return state;
   }
 
-  // ── MOCKUP: "ปิดการแจ้งเตือนของระบบปฏิบัติการ" — UI เท่านั้น ไม่มีการเรียก API/บันทึกจริง ──
-  function updateOsNotifyMockNote() {
-    var note = document.getElementById("os-notify-mock-note");
-    if (note) note.textContent = "ตอนนี้เป็นแค่ UI mockup — การเปลี่ยนสวิตช์นี้ยังไม่ถูกบันทึกหรือส่งไป backend จริง";
+  // ── ปิดการแจ้งเตือนของระบบปฏิบัติการ — system-wide, ไม่ผูกกับ user ที่เลือก ──────
+  var OS_NOTIFY_CFG_KEY_MAP = {
+    release_upgrade: "release_upgrades",
+    update_notifier_autostart: "update_notifier_autostart",
+    needrestart_prompt: "needrestart_conf",
+    gnome_initial_setup: "gnome_initial_setup_autostart",
+    // hold_packages ไม่มี config file ให้ดู (เป็น apt-mark state ไม่ใช่ไฟล์)
+  };
+
+  function getOsNotifyState() {
+    var state = {};
+    document.querySelectorAll(".os-notify-toggle").forEach(function (el) {
+      state[el.getAttribute("data-notify-key")] = el.checked;
+    });
+    return state;
   }
-  function mockSaveOsNotifySettings() {
-    alert("Mockup เท่านั้น — ยังไม่เชื่อมต่อ API หรือ logic จริง");
+
+  function updateOsNotifyReadinessRow(status) {
+    var keys = Object.keys(status);
+    var count = keys.filter(function (k) { return !!status[k]; }).length;
+    var allOk = count === keys.length;
+    var row = document.querySelector('[data-readiness="os-notifications"]');
+    if (!row) return;
+    var iconBox = row.querySelector(".readiness-icon-box");
+    var icon = row.querySelector(".readiness-icon");
+    var zone = row.querySelector(".readiness-zone");
+    var desc = row.querySelector(".readiness-desc");
+    if (iconBox) { iconBox.classList.toggle("bg-safe/8", allOk); iconBox.classList.toggle("bg-caution/10", !allOk); }
+    if (icon) { icon.classList.toggle("text-safe", allOk); icon.classList.toggle("text-caution", !allOk); }
+    if (zone) {
+      zone.classList.toggle("zone-safe", allOk);
+      zone.classList.toggle("zone-caution", !allOk);
+      zone.textContent = allOk ? "พร้อม" : "ยังไม่ครบ";
+    }
+    if (desc) desc.textContent = count + " จาก " + keys.length + " รายการปิดแล้ว — ตั้งค่าที่แท็บ \"เปิดแอปอัตโนมัติ\"";
   }
+
+  window.saveOsNotifySettings = function () {
+    var note = document.getElementById("os-notify-save-note");
+    apiRequest("POST", "/api/kiosk/os-notifications", { flags: getOsNotifyState() }).then(function (result) {
+      if (result.ok) {
+        showToast("บันทึกการตั้งค่าแจ้งเตือนระบบปฏิบัติการแล้ว", "success");
+        var status = result.data;
+        Object.keys(OS_NOTIFY_CFG_KEY_MAP).forEach(function (key) {
+          var cfgKey = OS_NOTIFY_CFG_KEY_MAP[key];
+          var ok = !!status[key];
+          updateCfgCardStatus(cfgKey, ok, ok ? "ปิดแล้ว" : "ยังเปิดอยู่");
+          reloadConfigContent(cfgKey);
+        });
+        updateOsNotifyReadinessRow(status);
+        if (note) note.textContent = "แต่ละสวิตช์บันทึกทันทีที่กด \"บันทึก\" — ไม่ต้องรอปุ่ม \"บันทึกและเปิดใช้งาน\" ด้านล่างของแท็บนี้";
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
 
   // ── MOCKUP: "ปิดเมนูคลิกขวาบนหน้าเว็บ" — UI เท่านั้น ไม่มีการเรียก API/บันทึกจริง ──
   function updateContextMenuMockNote() {

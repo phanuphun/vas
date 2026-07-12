@@ -106,6 +106,16 @@ from features.kiosk.manager import (
     resolve_kiosk_target_user,
     stop_kiosk_mode,
 )
+from features.kiosk.os_notifications import (
+    GNOME_INITIAL_SETUP_AUTOSTART_PATH,
+    NEEDRESTART_CONF_PATH,
+    OS_NOTIFY_FLAG_DEFS,
+    RELEASE_UPGRADES_PATH,
+    UPDATE_NOTIFIER_AUTOSTART_PATH,
+    OsNotificationManager,
+    collect_os_notification_status,
+    normalize_os_notify_flags,
+)
 from features.display.monitors_xml import (
     MonitorsXmlManager,
     SYSTEM_MONITORS_XML_PATH,
@@ -1683,6 +1693,31 @@ def create_app() -> Flask:
             return {"exists": True, "content": content, "path": path.as_posix()}
         except OSError as e:
             return {"error": str(e)}, 500
+
+    @app.get("/api/kiosk/os-notifications")
+    def kiosk_os_notifications_get_api() -> dict[str, object]:
+        return collect_os_notification_status().as_dict()
+
+    @app.post("/api/kiosk/os-notifications")
+    def kiosk_os_notifications_save_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        payload = request.get_json(silent=True) or {}
+        raw_flags = payload.get("flags")
+        flags = normalize_os_notify_flags(raw_flags if isinstance(raw_flags, dict) else None)
+        if not flags:
+            return {"status": "error", "errors": ["ไม่มี flag ที่ต้องบันทึก"]}, 400
+
+        old_status = collect_os_notification_status().as_dict()
+        manager = OsNotificationManager(CommandRunner())
+        try:
+            manager.apply(flags)
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        status = collect_os_notification_status()
+        from core.database import log_audit as _db_audit, log_config_change as _db_config
+        _db_audit("kiosk_os_notifications_changed", {"flags": flags})
+        _db_config("kiosk", "os_notifications", old_value=old_status, new_value=status.as_dict())
+        return {"status": "ok", **status.as_dict()}
 
     @app.post("/api/kiosk/stop")
     def kiosk_stop_api() -> "tuple[dict[str, object], int] | dict[str, object]":
@@ -3863,6 +3898,8 @@ def _kiosk_page_context() -> dict[str, object]:
             "interval_seconds": heartbeat_integ.get("interval_seconds") or 30,
             "running": heartbeat_thread is not None and heartbeat_thread.is_alive(),
         },
+        "os_notify_flag_defs": list(OS_NOTIFY_FLAG_DEFS),
+        "os_notify_status": collect_os_notification_status().as_dict(),
     }
 
 
@@ -3878,6 +3915,10 @@ def _allowed_kiosk_config_paths() -> dict[str, Path]:
         "openbox_autostart": kiosk_openbox_autostart_path(home),
         "autostart_desktop": kiosk_gnome_autostart_desktop_path(home),
         "kiosk_launch_script": kiosk_launch_script_path(home),
+        "release_upgrades": RELEASE_UPGRADES_PATH,
+        "update_notifier_autostart": UPDATE_NOTIFIER_AUTOSTART_PATH,
+        "needrestart_conf": NEEDRESTART_CONF_PATH,
+        "gnome_initial_setup_autostart": GNOME_INITIAL_SETUP_AUTOSTART_PATH,
     }
 
 
