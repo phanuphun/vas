@@ -847,9 +847,20 @@ def build_gnome_screen_blank_commands(seconds: int) -> "tuple[tuple[str, ...], .
 def parse_gsettings_uint(output: str) -> "int | None":
     """Parse output ของ `gsettings get org.gnome.desktop.session idle-delay`
 
-    รูปแบบที่ต้องการ: `uint32 300` (หรือบางเวอร์ชันคืนแค่ `300` เฉยๆ) — ดึงตัวเลขตัวแรกที่เจอ
+    รูปแบบที่ต้องการ (ทั้งสตริงหลัง strip() ต้องตรงเป๊ะ ไม่ใช่แค่มีเลขปนอยู่ที่ไหนก็ได้):
+    `uint32 300` (หรือบางเวอร์ชันคืนแค่ `300` เฉยๆ)
+
+    เดิมใช้ `re.search(r"(\\d+)", output)` หาตัวเลขตัวแรกที่เจอที่ไหนก็ได้ในสตริง — proof จริงบน
+    เครื่อง production (2026-07-12) พบว่าตอน session/D-Bus เพิ่งเริ่มใหม่ๆ (race window สั้นๆ
+    หลัง login/reboot) `gsettings get` บางครั้งคืน output ที่ไม่ใช่รูปแบบปกติเลย (ไม่ใช่ error จน
+    returncode != 0 ด้วยซ้ำ — แค่ stdout มีเลขอื่นปนมา) regex เดิมจะหยิบเลขนั้นมาใช้เป็นค่า idle-
+    delay ทั้งที่ไม่ใช่ค่าจริง (พบว่าอ่านได้ 180 และ 32 ในสถานการณ์ที่ค่าจริง persist อยู่คือ 0
+    มาตลอด ยืนยันด้วย `dconf dump`/อ่านซ้ำ 20 รอบต่อเนื่องได้ 0 ทุกรอบ) — เปลี่ยนเป็น
+    `re.fullmatch()` บังคับให้ทั้งสตริง (หลัง strip whitespace) ต้องตรงรูปแบบที่คาดไว้เป๊ะๆ
+    เท่านั้น ถ้าไม่ตรงให้ถือว่าอ่านไม่สำเร็จ (คืน None -> หน้าเว็บโชว์ "ไม่ทราบค่า" อย่างตรงไปตรงมา
+    แทนที่จะโชว์ตัวเลขมั่วๆ ที่ดูน่าเชื่อถือแต่ผิด)
     """
-    match = re.search(r"(\d+)", output)
+    match = re.fullmatch(r"(?:uint32\s+)?(\d+)", output.strip())
     if not match:
         return None
     return int(match.group(1))
