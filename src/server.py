@@ -112,6 +112,7 @@ from features.display.monitors_xml import (
     collect_monitors_xml_system_status,
     find_x_session_for_user,
     user_has_own_monitors_xml,
+    user_monitors_xml_path,
 )
 from system.status import GDM_CUSTOM_CONFIG_PATH
 
@@ -1023,6 +1024,15 @@ def create_app() -> Flask:
         kiosk_target_has_own_monitors_xml = (
             user_has_own_monitors_xml(kiosk_target.home) if kiosk_target is not None else False
         )
+        # สถานะไฟล์ระดับ user (ตัวเดียวกับที่เตือนด้านบน) — ใช้ collect_monitors_xml_system_status()
+        # ตัวเดิม แค่ส่ง path ของ user เข้าไปแทน (ฟังก์ชันนี้ generic บน path อยู่แล้ว) has_signature
+        # ของไฟล์นี้บอกได้ว่าไฟล์ล่าสุด "VAS sync ไว้" (มี signature) หรือ "หน้างานตั้งเองผ่าน GNOME
+        # Settings" (ไม่มี signature เพราะ mutter เขียนเองไม่ผ่าน VAS) — ใช้แสดงใน Config Files card
+        monitors_xml_user = (
+            collect_monitors_xml_system_status(user_monitors_xml_path(kiosk_target.home))
+            if kiosk_target is not None
+            else None
+        )
         # session_type ของ kiosk user เป้าหมาย (gnome/openbox) — ใช้เตือน/ปิดปุ่ม Persist
         # monitors.xml ล่วงหน้าตั้งแต่หน้าเว็บโหลด แทนที่จะปล่อยให้กดแล้วเจอ error จาก D-Bus
         # ทีหลัง (Openbox ไม่มี mutter ให้เรียก GetCurrentState ได้เลย — ดู
@@ -1068,6 +1078,7 @@ def create_app() -> Flask:
             xorg_touchscreen=collect_xorg_touchscreen_config_status(),
             xorg_display_rotate=collect_xorg_display_rotate_config_status(),
             monitors_xml=collect_monitors_xml_system_status(),
+            monitors_xml_user=monitors_xml_user,
             kiosk_target_username=kiosk_target_username,
             kiosk_target_has_own_monitors_xml=kiosk_target_has_own_monitors_xml,
             kiosk_target_session_type=kiosk_target_session_type,
@@ -1189,6 +1200,7 @@ def create_app() -> Flask:
 
         runner = DisplayCommandRunner()
         configurator = DisplayConfigurator(runner)
+        monitors_xml_sync_warning: "str | None" = None
         try:
             if resolution_mode_id:
                 resolution_error = _apply_monitor_resolution(resolution_mode_id, rotate)
@@ -1206,7 +1218,7 @@ def create_app() -> Flask:
             if persist_display_rotate_xorg:
                 configurator.persist_xorg_display_rotate(output=output, rotate=rotate)
             if persist_monitors_xml:
-                error_message = _write_system_monitors_xml(rotate)
+                error_message, monitors_xml_sync_warning = _write_system_monitors_xml(rotate)
                 if error_message:
                     return {"status": "error", "errors": [error_message]}, 500
         except (CommandExecutionError, OSError, ValueError) as error:
@@ -1224,6 +1236,7 @@ def create_app() -> Flask:
             "persistDisplayRotateXorg": persist_display_rotate_xorg,
             "persistMonitorsXml": persist_monitors_xml,
             "resolutionModeId": resolution_mode_id,
+            "monitorsXmlUserSync": monitors_xml_sync_warning,
         }
 
     @app.post("/api/display/persist-write")
@@ -1245,6 +1258,7 @@ def create_app() -> Flask:
             return {"status": "error", "errors": [f"Unsupported touch rotation: {touch_rotate}"]}, 400
 
         configurator = DisplayConfigurator(DisplayCommandRunner())
+        monitors_xml_sync_warning: "str | None" = None
         try:
             if target == "session":
                 if not output or not touch:
@@ -1261,7 +1275,7 @@ def create_app() -> Flask:
                     return {"status": "error", "errors": ["ต้องเลือก Display ก่อน"]}, 400
                 configurator.persist_xorg_display_rotate(output=output, rotate=rotate)
             elif target == "monitors_xml":
-                error_message = _write_system_monitors_xml(rotate)
+                error_message, monitors_xml_sync_warning = _write_system_monitors_xml(rotate)
                 if error_message:
                     return {"status": "error", "errors": [error_message]}, 500
             else:
@@ -1269,7 +1283,7 @@ def create_app() -> Flask:
         except (CommandExecutionError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
-        return {"status": "ok", "target": target}
+        return {"status": "ok", "target": target, "monitorsXmlUserSync": monitors_xml_sync_warning}
 
     @app.post("/api/display/persist-remove")
     def display_persist_remove() -> tuple[dict[str, object], int] | dict[str, object]:
@@ -1288,7 +1302,14 @@ def create_app() -> Flask:
             elif target == "xorg_rotate":
                 configurator.remove_xorg_display_rotate_persist()
             elif target == "monitors_xml":
-                MonitorsXmlManager(DisplayCommandRunner()).remove_system_level()
+                manager = MonitorsXmlManager(DisplayCommandRunner())
+                manager.remove_system_level()
+                # ลบฝั่ง user-level ที่ sync ไว้ตอน Persist ด้วย (เฉพาะไฟล์ที่ VAS เขียนเอง มี
+                # signature เท่านั้น — ดู remove_user_level() docstring) กัน user-level เก่าที่
+                # sync ไว้ค้างอยู่ ยังเป็นตัวชนะ system-level ต่อไปทั้งที่ปิด Persist ไปแล้ว
+                kiosk_target = resolve_kiosk_target_user(list_kiosk_linux_users())
+                if kiosk_target is not None:
+                    manager.remove_user_level(kiosk_target.home)
             else:
                 return {"status": "error", "errors": [f"Unknown target: {target}"]}, 400
         except (CommandExecutionError, OSError, ValueError) as error:
@@ -3869,7 +3890,7 @@ def _allowed_config_paths() -> dict[str, Path]:
         _effective_home_config_path,
         _effective_home_script_path,
     )
-    return {
+    paths: "dict[str, Path]" = {
         "gdm_custom": Path(GDM_CUSTOM_CONFIG_PATH),
         "xprofile": _effective_home_config_path(),
         "display_script": _effective_home_script_path(),
@@ -3877,16 +3898,36 @@ def _allowed_config_paths() -> dict[str, Path]:
         "xorg_display_rotate": Path(XORG_DISPLAY_ROTATE_CONFIG_PATH),
         "monitors_xml": SYSTEM_MONITORS_XML_PATH,
     }
+    # monitors_xml_user: ต่าง path จากตัวอื่นในดิกต์นี้ตรงที่ขึ้นกับ kiosk_target_user ปัจจุบัน
+    # (dynamic ไม่ใช่ constant) — ใช้ resolve mechanism เดียวกับ _allowed_kiosk_config_paths()
+    # ด้านบน (หน้า Kiosk) โดยเจตนา ใส่เฉพาะตอน resolve target_user ได้จริงเท่านั้น (ไม่ fallback
+    # เป็น "/home/kiosk-user" เหมือนฟังก์ชันนั้น เพราะถ้า resolve ไม่ได้จริงๆ ไม่ควรมี key นี้เลย
+    # ให้ frontend มองไม่เห็น card แทนที่จะโชว์ path ปลอมที่อาจไม่มีอยู่จริง)
+    kiosk_target = resolve_kiosk_target_user(list_kiosk_linux_users())
+    if kiosk_target is not None:
+        paths["monitors_xml_user"] = user_monitors_xml_path(kiosk_target.home)
+    return paths
 
 
-def _write_system_monitors_xml(rotate: str) -> "str | None":
+def _write_system_monitors_xml(rotate: str) -> "tuple[str | None, str | None]":
     """เขียน /etc/xdg/monitors.xml ผ่าน D-Bus ของ session ที่ active อยู่ตอนนี้ (แทนที่ขั้นตอน
     เข้า GNOME Settings > Displays > Apply > Keep Changes บนจอเครื่องจริง — ดู
-    docs/monitors-xml/proof-2026-07-11-option-c-system-level.md) คืน error message (str) ถ้า
-    ล้มเหลว, None ถ้าสำเร็จ — caller ต้องรายงาน error กลับไปหน้าเว็บเสมอ ไม่ใช่เงียบๆ"""
+    docs/monitors-xml/proof-2026-07-11-option-c-system-level.md) แล้ว sync ค่าเดียวกันไปที่
+    ~/.config/monitors.xml ของ kiosk user เป้าหมายด้วยเสมอ (sync-on-apply) — เพราะ mutter ให้
+    ไฟล์ระดับ user ชนะระดับเครื่องเสมอตาม policy default (ดู MonitorsXmlManager.write_user_level
+    docstring ใน monitors_xml.py) ถ้า kiosk user มีไฟล์ของตัวเองอยู่ก่อนแล้ว (เช่นเคยถูกตั้งค่าที่
+    หน้างานผ่าน GNOME Settings มาก่อน) ค่าที่เขียนระดับเครื่องข้างบนจะไม่มีผลอะไรเลยถ้าไม่ sync
+    จุดนี้ด้วย — ผู้ใช้ยืนยันแนวทางนี้แล้ว (เลือก "sync-on-apply" จาก 3 ทางเลือกที่เสนอ)
+
+    คืน (error, sync_warning):
+    - error: str ถ้าเขียนระดับเครื่องล้มเหลว (fatal, caller ต้องคืน 500 ให้หน้าเว็บ), None ถ้า
+      เขียนระดับเครื่องสำเร็จ
+    - sync_warning: str ถ้า sync ระดับ user ล้มเหลว/ข้ามไป (non-fatal — ระดับเครื่องเขียนสำเร็จ
+      ไปแล้ว caller ควรแสดงเตือนแทนที่จะ fail ทั้ง request ทั้งก้อน), None ถ้า sync สำเร็จ
+    """
     query_user = _desktop_user()
     if not query_user:
-        return "หา user ที่ login session กราฟิกอยู่ตอนนี้ไม่เจอ — ต้องมี session ที่ active อยู่อย่างน้อย 1 คน"
+        return "หา user ที่ login session กราฟิกอยู่ตอนนี้ไม่เจอ — ต้องมี session ที่ active อยู่อย่างน้อย 1 คน", None
     # เช็ค session_type ที่ตั้งค่าไว้ก่อนยิง D-Bus เลย — Openbox ไม่มี mutter/GNOME Shell ให้
     # เรียก GetCurrentState ได้ตั้งแต่ต้น (พบจริง: ผู้ใช้ตั้ง kiosk-user เป็น Openbox ไว้ทดสอบ
     # แล้วมาเปิด toggle นี้ ได้ error message เดิมที่ generic เกินไปจนเดาสาเหตุไม่ออก)
@@ -3898,18 +3939,32 @@ def _write_system_monitors_xml(rotate: str) -> "str | None":
             "GNOME/mutter เท่านั้น ไม่เกี่ยวกับ Openbox) ถ้าต้องการใช้ automation นี้ ต้องเปลี่ยน "
             "session ของ kiosk user เป็น GNOME ก่อนชั่วคราว (หน้า Kiosk > ประเภท session) แล้ว "
             "reboot/re-login ให้ session เป็น GNOME จริงก่อนกลับมากดปุ่มนี้อีกครั้ง"
-        )
+        ), None
     session = find_x_session_for_user(query_user)
     if session is None:
-        return f"หา DISPLAY ของ user {query_user} ไม่เจอ (ต้องมี X session ที่กำลังทำงานอยู่จริง)"
+        return f"หา DISPLAY ของ user {query_user} ไม่เจอ (ต้องมี X session ที่กำลังทำงานอยู่จริง)", None
     x_display, uid = session
     manager = MonitorsXmlManager(DisplayCommandRunner())
     state, error_detail = manager.get_current_state(query_user, x_display, uid)
     if state is None:
         detail_suffix = f" — รายละเอียด: {error_detail}" if error_detail else ""
-        return f"อ่านค่าฮาร์ดแวร์จอผ่าน D-Bus (mutter) ไม่สำเร็จ{detail_suffix}"
+        return f"อ่านค่าฮาร์ดแวร์จอผ่าน D-Bus (mutter) ไม่สำเร็จ{detail_suffix}", None
     manager.write_system_level(state, rotate)
-    return None
+
+    # sync ไปยัง user-level ของ kiosk user เป้าหมาย (resolve_kiosk_target_user — คนละ mechanism
+    # จาก query_user ข้างบน: query_user คือคนที่ login กราฟิกอยู่ตอนนี้ที่ใช้ query D-Bus ได้จริง
+    # ส่วน kiosk_target คือ user ที่หน้า Kiosk "ตั้งใจ" ให้เป็น kiosk เสมอ อาจเป็นคนละคนกันได้ —
+    # แต่ state ที่ query มาเป็นค่าฮาร์ดแวร์ทั่วไป เขียนไปที่ home ของใครก็ได้ไม่ต้องเป็นคนเดียวกัน)
+    kiosk_target = resolve_kiosk_target_user(list_kiosk_linux_users())
+    if kiosk_target is None:
+        return None, "ไม่พบ kiosk user ที่ต้อง sync monitors.xml ระดับ user ให้ — เขียนแค่ระดับเครื่องเท่านั้น (อาจไม่มีผลถ้ามี user ที่มีไฟล์ของตัวเองอยู่ก่อน)"
+    try:
+        manager.write_user_level(state, rotate, kiosk_target.home, kiosk_target.username)
+    except OSError as sync_error:
+        return None, f"sync ไปยัง ~/.config/monitors.xml ของ {kiosk_target.username} ไม่สำเร็จ: {sync_error}"
+    return None, None
+
+
 def _apply_monitor_resolution(mode_id: str, rotate: str) -> "str | None":
     """เปลี่ยนความละเอียด/ความถี่รีเฟรชจอผ่าน D-Bus ของ mutter ตรงๆ (ApplyMonitorsConfig)
     แทนการยิง `xrandr --mode` ตรงๆ — เหตุผลเดียวกับ _write_system_monitors_xml() ข้างบน

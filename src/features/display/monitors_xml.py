@@ -19,6 +19,7 @@ D-Bus (`org.gnome.Mutter.DisplayConfig.GetCurrentState`) ตรงๆ จาก 
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,6 +103,21 @@ class MonitorsXmlSystemStatus:
     path: Path
     exists: bool
     has_signature: bool
+
+
+def _chown_path_to_user(path: Path, username: str) -> None:
+    """chown ไฟล์/โฟลเดอร์ไปให้ username ที่ระบุตรงๆ — จำเป็นเพราะ VAS server รันเป็น root/
+    systemd service เขียนไฟล์เข้า home ของ kiosk user โดยตรง (write_user_level) ถ้าไม่ chown
+    ไฟล์จะเป็นของ root ทำให้ GNOME session ของ kiosk user เองอ่าน/เขียนทับไม่ได้ในภายหลัง
+    (สำเนา private helper เดียวกับ display.py::_chown_path_to_user โดยเจตนา — โมดูลนี้ไม่ import
+    ข้าม features/display/display.py เพื่อไม่ผูก private helper ข้ามไฟล์กัน)"""
+    if pwd_module is None or not (hasattr(os, "geteuid") and os.geteuid() == 0):
+        return
+    try:
+        pw = pwd_module.getpwnam(username)
+        os.chown(path, pw.pw_uid, pw.pw_gid)
+    except (KeyError, OSError):
+        pass
 
 
 def user_monitors_xml_path(home: Path) -> Path:
@@ -346,6 +362,46 @@ class MonitorsXmlManager:
             return
         if path.exists():
             path.unlink()
+
+    def remove_user_level(self, home: Path) -> None:
+        """ลบ ~/.config/monitors.xml ของ kiosk user — **เฉพาะไฟล์ที่มี MONITORS_XML_SIGNATURE
+        เท่านั้น** (คือไฟล์ที่ write_user_level() เขียนไว้เอง) กันลบไฟล์จริงของ user ที่มาจาก
+        การตั้งค่าที่หน้างานผ่าน GNOME Settings เอง (ไม่มี signature นี้) โดยไม่ตั้งใจตอนปิด
+        toggle Persist monitors.xml จากฝั่ง VAS — ตรง pattern เดียวกับ collect_monitors_xml_
+        system_status() ที่เช็ค signature ก่อนเสมอ"""
+        path = user_monitors_xml_path(home)
+        if self.runner.dry_run:
+            print(f"remove (if VAS-signed) {path.as_posix()}")
+            return
+        if not path.exists():
+            return
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        if MONITORS_XML_SIGNATURE not in content:
+            return
+        print(f"remove {path.as_posix()}")
+        path.unlink()
+
+    def write_user_level(self, state: MonitorState, rotation: str, home: Path, username: str) -> None:
+        """เขียน ~/.config/monitors.xml ของ kiosk user ตัวเป้าหมายให้เนื้อหาตรงกับที่เขียนลง
+        /etc/xdg/monitors.xml (write_system_level) — เพราะ mutter ให้ไฟล์ระดับ user ชนะ
+        ระดับเครื่องเสมอ (ดู docstring บนสุดของไฟล์นี้) VAS จึงต้อง "sync" ทั้งสองที่ให้ตรงกัน
+        ทุกครั้งที่ Apply/Persist ไม่งั้นถ้า kiosk user มีไฟล์ของตัวเองอยู่ก่อนแล้ว (เช่นเคยถูก
+        ตั้งค่าที่หน้างานผ่าน GNOME Settings มาก่อน) ค่าที่ตั้งจาก VAS จะไม่มีผลอะไรเลย แม้จะ
+        เขียนระดับเครื่องสำเร็จก็ตาม — เรียกต่อจาก write_system_level() เสมอ ไม่ใช้แทนกัน"""
+        path = user_monitors_xml_path(home)
+        content = build_monitors_xml(state, rotation)
+        print(f"write {path.as_posix()}")
+        if self.runner.dry_run:
+            print(content.rstrip())
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o644)
+        _chown_path_to_user(path, username)
+        _chown_path_to_user(path.parent, username)
 
 
 def build_monitors_xml(state: MonitorState, rotation: str) -> str:

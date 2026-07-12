@@ -183,25 +183,6 @@
                 <option value="{{ seconds }}" {{ 'selected' if seconds == current_screen_blank else '' }}>{{ label }}</option>
                 {% endfor %}
               </select>
-              {% if screen_blank_session_type == "gnome" %}
-              <p class="text-[0.7rem] text-faint flex items-center gap-1.5 flex-wrap">
-                <span class="zone zone-info">GNOME</span>
-                ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">gsettings idle-delay</code>
-                — เทียบเท่า Ubuntu Settings &gt; Power &gt; Blank Screen (บันทึกถาวรทันที ไม่ต้อง reboot)
-              </p>
-              <p class="text-[0.7rem] text-faint">
-                หมายเหตุ: <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> ไม่มีผลกับ session แบบ GNOME
-                (gsd-power ดับจอเองผ่าน idle-timer ของตัวเอง ไม่ผ่าน X11 Screensaver/DPMS) — ระบบยังตั้ง <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code>
-                คู่ไปด้วยเผื่อสลับไปใช้ Openbox ในอนาคต
-              </p>
-              {% elif screen_blank_session_type == "openbox" %}
-              <p class="text-[0.7rem] text-faint flex items-center gap-1.5 flex-wrap">
-                <span class="zone zone-mute">Openbox</span>
-                ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> (screensaver + DPMS) — เทียบเท่า Ubuntu Settings &gt; Power &gt; Screen Blank
-              </p>
-              {% else %}
-              <p class="text-[0.7rem] text-faint">ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> (screensaver + DPMS) — เทียบเท่า Ubuntu Settings &gt; Power &gt; Screen Blank</p>
-              {% endif %}
             </div>
             <div class="flex flex-col gap-1.5">
               <label class="text-[0.75rem] font-semibold text-muted" for="touchDevice">Touchscreen</label>
@@ -325,9 +306,9 @@
             <span>Kiosk user (<strong>{{ kiosk_target_username }}</strong>) เป็น Openbox — ไม่มี mutter/D-Bus ปิดใช้งานปุ่มนี้ไว้</span>
           </div>
           {% elif kiosk_target_username and kiosk_target_has_own_monitors_xml %}
-          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-caution/8 border-caution/25 text-[0.78rem] text-[#92660b]">
-            <iconify-icon icon="lucide:alert-triangle" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
-            <span>Kiosk user (<strong>{{ kiosk_target_username }}</strong>) มี monitors.xml ของตัวเองอยู่แล้ว — ค่านี้จะไม่มีผล</span>
+          <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border bg-accent/8 border-accent/25 text-[0.78rem] text-accent">
+            <iconify-icon icon="lucide:refresh-cw" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+            <span>Kiosk user (<strong>{{ kiosk_target_username }}</strong>) มี monitors.xml ของตัวเองอยู่แล้ว — VAS จะ sync ค่านี้ให้ตรงกับที่ตั้งไว้ทุกครั้งที่ Apply/Persist (เพราะไฟล์ระดับ user ชนะระดับเครื่องเสมอ) ถ้าหน้างานไปปรับผ่าน GNOME Settings อีกครั้งภายหลัง ค่านั้นจะชนะจนกว่าจะกด Apply/Persist จาก VAS รอบใหม่</span>
           </div>
           {% endif %}
           <div class="flex items-center justify-between gap-4">
@@ -516,7 +497,16 @@
           "ตั้งค่าแล้ว (เขียนโดย VAS)" if monitors_xml.has_signature else "ยังไม่ได้ตั้งค่า",
           "monitors_xml"
         ),
-      ] %}
+      ] + ([(
+        "monitors_xml_user",
+        "lucide:user-cog",
+        monitors_xml_user.path.as_posix(),
+        "monitors.xml (ระดับ user — " ~ kiosk_target_username ~ ")",
+        "Config ของ GNOME/mutter เฉพาะ user นี้ — <strong>ชนะไฟล์ระดับเครื่องเสมอ</strong>ตาม policy default ของ mutter VAS จะเขียนไฟล์นี้ให้ตรงกับ /etc/xdg/monitors.xml ทุกครั้งที่ Apply/Persist (sync-on-apply) แต่ถ้าหน้างานไปปรับผ่าน GNOME Settings บนตัวเครื่องอีกครั้งภายหลัง ไฟล์นี้จะถูกเขียนทับ (ไม่มี VAS signature อีกต่อไป) แล้วชนะ VAS จนกว่าจะกด Apply/Persist จาก VAS รอบใหม่",
+        monitors_xml_user.has_signature,
+        ("VAS sync ไว้ล่าสุด (ตรงกับระดับเครื่อง)" if monitors_xml_user.has_signature else "ไม่มี VAS signature — น่าจะถูกตั้งจากหน้างานโดยตรง ยังไม่เคย sync จาก VAS") if monitors_xml_user.exists else "ยังไม่มีไฟล์นี้",
+        "monitors_xml_user"
+      )] if kiosk_target_has_own_monitors_xml and monitors_xml_user else []) %}
 
       <div class="flex flex-col gap-4">
         {% for key, icon, path, title, desc, ok, status_text, cfg_key in cfg_files %}
@@ -696,8 +686,15 @@
         .then(function (d) {
           toggleEl.disabled = false;
           if (d.status === "ok") {
-            if (msgEl) msgEl.textContent = turningOn ? "บันทึกแล้ว" : "ลบไฟล์แล้ว";
-            if (window.showToast) window.showToast(turningOn ? "บันทึกแล้ว" : "ลบไฟล์แล้ว", "ok");
+            // monitorsXmlUserSync: warning ที่ไม่ fail request (ดูคอมเมนต์ doApply() ด้านล่าง) —
+            // มีค่าเฉพาะตอน target === "monitors_xml" เท่านั้น target อื่นเป็น undefined เสมอ
+            if (d.monitorsXmlUserSync) {
+              if (msgEl) msgEl.textContent = "บันทึกแล้ว (คำเตือน sync user-level)";
+              if (window.showToast) window.showToast("บันทึกแล้ว — คำเตือน: " + d.monitorsXmlUserSync, "error");
+            } else {
+              if (msgEl) msgEl.textContent = turningOn ? "บันทึกแล้ว" : "ลบไฟล์แล้ว";
+              if (window.showToast) window.showToast(turningOn ? "บันทึกแล้ว" : "ลบไฟล์แล้ว", "ok");
+            }
           } else {
             // เขียน/ลบไม่สำเร็จ — ย้อน toggle กลับ กัน UI โชว์สถานะไม่ตรงกับไฟล์จริงบนดิสก์
             toggleEl.checked = !turningOn;
@@ -919,10 +916,15 @@
 
   function setResult(msg, status) {
     if (applyResult) {
-      applyResult.className = "msg text-[0.82rem] " + (status === "success" || status === "ok" ? "text-safe" : status === "error" ? "text-danger" : "text-faint");
+      applyResult.className = "msg text-[0.82rem] " + (
+        status === "success" || status === "ok" ? "text-safe"
+        : status === "error" ? "text-danger"
+        : status === "warning" ? "text-caution"
+        : "text-faint"
+      );
       applyResult.textContent = msg;
     }
-    if (msg && (status === "ok" || status === "success" || status === "error") && window.showToast) {
+    if (msg && (status === "ok" || status === "success" || status === "error" || status === "warning") && window.showToast) {
       window.showToast(msg, status === "error" ? "error" : "ok");
     }
   }
@@ -1024,8 +1026,16 @@
         if (errors.length === 0) {
           deviceRotations[payload.output] = payload.rotate;
           if (payload.touch) deviceTouchRotations[payload.touch] = displayResult.touchRotate || payload.rotate;
-          setResult("Applied successfully", "ok");
-          setTimeout(function () { setResult("", ""); }, 3000);
+          // monitorsXmlUserSync เป็น warning แยกจาก status หลัก (ดูคอมเมนต์ server.py:
+          // _write_system_monitors_xml()) — ระดับเครื่องเขียนสำเร็จไปแล้ว (status ok) แต่ sync
+          // ไปยัง ~/.config/monitors.xml ของ kiosk user ไม่สำเร็จ/ข้ามไป ต้องเตือนให้เห็นเสมอ
+          // ไม่งั้นจะเจอบั๊กเดิม ("ตั้งจาก VAS แล้วไม่มีผล") อีกแบบเงียบๆ
+          if (displayResult.monitorsXmlUserSync) {
+            setResult("Applied successfully — คำเตือน: " + displayResult.monitorsXmlUserSync, "warning");
+          } else {
+            setResult("Applied successfully", "ok");
+            setTimeout(function () { setResult("", ""); }, 3000);
+          }
         } else {
           setResult("Error: " + errors.join(", "), "error");
         }
