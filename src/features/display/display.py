@@ -61,9 +61,22 @@ SCREEN_BLANK_OPTIONS: "tuple[tuple[int, str], ...]" = (
     (0, "ไม่ปิดหน้าจอ (Never)"),
 )
 
+# ── GNOME screen blank (gsettings) — คนละ mechanism กับ xset โดยสิ้นเชิง ──────────
+# proof จริงบนเครื่อง 2026-07-12 (kiosk-user, session Session=ubuntu-xorg): ตั้ง `xset s off` +
+# `xset -dpms` ไว้ครบแล้วผ่าน .xprofile จอก็ยังดับตามค่า default ของ gsettings
+# org.gnome.desktop.session idle-delay (300 วิ = ค่า default ของ Ubuntu) เพราะ gsd-power
+# (GNOME power daemon) ดับจอเองผ่าน idle-timer ของตัวเอง ไม่ผ่าน X11 Screensaver/DPMS extension
+# ที่ xset ควบคุม — ยืนยันด้วย `xset q` ที่ยังโชว์ "DPMS is Disabled"/"timeout: 0" เหมือนเดิม
+# ทุกตัวอักษรแม้จอจะดับไปแล้วจริง จึงต้องตั้งค่านี้แยกต่างหากสำหรับ session แบบ GNOME
+# (ดู DisplayConfigurator.apply_gnome_screen_blank() ด้านล่าง)
+GNOME_IDLE_DELAY_SCHEMA = "org.gnome.desktop.session"
+GNOME_IDLE_DELAY_KEY = "idle-delay"
+
 __all__ = [
     "DISPLAY_READY_MARKER_NAME",
     "DISPLAY_SESSION_SIGNATURE",
+    "GNOME_IDLE_DELAY_KEY",
+    "GNOME_IDLE_DELAY_SCHEMA",
     "ROTATION_MATRICES",
     "SCREEN_BLANK_OPTIONS",
     "SCREEN_BLANK_SIGNATURE",
@@ -73,15 +86,18 @@ __all__ = [
     "build_display_session_block",
     "build_display_session_script",
     "build_gdm_wayland_config",
+    "build_gnome_screen_blank_commands",
     "build_screen_blank_block",
     "build_screen_blank_commands",
     "build_xorg_display_rotate_config",
     "build_xorg_touchscreen_config",
     "display_ready_marker_path",
+    "get_gnome_screen_blank_seconds",
     "get_screen_blank_seconds",
     "get_udevadm_touchscreen_names",
     "list_touch_devices",
     "matrix_for_rotation",
+    "parse_gsettings_uint",
     "parse_xinput_device_map",
     "parse_xset_screen_blank_seconds",
     "remove_managed_block",
@@ -308,6 +324,53 @@ class DisplayConfigurator:
         )
         _chown_to_effective_user(path)
 
+    def apply_gnome_screen_blank(self, seconds: int, username: str) -> None:
+        """ตั้งค่า GNOME idle-delay (screen blank) ผ่าน gsettings ให้ user ที่ login session
+        แบบ GNOME อยู่ — คนละ mechanism จาก apply_screen_blank()/persist_screen_blank() (xset)
+        โดยสิ้นเชิง เพราะ gsd-power ไม่ผ่าน X11 Screensaver/DPMS extension เลย (ดูคอมเมนต์ที่
+        GNOME_IDLE_DELAY_SCHEMA ด้านบน) — ต้องเรียกทั้งคู่พร้อมกันสำหรับ session แบบ GNOME
+        (ดู server.py: display_screen_blank())
+
+        ต่างจาก xset ตรงที่ gsettings เขียนผ่าน dconf ซึ่ง persist ลงดิสก์ทันทีในตัวเอง
+        (~/.config/dconf/user) ไม่ต้องพึ่ง .xprofile/relogin เหมือน xset
+
+        ข้อกำหนดของ gsettings/dconf:
+        1. ต้องรันในบริบท D-Bus session bus ของ user เป้าหมาย (unix:path=/run/user/<uid>/bus)
+           เรียกจาก root ตรงๆ โดยไม่มี DBUS_SESSION_BUS_ADDRESS ที่ถูกต้องจะ fail เงียบๆ
+           เหมือนปัญหา XAUTHORITY ของ xrandr/xset (ดู _default_xauthority() ใน server.py)
+        2. bus นี้มีจริงก็ต่อเมื่อ user login session graphical อยู่จริงเท่านั้น (systemd --user
+           session) — ถ้า user ไม่ได้ login อยู่จะไม่มี /run/user/<uid>/bus เลย
+        3. ~/.config/dconf/ ต้องมีอยู่ก่อนและเป็นเจ้าของโดย user เป้าหมาย — user ที่สร้างผ่าน
+           useradd ใหม่ๆ (เช่น kiosk-user) อาจไม่เคยมีโฟลเดอร์นี้เลย ทำให้เขียนค่าไม่ได้ (proof
+           จริงบนเครื่อง 2026-07-12: `Failed to create file .../.config/dconf/user.XXXX:
+           No such file or directory`) — ensure ให้ก่อนเรียก gsettings ทุกครั้ง
+        """
+        info = _user_info(username)
+        if info is None:
+            raise ValueError(f"ไม่พบ user '{username}' ในระบบ (pwd lookup ล้มเหลว)")
+        uid, home = info
+        dbus_address = _dbus_session_bus_address(uid)
+        commands = build_gnome_screen_blank_commands(seconds)
+
+        if self.runner.dry_run:
+            print(f"ensure dconf dir: {(home / '.config' / 'dconf').as_posix()}")
+            for command in commands:
+                args = ["runuser", "-u", username, "--", "env", f"DBUS_SESSION_BUS_ADDRESS={dbus_address}", *command]
+                self.runner.run(args, check=True)
+            return
+
+        bus_path = Path(f"/run/user/{uid}/bus")
+        if not bus_path.exists():
+            raise ValueError(
+                f"ไม่มี D-Bus session bus ของ user '{username}' ที่ {bus_path.as_posix()} — "
+                "user ต้อง login เข้า GNOME session อยู่จริงถึงจะตั้งค่า gsettings ได้"
+            )
+
+        _ensure_dconf_dir(home, username)
+        for command in commands:
+            args = ["runuser", "-u", username, "--", "env", f"DBUS_SESSION_BUS_ADDRESS={dbus_address}", *command]
+            self.runner.run(args, check=True)
+
     def reset_touch_mapping(
         self,
         touch: str,
@@ -520,6 +583,49 @@ def _chown_to_effective_user(path: Path) -> None:
         pass
 
 
+def _chown_path_to_user(path: Path, username: str) -> None:
+    """chown ไฟล์/โฟลเดอร์ไปให้ username ที่ระบุตรงๆ (ต่าง _chown_to_effective_user() ตรงที่ไม่
+    พึ่ง SUDO_USER — จำเป็นเวลา VAS server รันเป็น systemd service ที่ไม่มี SUDO_USER ใน env เลย
+    แต่ต้อง chown ให้ user เป้าหมายที่ resolve มาจากทางอื่น เช่น find_x11_session_owner())"""
+    if not (hasattr(os, "geteuid") and os.geteuid() == 0):
+        return
+    try:
+        import pwd
+        pw = pwd.getpwnam(username)  # type: ignore[attr-defined]
+        os.chown(path, pw.pw_uid, pw.pw_gid)  # type: ignore[attr-defined]
+    except (ImportError, KeyError, OSError):
+        pass
+
+
+def _user_info(username: str) -> "tuple[int, Path] | None":
+    """คืน (uid, home) ของ username — None ถ้า lookup ไม่เจอ (user ไม่มีอยู่จริง)"""
+    try:
+        import pwd
+        pw = pwd.getpwnam(username)  # type: ignore[attr-defined]
+        return pw.pw_uid, Path(pw.pw_dir)  # type: ignore[attr-defined]
+    except (ImportError, KeyError):
+        return None
+
+
+def _dbus_session_bus_address(uid: int) -> str:
+    """path มาตรฐานของ systemd --user session bus — ต้องมี user login session graphical อยู่จริง
+    ถึงจะมีไฟล์นี้ (สร้างโดย systemd-logind ตอน login)"""
+    return f"unix:path=/run/user/{uid}/bus"
+
+
+def _ensure_dconf_dir(home: Path, username: str) -> None:
+    """สร้าง ~/.config/dconf ให้ username เป้าหมายก่อนเรียก gsettings เสมอ — user ที่สร้างผ่าน
+    useradd ใหม่ๆ (เช่น kiosk-user) อาจไม่เคยมีโฟลเดอร์นี้เลย ทำให้ dconf เขียนค่าไม่ได้ (proof จริง
+    บนเครื่อง 2026-07-12: `Failed to create file .../.config/dconf/user.XXXX: No such file or
+    directory`) — mkdir เป็น root แล้วต้อง chown ให้ username คืน ไม่งั้น dconf-service ที่รันเป็น
+    username เองเขียนเข้าโฟลเดอร์ที่ root เป็นเจ้าของไม่ได้เหมือนเดิม"""
+    config_dir = home / ".config"
+    dconf_dir = config_dir / "dconf"
+    dconf_dir.mkdir(parents=True, exist_ok=True)
+    _chown_path_to_user(config_dir, username)
+    _chown_path_to_user(dconf_dir, username)
+
+
 # ---------------------------------------------------------------------------
 # Pure builders
 # ---------------------------------------------------------------------------
@@ -724,6 +830,59 @@ def get_screen_blank_seconds(
     if result.returncode != 0:
         return None
     return parse_xset_screen_blank_seconds(result.stdout)
+
+
+def build_gnome_screen_blank_commands(seconds: int) -> "tuple[tuple[str, ...], ...]":
+    """คืนชุดคำสั่ง gsettings สำหรับตั้ง GNOME idle-delay (หน้าจอดับอัตโนมัติ)
+
+    seconds <= 0 -> idle-delay 0 (เทียบเท่า GNOME Settings > Power > Blank Screen > Never)
+    seconds > 0  -> idle-delay <seconds>
+
+    คนละ mechanism กับ xset/DPMS โดยสิ้นเชิง — ดูคอมเมนต์ที่ GNOME_IDLE_DELAY_SCHEMA
+    """
+    value = "0" if seconds <= 0 else str(int(seconds))
+    return (("gsettings", "set", GNOME_IDLE_DELAY_SCHEMA, GNOME_IDLE_DELAY_KEY, value),)
+
+
+def parse_gsettings_uint(output: str) -> "int | None":
+    """Parse output ของ `gsettings get org.gnome.desktop.session idle-delay`
+
+    รูปแบบที่ต้องการ: `uint32 300` (หรือบางเวอร์ชันคืนแค่ `300` เฉยๆ) — ดึงตัวเลขตัวแรกที่เจอ
+    """
+    match = re.search(r"(\d+)", output)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def get_gnome_screen_blank_seconds(
+    runner: CommandRunner,
+    username: str,
+) -> "int | None":
+    """อ่านค่า GNOME idle-delay ปัจจุบันของ username ผ่าน gsettings
+
+    คืน None ถ้า user ไม่มีอยู่จริง, ไม่มี D-Bus session bus อยู่ (ไม่ได้ login), หรือคำสั่งล้มเหลว
+    — ตาม pattern เดียวกับ get_screen_blank_seconds() (xset) ด้านบน
+    """
+    info = _user_info(username)
+    if info is None:
+        return None
+    uid, _home = info
+    bus_path = Path(f"/run/user/{uid}/bus")
+    if not bus_path.exists():
+        return None
+    dbus_address = _dbus_session_bus_address(uid)
+    args = [
+        "runuser", "-u", username, "--", "env", f"DBUS_SESSION_BUS_ADDRESS={dbus_address}",
+        "gsettings", "get", GNOME_IDLE_DELAY_SCHEMA, GNOME_IDLE_DELAY_KEY,
+    ]
+    try:
+        result = runner.run(args, check=False)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_gsettings_uint(result.stdout)
 
 
 def build_gdm_wayland_config(existing_content: str, enabled: bool) -> str:

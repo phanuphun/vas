@@ -37,6 +37,7 @@ from features.display.display import (
     ROTATION_MATRICES,
     SCREEN_BLANK_OPTIONS,
     TouchDevice,
+    get_gnome_screen_blank_seconds,
     get_screen_blank_seconds,
     get_udevadm_touchscreen_names,
     parse_xinput_device_map,
@@ -1008,7 +1009,6 @@ def create_app() -> Flask:
     def display_settings() -> str:
         default_display = _default_x_display()
         devices = collect_display_devices(x_display=default_display)
-        current_screen_blank = get_screen_blank_seconds(DisplayCommandRunner(), x_display=default_display)
         default_output = devices.outputs[0] if devices.outputs else None
         current_rotation = devices.rotations.get(default_output, "normal") if default_output else "normal"
         default_touch = devices.touch_devices[0].name if devices.touch_devices else None
@@ -1032,6 +1032,24 @@ def create_app() -> Flask:
             if kiosk_target_username is not None
             else "gnome"
         )
+
+        # Screen Blank ปัจจุบัน: อ่านจาก user ที่ login session graphical จริงอยู่ตอนนี้ (ตัวเดียว
+        # กับที่ Apply จะไปแก้) ไม่ใช่ kiosk_target_username — คนละ resolve mechanism กัน (ดู
+        # display_screen_blank() ด้านล่างสำหรับเหตุผลเดียวกัน) ถ้า session นั้นเป็น GNOME ต้องอ่าน
+        # ค่าจาก gsettings idle-delay เป็นค่าจริง ไม่ใช่ xset — เพราะ gsd-power ไม่ผ่าน X11
+        # Screensaver/DPMS extension เลย (proof จริงบนเครื่อง 2026-07-12 ดู display.py คอมเมนต์ที่
+        # GNOME_IDLE_DELAY_SCHEMA) ค่าจาก xset จึงไม่สะท้อนพฤติกรรมจริงของจอเลยสำหรับ session แบบนี้
+        active_session_owner = find_x11_session_owner()
+        active_session_username = active_session_owner[0] if active_session_owner else None
+        active_session_type = (
+            collect_accounts_service_status(active_session_username).session_type
+            if active_session_username is not None
+            else None
+        )
+        if active_session_type == "gnome" and active_session_username is not None:
+            current_screen_blank = get_gnome_screen_blank_seconds(DisplayCommandRunner(), active_session_username)
+        else:
+            current_screen_blank = get_screen_blank_seconds(DisplayCommandRunner(), x_display=default_display)
 
         return render_template(
             "display.html",
@@ -1057,6 +1075,8 @@ def create_app() -> Flask:
             screen_blank_config=collect_screen_blank_config_status(),
             current_screen_blank=current_screen_blank,
             current_screen_blank_label=screen_blank_label(current_screen_blank),
+            screen_blank_session_type=active_session_type,
+            active_session_username=active_session_username,
         )
 
     @app.get("/api/display/config-content")
@@ -1345,11 +1365,33 @@ def create_app() -> Flask:
         except (CommandExecutionError, OSError, ValueError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
+        # ตั้งค่า gsettings ควบคู่ไปด้วยเสมอถ้า user ที่ login session graphical อยู่ตอนนี้เป็น
+        # GNOME — xset ด้านบนไม่มีผลกับ session แบบนี้เลย (gsd-power ไม่ผ่าน X11
+        # Screensaver/DPMS extension เลย ดู display.py คอมเมนต์ที่ GNOME_IDLE_DELAY_SCHEMA,
+        # proof จริงบนเครื่อง 2026-07-12) ไม่ลบ/ไม่ branch ทิ้ง xset เดิม — เผื่อสลับไปใช้ Openbox
+        # ในอนาคต เก็บ error ของฝั่ง gnome แยกไม่ให้ request นี้ fail ทั้งก้อน เพราะ persist xset
+        # ด้านบนอาจสำเร็จไปแล้ว
+        gnome_result: "dict[str, object]" = {"attempted": False}
+        active_session_owner = find_x11_session_owner()
+        if active_session_owner:
+            active_username, _active_display = active_session_owner
+            active_session_type = collect_accounts_service_status(active_username).session_type
+            if active_session_type == "gnome":
+                gnome_result["attempted"] = True
+                gnome_result["username"] = active_username
+                try:
+                    configurator.apply_gnome_screen_blank(seconds, username=active_username)
+                    gnome_result["status"] = "ok"
+                except (CommandExecutionError, OSError, ValueError) as gnome_error:
+                    gnome_result["status"] = "error"
+                    gnome_result["error"] = str(gnome_error)
+
         return {
             "status": "ok",
             "seconds": seconds,
             "display": x_display,
             "persist": persist,
+            "gnome": gnome_result,
         }
 
     @app.post("/api/display/wayland")

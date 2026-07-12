@@ -113,6 +113,22 @@
             {{ session.session_type }} via {{ session.source }}
           </span>
         </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:user" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Logged in:</span>
+          <span class="text-[0.78rem] {% if active_session_username %}text-ink{% else %}text-caution{% endif %}">
+            {% if active_session_username %}
+              {{ active_session_username }}{% if screen_blank_session_type %} ({{ screen_blank_session_type }}){% endif %}
+            {% else %}ไม่พบ user ที่ login อยู่{% endif %}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Screen Blank:</span>
+          <span class="text-[0.78rem] {% if current_screen_blank == 0 %}text-safe{% else %}text-ink{% endif %}">
+            {{ current_screen_blank_label }}
+          </span>
+        </div>
       </div>
 
       <!-- Settings card -->
@@ -167,7 +183,25 @@
                 <option value="{{ seconds }}" {{ 'selected' if seconds == current_screen_blank else '' }}>{{ label }}</option>
                 {% endfor %}
               </select>
+              {% if screen_blank_session_type == "gnome" %}
+              <p class="text-[0.7rem] text-faint flex items-center gap-1.5 flex-wrap">
+                <span class="zone zone-info">GNOME</span>
+                ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">gsettings idle-delay</code>
+                — เทียบเท่า Ubuntu Settings &gt; Power &gt; Blank Screen (บันทึกถาวรทันที ไม่ต้อง reboot)
+              </p>
+              <p class="text-[0.7rem] text-faint">
+                หมายเหตุ: <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> ไม่มีผลกับ session แบบ GNOME
+                (gsd-power ดับจอเองผ่าน idle-timer ของตัวเอง ไม่ผ่าน X11 Screensaver/DPMS) — ระบบยังตั้ง <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code>
+                คู่ไปด้วยเผื่อสลับไปใช้ Openbox ในอนาคต
+              </p>
+              {% elif screen_blank_session_type == "openbox" %}
+              <p class="text-[0.7rem] text-faint flex items-center gap-1.5 flex-wrap">
+                <span class="zone zone-mute">Openbox</span>
+                ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> (screensaver + DPMS) — เทียบเท่า Ubuntu Settings &gt; Power &gt; Screen Blank
+              </p>
+              {% else %}
               <p class="text-[0.7rem] text-faint">ควบคุมผ่าน <code class="text-[0.68rem] bg-surface px-1 rounded font-mono">xset</code> (screensaver + DPMS) — เทียบเท่า Ubuntu Settings &gt; Power &gt; Screen Blank</p>
+              {% endif %}
             </div>
             <div class="flex flex-col gap-1.5">
               <label class="text-[0.75rem] font-semibold text-muted" for="touchDevice">Touchscreen</label>
@@ -978,6 +1012,14 @@
         var errors = [];
         if (displayResult.status !== "ok") errors = errors.concat(displayResult.errors || []);
         if (blankResult && blankResult.status !== "ok") errors = errors.concat(blankResult.errors || []);
+        // gnome_result เป็น best-effort แยกจาก status หลักของ /api/display/screen-blank เสมอ
+        // (ดูคอมเมนต์ server.py: display_screen_blank()) — request หลักอาจ "ok" อยู่แล้วเพราะ
+        // xset persist สำเร็จ แต่ gsettings (ตัวที่มีผลจริงกับ session แบบ GNOME) fail แยกได้ —
+        // ต้องโชว์ error นี้ให้เห็นด้วย ไม่งั้นผู้ใช้จะเข้าใจผิดว่า "Applied successfully" ทั้งที่
+        // จอ GNOME จริงๆ ยังไม่ถูกตั้งค่าเลย
+        if (blankResult && blankResult.gnome && blankResult.gnome.attempted && blankResult.gnome.status === "error") {
+          errors.push("GNOME screen blank (gsettings): " + blankResult.gnome.error);
+        }
 
         if (errors.length === 0) {
           deviceRotations[payload.output] = payload.rotate;
