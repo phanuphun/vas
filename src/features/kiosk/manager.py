@@ -254,6 +254,16 @@ GNOME_LOCKDOWN_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
         "label": "ปิดปุ่ม Super (เปิด Activities Overview)",
         "desc": "กันปุ่ม Super บนคีย์บอร์ดเปิดหน้า Activities Overview หลุดออกจาก kiosk",
     },
+    {
+        "key": "disable_ubuntu_dock",
+        "command": "gnome-extensions disable ubuntu-dock@ubuntu.com",
+        "label": "ปิด Ubuntu Dock (กันปัดขอบจอซ้ายโผล่ dock)",
+        "desc": (
+            "ปิด extension ubuntu-dock (dash-to-dock) ไม่ให้โผล่ตอนปัดนิ้ว/เมาส์ชนขอบจอซ้าย "
+            "กันการกดไอคอนใน dock (เช่น Settings/Files) หลุดออกจาก kiosk — ยืนยัน UUID จริง "
+            "บนเครื่อง hapymed-sterile-00 แล้วผ่าน `ls /usr/share/gnome-shell/extensions/`"
+        ),
+    },
 )
 
 DEFAULT_GNOME_LOCKDOWN_FLAGS: "dict[str, bool]" = {item["key"]: True for item in GNOME_LOCKDOWN_FLAG_DEFS}

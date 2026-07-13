@@ -102,6 +102,22 @@ def test_parse_gnome_lockdown_flags_roundtrips_with_build() -> None:
     assert parsed == flags
 
 
+def test_ubuntu_dock_lockdown_present_by_default_and_omitted_when_disabled() -> None:
+    """toggle ปิด Ubuntu Dock (เพิ่มจากการวิเคราะห์คลิปที่พบว่าปัดขอบจอซ้ายแล้ว dock โผล่ทับ
+    kiosk ได้ — UUID ยืนยันจริงบนเครื่อง hapymed-sterile-00 คือ ubuntu-dock@ubuntu.com)"""
+    dock_command = next(
+        item["command"] for item in GNOME_LOCKDOWN_FLAG_DEFS if item["key"] == "disable_ubuntu_dock"
+    )
+    assert dock_command == "gnome-extensions disable ubuntu-dock@ubuntu.com"
+
+    default_preamble = build_gnome_lockdown_preamble(None)
+    assert dock_command in default_preamble
+
+    flags = normalize_gnome_lockdown_flags({"disable_ubuntu_dock": False})
+    preamble_without_dock = build_gnome_lockdown_preamble(flags)
+    assert dock_command not in preamble_without_dock
+
+
 def test_normalize_gnome_lockdown_flags_defaults_unknown_keys_ignored() -> None:
     result = normalize_gnome_lockdown_flags({"disable_hot_corner": False, "not_a_real_key": True})
 
