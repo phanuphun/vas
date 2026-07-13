@@ -118,6 +118,23 @@ def test_ubuntu_dock_lockdown_present_by_default_and_omitted_when_disabled() -> 
     assert dock_command not in preamble_without_dock
 
 
+def test_touch_gestures_lockdown_present_by_default_and_omitted_when_disabled() -> None:
+    """toggle ปิด touch gesture (ปัดขวาสลับ workspace / ปัดขึ้น 4 นิ้วยุบแอปเข้า Activities
+    Overview) เปิดใช้ extension "Disable Gestures 2021" — ทดสอบมือสำเร็จแล้วบน
+    hapymed-sterile-00 (kios2-user, GNOME Shell 42.9, extension v5)"""
+    gesture_command = next(
+        item["command"] for item in GNOME_LOCKDOWN_FLAG_DEFS if item["key"] == "disable_touch_gestures"
+    )
+    assert gesture_command == "gnome-extensions enable disable-gestures-2021@verycrazydog.gmail.com"
+
+    default_preamble = build_gnome_lockdown_preamble(None)
+    assert gesture_command in default_preamble
+
+    flags = normalize_gnome_lockdown_flags({"disable_touch_gestures": False})
+    preamble_without_gestures = build_gnome_lockdown_preamble(flags)
+    assert gesture_command not in preamble_without_gestures
+
+
 def test_normalize_gnome_lockdown_flags_defaults_unknown_keys_ignored() -> None:
     result = normalize_gnome_lockdown_flags({"disable_hot_corner": False, "not_a_real_key": True})
 

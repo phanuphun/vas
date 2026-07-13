@@ -1517,6 +1517,17 @@ def create_app() -> Flask:
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
+        # Auto-install extension "Disable Gestures 2021" (package id: gnome-gesture-lockdown)
+        # เป็น best-effort เท่านั้น — รันเป็น background thread ผ่าน start_install() เดิม (ไม่ block
+        # request นี้) และห้าม fail การสร้าง kiosk user ทั้งก้อนถ้าขั้นตอนนี้มีปัญหา (เช่น
+        # extensions.gnome.org เข้าไม่ได้ตอนนั้น, gnome-shell --version หาไม่เจอ) — ผู้ใช้ยังกด
+        # ติดตั้งเองที่หน้า "ซอฟต์แวร์ระบบ" ทีหลังได้เสมอถ้ารอบนี้ล้มเหลว
+        try:
+            from features.packages.settings import start_install as _start_gesture_install
+            _start_gesture_install("gnome-gesture-lockdown")
+        except Exception:
+            pass
+
         created = next((u for u in list_kiosk_linux_users() if u.username == username), None)
         from core.database import log_audit as _db_audit
         _db_audit("kiosk_user_created", {"username": username, "groups": add_groups})

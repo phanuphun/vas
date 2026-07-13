@@ -2,6 +2,17 @@
 
 ## [2026-07-13]
 
+### เพิ่ม toggle ปิด touch gesture (ปัดขวาสลับ workspace / ปัดขึ้น 4 นิ้วยุบแอปเข้า Activities Overview) ผ่าน extension "Disable Gestures 2021" + auto-install อัตโนมัติตอนสร้าง kiosk user
+- **ที่มา**: ต่อจากปัญหา Ubuntu Dock (entry ด้านล่างในไฟล์นี้) — ผู้ใช้ส่งคลิป/ภาพเพิ่มเติมพบว่ายังปัดขวาสลับ workspace ได้ และปัดขึ้น 4 นิ้วยุบแอปเข้า Activities Overview ได้ ซึ่ง 4 flag เดิม (`disable_hot_corner`, `disable_terminal_shortcut`, `disable_super_key`, `disable_ubuntu_dock`) ไม่ครอบคลุม เพราะเป็น touch gesture ของ GNOME Shell เองที่ไม่ผ่านคีย์บอร์ด/มุมจอ/dock เลย — ผู้ใช้ขอให้ทดสอบ manual บนเครื่องจริง `hapymed-sterile-00` ก่อนเขียนแผน ยืนยันสำเร็จว่า extension "Disable Gestures 2021" (`disable-gestures-2021@verycrazydog.gmail.com`) ปิด gesture ได้จริง (ทดสอบบน kios2-user, GNOME Shell 42.9, extension v5 — ต้อง reboot 1 ครั้งหลัง install ครั้งแรกให้ gnome-shell rescan extension directory) จากนั้นเขียนแผน (`docs/plans/2026-07-13-gnome-gesture-touch-lockdown-spec.md`) และได้รับ approve ให้ implement เต็มรูปแบบ โดยผู้ใช้เน้นว่าห้ามกระทบ flow อื่น
+- vendor extension source ทั้ง 2 เวอร์ชันเข้าโปรเจกต์ที่ `src/features/packages/vendor/gnome-disable-gestures/{v5,v9}/` (v5 รองรับ GNOME Shell 3.36-44, v9 รองรับ 45-47) ดึงจาก GitHub tags ของ `VeryCrazyDog/gnome-disable-gestures` (MIT license, ติดไฟล์ `LICENSE` ไว้ด้วยทั้งคู่)
+- `src/features/packages/settings.py`: เพิ่ม package ใหม่ `gnome-gesture-lockdown` ("Disable Gestures 2021") ใน `PACKAGES` ภายใต้ category `"kiosk"` — `check()` ใช้ `_file_check()` เดิมเช็ค `metadata.json` ที่ path ระบบ, `install_cmds` รัน bash script ใหม่ `_gesture_lockdown_install_script()` ที่เช็ค `gnome-shell --version` ก่อนแล้วเลือก copy จาก vendor dir `v5`/`v9` ให้ตรงเวอร์ชันจริงของเครื่อง, `uninstall_cmds` ลบ system dir ทิ้งพร้อม `uninstall_warning` เตือนว่าจะเปิดทางหลุด kiosk อีกครั้ง
+- `src/features/kiosk/manager.py`: เพิ่ม flag ที่ 5 `disable_touch_gestures` ใน `GNOME_LOCKDOWN_FLAG_DEFS` (command: `gnome-extensions enable disable-gestures-2021@verycrazydog.gmail.com` — enable ไม่ใช่ disable เพราะ extension ตัวนี้ต้องเปิดใช้งานถึงจะไปปิด gesture ให้), เพิ่ม field `gesture_lockdown_installed` ใน `KioskSoftwareStatus` (default `False`, ไม่กระทบ call site เดิมเพราะทุกจุดสร้างด้วย kwargs อยู่แล้ว) พร้อมเช็ค metadata.json ผ่าน path ระบบเดียวกับใน `settings.py`
+- `src/server.py`: หลัง `manager.create_user()` สำเร็จ เรียก `start_install("gnome-gesture-lockdown")` จาก `features.packages.settings` ต่อท้ายแบบ best-effort — รันเป็น background thread (`start_install` เดิมไม่ block request), ห่อ try/except ทั้งก้อนไม่ให้ล้มการสร้าง kiosk user ถ้าขั้นตอนนี้มีปัญหา (เช่น หา `gnome-shell --version` ไม่เจอ) — ผู้ใช้ยังกดติดตั้งเองที่หน้า "ซอฟต์แวร์ระบบ" ทีหลังได้เสมอ
+- `src/web/templates/kiosk.html`: ไม่ต้องแก้ — ทั้ง toggle ใหม่ในหน้าคีออส (loop `gnome_lockdown_flag_defs` เดิม) และการ์ด package ใหม่ในหน้า "ซอฟต์แวร์ระบบ" (loop `PACKAGES` เดิม) render อัตโนมัติแบบ generic
+- `tests/test_kiosk_manager.py`: เพิ่ม `test_touch_gestures_lockdown_present_by_default_and_omitted_when_disabled()` (โครงเดียวกับ test ของ `disable_ubuntu_dock`) — ยืนยัน command string ตรง, อยู่ใน preamble by default, หายไปเมื่อปิด toggle
+- เพิ่มไฟล์ทดสอบใหม่ `tests/test_packages_settings.py` (ไม่เคยมีไฟล์ทดสอบของ `features/packages/settings.py` มาก่อน) — คลุม: package ใหม่อยู่ใน `PACKAGES` ครบ field, `check()` คืน `False`/`None` เมื่อยังไม่ติดตั้งจริง, `uninstall_cmds` ลบ path ที่ถูกต้อง, install script เลือก v5/v9 ถูกเงื่อนไข, ไฟล์ vendor ทั้ง 2 เวอร์ชันมีอยู่จริงในโปรเจกต์ (กันเผลอลืม commit asset)
+- **ตรวจสอบ**: `python3 -m py_compile` ผ่านทั้ง `settings.py`/`manager.py`/`server.py`/ทั้ง 2 test file — `pytest tests/test_kiosk_manager.py` ผ่านครบ 12 เคส (รวม test ใหม่), `pytest tests/test_packages_settings.py` ผ่านครบ 5 เคสใหม่ — เจอปัญหา mount-sync ค้างซ้ำอีกครั้งกับ `tests/test_kiosk_manager.py` (bash เห็นไฟล์ตัดขาดกลาง docstring ภาษาไทยของ test ใหม่ที่เพิ่งเพิ่ม) แก้ด้วยวิธีเดิม — ดึง `git show HEAD` มา patch ซ้ำด้วย python ใน bash โดยตรงแล้ว `py_compile`/`pytest` ผ่านก่อน copy ทับไฟล์จริง — ยังไม่ได้รัน `mypy`/`ruff` รอบสุดท้ายและยังไม่ได้ commit (ขั้นตอนถัดไป) — **ยังไม่ได้ทดสอบบนเครื่องจริง**: ต้องเปิดหน้า "ซอฟต์แวร์ระบบ" กดติดตั้ง `gnome-gesture-lockdown` บนเครื่องที่ยังไม่เคยมี extension นี้ ยืนยันว่าเลือกเวอร์ชัน v5/v9 ถูกต้องตาม GNOME Shell จริง, กด Apply ที่หน้าคีออสเปิด toggle ใหม่แล้ว reboot ยืนยันว่าปัดขวา/ปัดขึ้นไม่หลุดออก kiosk อีก, และทดสอบสร้าง kiosk user ใหม่ยืนยันว่า auto-install ทำงานจริงแบบ background ไม่ block การสร้าง user
+
 ### เพิ่ม toggle ที่ 6 "ปิดแจ้งเตือน crash report (apport/whoopsie)" ใน os_notifications.py — จากการ debug popup "Report a problem... Ubuntu is ready" จริงบนเครื่อง hapymed-sterile-00
 - **ที่มา**: ผู้ใช้รายงานว่าหลัง reboot เครื่อง kiosk เจอ popup "Report a problem... / 'Ubuntu' is ready" เด้งทับหน้าจอ พร้อมสงสัยว่าแถบแปลภาษา "Thai/English" ที่โผล่มาเป็น Chromium translate bubble ที่ปิดไม่สำเร็จหรือเปล่า — สืบสวนร่วมกับผู้ใช้ผ่าน SSH บนเครื่องจริง (`hapymed-sterile-00`): `ps aux` ยืนยันว่า `--disable-features=Translate` ถูกส่งไปถูกต้องและ propagate ไปทุก child process จริง (Chromium 150.0.7871.46 snap) พิสูจน์ว่า Chromium translate feature ปิดสำเร็จ ไม่ใช่ต้นเหตุ, `gsettings get org.gnome.desktop.input-sources sources` ได้ `[('xkb', 'us')]` ตัวเดียว ตัดทฤษฎี GNOME language-switcher indicator ทิ้งด้วย — ส่วน popup "Report a problem" พบว่า `/etc/default/apport` เป็น `enabled=1` (apport ไม่เคยถูกปิดมาก่อน) และ `/var/crash/` มีไฟล์ crash จริง 2 ไฟล์ (`_usr_bin_anydesk.1001.crash`, `_usr_bin_software-properties-gtk.1000.crash`) — สรุปว่า popup มาจาก whoopsie เจอไฟล์ crash ใหม่จริง ไม่ใช่ first-boot message ทั่วไป ผู้ใช้ approve ให้เพิ่ม toggle ที่ 6 ปิด apport ใน section เดิม "ปิดการแจ้งเตือนของระบบปฏิบัติการ" พร้อมขอให้เพิ่มการ์ดไฟล์นี้ใน Config Files tab ด้วยถ้ายังไม่มี
 - `src/features/kiosk/os_notifications.py`: เพิ่ม `APPORT_DEFAULT_PATH` (`/etc/default/apport`), toggle ที่ 6 `apport_crash_report` ใน `OS_NOTIFY_FLAG_DEFS`, field `apport_crash_report` ใน `OsNotificationStatus`/`as_dict()`, helper `_apport_disabled()` (parse `enabled=0`/`1`, คืน `False` ถ้าไฟล์ไม่มีอยู่จริง — เหมือน `_release_upgrade_disabled()`/`_needrestart_auto()` ไม่ใช่แบบ `_autostart_disabled()` เพราะไฟล์นี้เป็น key=value ไม่ใช่ .desktop autostart entry), pure builder `build_apport_content()` (โครงสร้างเดียวกับ `build_release_upgrades_content()`), method `set_apport_crash_report()` ใน `OsNotificationManager` + dispatch ใน `apply()` — เจตนาปิดแค่ `enabled=0` ที่ไฟล์นี้เท่านั้น ไม่ไปสั่ง `systemctl disable whoopsie` หรือลบไฟล์ `.crash` เก่า เพราะ apport ปิดแล้วเคอร์เนลจะไม่ route crash เข้ามาอีก ไม่มีไฟล์ใหม่ให้ whoopsie แจ้ง
@@ -528,86 +539,4 @@
 - เพิ่ม CRUD functions ใน `core/database.py`: `list/get/create/update/delete_mqtt_broker`, `list/add/update/delete_mqtt_topic`
 - เพิ่ม helper functions ใน `features/mqtt/client.py`: `broker_db_to_config`, `start_mqtt_broker`, `get_broker_connection_status`, `get_primary_broker_id`
 - API endpoints ใหม่: `POST/PUT/DELETE /api/mqtt/brokers/<id>`, `POST /api/mqtt/brokers/<id>/connect`, `/disconnect`, `/test`, `/status`, `POST/PUT/DELETE /api/mqtt/topics/<id>`
-- UI ตาม INSTRUCTIONS.md convention: Page Header + Section Menu (tabs) + Content Section, ui-minimal design system
-
-
-
-### ระบบจัดการผู้ใช้งาน (Auth & User Management)
-- เพิ่ม `src/core/auth.py` — auth module: สร้าง/แก้ไข/ลบผู้ใช้, hash password ด้วย werkzeug, roles: root/admin/user
-- เพิ่ม `users` table ใน SQLite (เรียก `init_users()` จาก `init_db`)
-- หน้า First-run Setup (`/setup`) — ครั้งแรกที่ไม่มี user ให้สร้าง Root ก่อน
-- หน้า Login (`/login`) — form login พร้อม toggle show/hide password
-- หน้า User Management (`/users`) — ตาราง users, เพิ่ม/แก้ไข/ลบ, reset password ผ่าน modal
-- `before_request` guard — ป้องกัน route ที่ต้อง login, redirect first-run อัตโนมัติ
-- Navbar: user dropdown แสดงชื่อ+role, แก้ไขโปรไฟล์, เปลี่ยนรหัสผ่าน, ออกจากระบบ
-- Sidebar: เมนู "ผู้ใช้งาน" แสดงเฉพาะ root/admin
-- API: `/api/users`, `/api/users/<id>`, `/api/users/<id>/reset-password`, `/api/profile`, `/api/profile/password`
-
-### QR Device Catalog & Integration System
-- เพิ่มหน้า **อุปกรณ์** (`/qr/devices`) — catalog ของ hardware ที่รองรับ, ปุ่มติดตั้ง/ถอน, แสดง device ที่ install แล้ว
-- เพิ่มหน้า **ZKTeco QR500** (`/qr/device/zkteco/qr500`) — tab ตั้งค่า device (hidraw/evdev) + tab Integration (Webhook, MQTT Publish, Named Pipe I/O)
-- Integration Webhook: กำหนด URL, HTTP Method, Retry (1/5/10 ครั้ง), Timeout, แสดง Payload ตัวอย่าง
-- Integration MQTT: เลือก broker จากที่ตั้งไว้ในหน้า MQTT หรือกรอกใหม่, กำหนด topic และ QoS
-- Integration Pipe I/O: สร้าง named pipe (`mkfifo`) ให้ process อื่นอ่านข้อมูลสแกนได้
-- เพิ่ม `qr_device_registry.py` — จัดการ installed devices + integration config (JSON)
-- ปรับ `qr.html` — เพิ่มปุ่ม Copy Clipboard ชัดเจน, ลบ scan animation, เพิ่ม Flow Diagram แบบ pipeline
-- ปรับ `base.html` sidebar — เพิ่ม "อุปกรณ์" nav, conditional "QR500" sub-item เมื่อ install
-- เพิ่ม API: `/api/qr/devices/<id>/install`, `/api/qr/devices/<id>/uninstall`, `/api/qr/integrations`, `/api/qr/integrations/<type>`, `/api/qr/integrations/pipe/create`
-
-### แก้ SPA Router โหลดซ้ำหลายรอบ (base.html)
-- **FIX 1**: เพิ่ม `e.isTrusted` check — ป้องกัน synthetic click events จาก web components (เช่น `<iconify-icon>`) trigger navigation ซ้ำ
-- **FIX 2**: เพิ่ม `e.stopPropagation()` — ป้องกัน listener อื่นจับ event ซ้ำ
-- **FIX 3**: เพิ่ม `AbortController` — cancel fetch ที่ค้างอยู่เมื่อ navigate ใหม่, ป้องกัน concurrent navigation ทำให้ content ถูกเขียนทับหลายรอบ
-- **FIX 4**: เปลี่ยน `window.__vasCleanup = []` → `window.__vasCleanup = window.__vasCleanup || []` — ป้องกัน SPA init ลบ cleanup functions ที่ page scripts ลงทะเบียนไว้ก่อนหน้า (เพราะ `{% block extra_scripts %}` รันก่อน SPA init)
-
-### ปรับ Monitor ตาม page convention
-- ย้าย styles จาก `{% block extra_styles %}` (ไม่ได้ defined ใน base.html) มาเป็น `<style>` tag ใน content block
-- เพิ่ม Page Header (eyebrow + h1 + subtitle) ตาม INSTRUCTIONS.md convention
-- ปรับโครงสร้าง content block ให้ถูกต้อง: Page Header → Content Section
-
-### Re-Design หน้า Monitor
-- ออกแบบหน้า System Monitor ใหม่ด้วย UI-Minimal Design System
-- เพิ่ม Summary Stat Row (4 cards: CPU%, RAM%, Load Avg, Temperature) ไว้ด้านบน
-- เพิ่ม Loading skeleton แทน spinner เพื่อประสบการณ์ที่ดีขึ้น
-- ปรับ CPU/RAM card: bar usage + grid metric ที่อ่านง่ายขึ้น
-- ปรับ per-core bars เป็น micro-bar grid แบบ compact
-- Disk section: เพิ่ม icon, fstype badge, และ layout ที่สะอาดขึ้น
-- Network section: เพิ่ม interface icon และจัด layout ชัดเจน
-- ใช้สี dynamic (safe/caution/danger) ตาม threshold บน stat cards
-
-## [2026-06-23]
-
-### OpenSSH Server
-- เพิ่ม `vas install/reset --component openssh` ติดตั้งและรีเซ็ต openssh-server
-- แสดงสถานะ OpenSSH ใน `vas check` และ dashboard
-
-### HomeOffice Theme
-- ย้าย web templates มาใช้ HomeOffice Design System (sidebar, cf-* components)
-- เพิ่ม `homeoffice.css` และ `app.js` สำหรับ layout และ UI interactions
-
-### QR Code Reader (ZKTeco QR500-BM)
-- อ่าน QR ผ่าน hidraw HID keyboard mode พร้อม CLI (`vas qr`) และ web UI (`/qr`)
-- SSE stream สำหรับ real-time scan, API start/stop/config
-- ติดตั้ง udev rule ผ่าน `vas install --component qr-udev`
-- เพิ่ม agent skill และเอกสารอ้างอิง ZKTeco QR500
-
-## [2026-06-20]
-
-### เพิ่ม MCP tool specs และปรับปรุง TODO
-- เพิ่ม spec สำหรับ MCP tool `diagnose_touchscreen` — วิเคราะห์ปัญหา touchscreen แบบ step-by-step (kernel → xinput → xorg → session)
-- เพิ่ม spec สำหรับ MCP tool `diagnose_remote_access` — วิเคราะห์ปัญหา AnyDesk เข้าไม่ได้ (service → network → logs)
-- เพิ่ม spec สำหรับ MCP tool `diagnose_display` — วิเคราะห์ปัญหาหน้าจอไม่แสดงผลหรือ rotation ผิด
-- เพิ่ม improvement notes สำหรับ production server (gunicorn), Basic Auth dashboard, และ pytest-cov
-- เพิ่ม retrospective: MCP server startup และ mount() fix
-
-## [2026-06-18]
-
-### ปรับปรุง agentflow และโครงสร้างโปรเจกต์
-- อัปเดต `.agents/README.md`, `.agents/workflows/` ให้ใช้ config.json แทน hardcode path
-- ลบ `AGENTS.md` (ย้ายเนื้อหาไปใช้ผ่าน `@AGENTS.md` ใน CLAUDE.md)
-- อัปเดต `AGENTS.md.bak` ให้ตรงกับเนื้อหาล่าสุด
-- เพิ่ม `.agents/config.json` สำหรับ resolve `agentsPath` และ `wikiPath` แบบ dynamic
-- เพิ่ม `.agents/skills/grill-me/` skill ใหม่
-- เพิ่มโฟลเดอร์ `wiki/` สำหรับ project wiki
-- เพิ่ม `.mcp.json` ใน `.gitignore` เพื่อป้องกัน machine-specific config รั่วไหล
-- แก้ไข `CLAUDE.md` ให้ reference `@AGENTS.md` ตัวพิมพ์ถูกต้อง
+- UI ตาม INSTRUCTIONS.md conv

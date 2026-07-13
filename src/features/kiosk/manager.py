@@ -264,6 +264,18 @@ GNOME_LOCKDOWN_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
             "บนเครื่อง hapymed-sterile-00 แล้วผ่าน `ls /usr/share/gnome-shell/extensions/`"
         ),
     },
+    {
+        "key": "disable_touch_gestures",
+        "command": "gnome-extensions enable disable-gestures-2021@verycrazydog.gmail.com",
+        "label": "ปิด touch gesture ของ GNOME Shell (ปัดขวา/ปัดขึ้น)",
+        "desc": (
+            "เปิดใช้ extension \"Disable Gestures 2021\" กันปัดขวาสลับ workspace และปัดขึ้น 4 นิ้ว "
+            "ยุบแอปเข้า Activities Overview — ต้องติดตั้ง extension นี้ก่อนที่หน้า \"ซอฟต์แวร์ระบบ\" "
+            "(package id: gnome-gesture-lockdown) ไม่งั้น toggle นี้จะไม่มีผลอะไรเลย — ทดสอบมือสำเร็จแล้ว "
+            "บนเครื่อง hapymed-sterile-00 (kios2-user, GNOME Shell 42.9, extension v5) ต้อง reboot 1 ครั้ง "
+            "หลัง install ครั้งแรกให้ gnome-shell rescan extension directory ก่อน enable ถึงจะมีผล"
+        ),
+    },
 )
 
 DEFAULT_GNOME_LOCKDOWN_FLAGS: "dict[str, bool]" = {item["key"]: True for item in GNOME_LOCKDOWN_FLAG_DEFS}
@@ -347,6 +359,10 @@ class KioskAutostartStatus:
 class KioskSoftwareStatus:
     openbox_installed: bool
     chromium_installed: bool
+    # เช็คว่า extension "Disable Gestures 2021" (package id: gnome-gesture-lockdown ใน
+    # features/packages/settings.py) ถูกติดตั้งลง path ระบบแล้วหรือยัง — ถ้า False แปลว่า toggle
+    # disable_touch_gestures ใน GNOME_LOCKDOWN_FLAG_DEFS จะไม่มีผลอะไรเลยแม้เปิดไว้ก็ตาม
+    gesture_lockdown_installed: bool = False
 
 
 @dataclass(frozen=True)
@@ -970,14 +986,20 @@ def collect_kiosk_autostart_status(session_type: str, home: Path) -> KioskAutost
     )
 
 
+_GESTURE_LOCKDOWN_METADATA_PATH = Path(
+    "/usr/share/gnome-shell/extensions/disable-gestures-2021@verycrazydog.gmail.com/metadata.json"
+)
+
+
 def collect_kiosk_software_status() -> KioskSoftwareStatus:
     if dev_fake_installed():
-        return KioskSoftwareStatus(openbox_installed=True, chromium_installed=True)
+        return KioskSoftwareStatus(openbox_installed=True, chromium_installed=True, gesture_lockdown_installed=True)
 
     import shutil as _shutil
     return KioskSoftwareStatus(
         openbox_installed=_shutil.which("openbox") is not None,
         chromium_installed=_shutil.which("chromium-browser") is not None or _shutil.which("chromium") is not None,
+        gesture_lockdown_installed=_path_exists(_GESTURE_LOCKDOWN_METADATA_PATH),
     )
 
 

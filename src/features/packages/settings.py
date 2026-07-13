@@ -98,6 +98,33 @@ def _which_any_check(cmds: tuple[str, ...]):
 
 
 # ---------------------------------------------------------------------------
+# GNOME gesture lockdown — vendor asset path (resolve ที่นี่ครั้งเดียวตอน import โมดูล
+# แทนการพึ่ง $0/readlink ใน bash ซึ่งใช้ไม่ได้จริงเวลารันผ่าน subprocess list แบบตรงๆ)
+# ---------------------------------------------------------------------------
+
+_GESTURE_LOCKDOWN_UUID = "disable-gestures-2021@verycrazydog.gmail.com"
+_GESTURE_LOCKDOWN_VENDOR_DIR = Path(__file__).parent / "vendor" / "gnome-disable-gestures"
+_GESTURE_LOCKDOWN_SYSTEM_DIR = f"/usr/share/gnome-shell/extensions/{_GESTURE_LOCKDOWN_UUID}"
+
+
+def _gesture_lockdown_install_script() -> str:
+    """สร้างคำสั่ง shell เดียวที่: (1) เช็ค GNOME Shell major version ของเครื่องจริง
+    (2) เลือกโฟลเดอร์ vendor v5 (Shell 3.36-44) หรือ v9 (Shell 45-47) ให้ตรง (3) copy
+    extension.js/metadata.json ไปลง path ระบบ — path ของ vendor dir resolve จาก Python
+    (__file__) ตอน import แล้ว ไม่ใช่เดาจาก $0 ใน bash (ใช้ไม่ได้เวลารันผ่าน list args ตรงๆ
+    ไม่ผ่าน shell file จริง)"""
+    v5_dir = (_GESTURE_LOCKDOWN_VENDOR_DIR / "v5").as_posix()
+    v9_dir = (_GESTURE_LOCKDOWN_VENDOR_DIR / "v9").as_posix()
+    return (
+        "SHELL_VER=$(gnome-shell --version | grep -oE '[0-9]+' | head -1); "
+        f'if [ -n "$SHELL_VER" ] && [ "$SHELL_VER" -ge 45 ]; then SRC="{v9_dir}"; '
+        f'else SRC="{v5_dir}"; fi; '
+        f'mkdir -p "{_GESTURE_LOCKDOWN_SYSTEM_DIR}" && '
+        f'cp "$SRC/extension.js" "$SRC/metadata.json" "{_GESTURE_LOCKDOWN_SYSTEM_DIR}/"'
+    )
+
+
+# ---------------------------------------------------------------------------
 # Package manifest
 # ---------------------------------------------------------------------------
 
@@ -316,6 +343,27 @@ PACKAGES: list[dict[str, Any]] = [
             ["apt-get", "purge", "-y", "chromium-browser", "chromium"],
         ],
         "uninstall_warning": "การถอน Chromium จะทำให้หน้าจอ kiosk mode (ถ้าตั้งค่าไว้) เปิดเบราว์เซอร์ไม่ได้อีก",
+    },
+    {
+        "id":          "gnome-gesture-lockdown",
+        "name":        "Disable Gestures 2021",
+        "description": (
+            "GNOME Shell extension — ปิด touch gesture ในตัว (ปัดขวาสลับ workspace, "
+            "ปัดขึ้นยุบแอปเข้า Activities Overview) กันหลุดออกจาก kiosk mode ทาง gesture "
+            "ที่ Hot Corner/Super key/Ubuntu Dock ปิดไม่ถึง"
+        ),
+        "logo":        None,
+        "category":    "kiosk",
+        "depends":     [],
+        "children":    [],
+        "check":       _file_check(f"{_GESTURE_LOCKDOWN_SYSTEM_DIR}/metadata.json"),
+        "install_cmds": [
+            ["bash", "-c", _gesture_lockdown_install_script()],
+        ],
+        "uninstall_cmds": [
+            ["rm", "-rf", _GESTURE_LOCKDOWN_SYSTEM_DIR],
+        ],
+        "uninstall_warning": "การถอนจะเปิดทางให้ปัดขวา/ปัดขึ้นหลุดออกจาก kiosk ได้อีกครั้ง — ต้อง Apply/reboot ที่หน้า Kiosk ใหม่ถ้าติดตั้งซ้ำภายหลัง",
     },
     # ── Hardware ──────────────────────────────────────────────────
     {
