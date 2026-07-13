@@ -235,6 +235,13 @@ def normalize_chrome_flags(chrome_flags: "Mapping[str, object] | None") -> "dict
 # จาก root โดยไม่มี DBUS_SESSION_BUS_ADDRESS/DISPLAY ของ user เป้าหมายจะ fail เงียบๆ
 GNOME_LOCKDOWN_SIGNATURE = "# vending-auto-config: kiosk-gnome-lockdown"
 
+# ── Gesture lockdown extension — UUID + wait timeout ────────────────────────
+# แยกเป็นค่าคงที่ต่างหาก (ไม่ hardcode ซ้ำในหลายที่) เพราะต้องใช้ทั้งใน command ที่ enable
+# extension และใน wait-loop ด้านล่างที่ตรวจว่า enable สำเร็จจริงหรือยัง (ดู
+# _build_gesture_lockdown_wait_block)
+_GESTURE_LOCKDOWN_EXTENSION_UUID = "disable-gestures-2021@verycrazydog.gmail.com"
+_GESTURE_LOCKDOWN_ENABLE_WAIT_SECONDS = 5
+
 GNOME_LOCKDOWN_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
     {
         "key": "disable_hot_corner",
@@ -266,14 +273,18 @@ GNOME_LOCKDOWN_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
     },
     {
         "key": "disable_touch_gestures",
-        "command": "gnome-extensions enable disable-gestures-2021@verycrazydog.gmail.com",
+        "command": f"gnome-extensions enable {_GESTURE_LOCKDOWN_EXTENSION_UUID}",
         "label": "ปิด touch gesture ของ GNOME Shell (ปัดขวา/ปัดขึ้น)",
         "desc": (
             "เปิดใช้ extension \"Disable Gestures 2021\" กันปัดขวาสลับ workspace และปัดขึ้น 4 นิ้ว "
             "ยุบแอปเข้า Activities Overview — ต้องติดตั้ง extension นี้ก่อนที่หน้า \"ซอฟต์แวร์ระบบ\" "
             "(package id: gnome-gesture-lockdown) ไม่งั้น toggle นี้จะไม่มีผลอะไรเลย — ทดสอบมือสำเร็จแล้ว "
             "บนเครื่อง hapymed-sterile-00 (kios2-user, GNOME Shell 42.9, extension v5) ต้อง reboot 1 ครั้ง "
-            "หลัง install ครั้งแรกให้ gnome-shell rescan extension directory ก่อน enable ถึงจะมีผล"
+            "หลัง install ครั้งแรกให้ gnome-shell rescan extension directory ก่อน enable ถึงจะมีผล — พบเพิ่มเติมว่า "
+            "ปัดขึ้นยังหลุดได้ชั่วขณะแค่ตอนแรกสุดหลัง login (ก่อนหน้าจอ kiosk หลักจะขึ้น) เพราะ 'gnome-extensions "
+            "enable' เป็นแค่ D-Bus call ที่ return เกือบทันที แต่ gnome-shell ยังใช้เวลาสั้นๆ โหลด extension เข้ามาจริง "
+            "ก่อนถึงจะปิด gesture ได้ — build_gnome_lockdown_preamble() จึงรอ (poll) ให้ enable เสร็จจริงก่อนเปิด "
+            "chromium ต่อ (ดู _build_gesture_lockdown_wait_block)"
         ),
     },
 )
@@ -294,15 +305,47 @@ def normalize_gnome_lockdown_flags(flags: "Mapping[str, object] | None") -> "dic
     return result
 
 
+def _build_gesture_lockdown_wait_block(
+    wait_seconds: int = _GESTURE_LOCKDOWN_ENABLE_WAIT_SECONDS,
+) -> str:
+    """รอให้ gnome-shell enable extension ปิด touch gesture "เสร็จจริง" ก่อนเปิด chromium ต่อ —
+    'gnome-extensions enable' เป็นแค่ D-Bus call ที่ return เกือบทันที ไม่ synchronous กับตอนที่
+    gnome-shell โหลด JS module ของ extension เข้ามาจริงแล้วไป disconnect touch-gesture handler
+    ของ mutter สำเร็จ — ถ้าเปิด chromium ต่อทันทีโดยไม่รอ มีช่วงเสี้ยววินาทีที่ gesture เก่ายังไม่ถูก
+    ปิด ถ้า user ปัดจอพอดีช่วงนั้น (เช่นหน้าจอแรกสุดหลัง login) ยังหลุดเข้า Activities Overview ได้อยู่
+    (พบอาการนี้จริงบนเครื่อง hapymed-sterile-00 วันที่ 2026-07-13 — ดู CHANGELOG entry เดียวกัน)
+
+    ใช้ loop poll `gnome-extensions list --enabled` แทนการ sleep เฉยๆ เพื่อไม่ต้องรอเต็มเวลาทุกครั้ง
+    ถ้า enable เสร็จเร็วกว่า — มี timeout กันค้างถ้า extension โหลดไม่สำเร็จเลยด้วยเหตุผลอื่น (เช่นยังไม่ได้
+    ติดตั้ง/reboot ตามที่ระบุใน desc ของ flag นี้) จะไม่ block การเปิด chromium ถาวร แค่รอเต็ม timeout
+    แล้วปล่อยผ่านไปเหมือนเดิม (พฤติกรรมเดิมก่อนแก้)"""
+    uuid = _GESTURE_LOCKDOWN_EXTENSION_UUID
+    return (
+        f"# รอ gnome-shell enable extension {shlex.quote(uuid)} เสร็จจริงก่อนเปิด chromium "
+        f"สูงสุด {wait_seconds} วิ (กัน race condition ตอน login — ดูคอมเมนต์ที่ "
+        "_build_gesture_lockdown_wait_block ใน manager.py)\n"
+        f"for _gest_wait_i in $(seq 1 {wait_seconds}); do\n"
+        f"  gnome-extensions list --enabled 2>/dev/null | grep -qx {shlex.quote(uuid)} && break\n"
+        "  sleep 1\n"
+        "done"
+    )
+
+
 def build_gnome_lockdown_preamble(gnome_lockdown_flags: "dict[str, bool] | None" = None) -> str:
     """สร้าง preamble ที่รัน gsettings ปิดทางหลุดออกจาก kiosk ของ GNOME Shell (hot corner,
     คีย์ลัด terminal, ปุ่ม Super) — แทรกก่อนเปิด chromium ใน kiosk-launch.sh เฉพาะตอน
-    session_type == "gnome" เท่านั้น (ดู KioskManager.write_autostart)"""
+    session_type == "gnome" เท่านั้น (ดู KioskManager.write_autostart)
+
+    flag `disable_touch_gestures` พิเศษกว่าตัวอื่น: หลังรันคำสั่ง enable extension แล้ว จะแทรก
+    wait-loop เพิ่ม (ดู _build_gesture_lockdown_wait_block) รอให้ enable เสร็จจริงก่อนค่อยเปิด
+    chromium ต่อ ตัวอื่นเป็น gsettings/gnome-extensions disable ที่ effect ทันที ไม่ต้องรอ"""
     flags = normalize_gnome_lockdown_flags(gnome_lockdown_flags)
     lines = [GNOME_LOCKDOWN_SIGNATURE, "# Managed by VAS. Manual edits may be overwritten."]
     for item in GNOME_LOCKDOWN_FLAG_DEFS:
         if flags.get(item["key"], False):
             lines.append(f"{item['command']} 2>/dev/null || true")
+            if item["key"] == "disable_touch_gestures":
+                lines.append(_build_gesture_lockdown_wait_block())
     return "\n".join(lines) + "\n"
 
 

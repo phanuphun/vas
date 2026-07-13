@@ -135,6 +135,32 @@ def test_touch_gestures_lockdown_present_by_default_and_omitted_when_disabled() 
     assert gesture_command not in preamble_without_gestures
 
 
+def test_touch_gestures_wait_block_follows_enable_and_omitted_when_disabled() -> None:
+    """ป้องกัน race condition ที่พบจริงบนเครื่อง hapymed-sterile-00 (2026-07-13): ปัดขึ้นยังหลุด
+    เข้า Activities Overview ได้ชั่วขณะแค่ตอนแรกสุดหลัง login เพราะ 'gnome-extensions enable'
+    เป็นแค่ D-Bus call ที่ return ก่อน gnome-shell จะโหลด extension เข้ามาจริง — ต้องมี wait-loop
+    poll `gnome-extensions list --enabled` ตามหลังคำสั่ง enable เสมอเมื่อ toggle นี้เปิดอยู่"""
+    gesture_command = next(
+        item["command"] for item in GNOME_LOCKDOWN_FLAG_DEFS if item["key"] == "disable_touch_gestures"
+    )
+
+    default_preamble = build_gnome_lockdown_preamble(None)
+    assert "gnome-extensions list --enabled" in default_preamble
+    assert "grep -qx disable-gestures-2021@verycrazydog.gmail.com" in default_preamble
+    assert default_preamble.index(gesture_command) < default_preamble.index("gnome-extensions list --enabled")
+
+    flags_disabled = normalize_gnome_lockdown_flags({"disable_touch_gestures": False})
+    preamble_without_gestures = build_gnome_lockdown_preamble(flags_disabled)
+    assert "gnome-extensions list --enabled" not in preamble_without_gestures
+
+    flags_dock_only = normalize_gnome_lockdown_flags(
+        {"disable_touch_gestures": False, "disable_ubuntu_dock": True}
+    )
+    preamble_dock_only = build_gnome_lockdown_preamble(flags_dock_only)
+    assert "gnome-extensions disable ubuntu-dock@ubuntu.com" in preamble_dock_only
+    assert "gnome-extensions list --enabled" not in preamble_dock_only
+
+
 def test_normalize_gnome_lockdown_flags_defaults_unknown_keys_ignored() -> None:
     result = normalize_gnome_lockdown_flags({"disable_hot_corner": False, "not_a_real_key": True})
 

@@ -2,6 +2,12 @@
 
 ## [2026-07-13]
 
+### แก้ race condition ปัดขึ้นยังหลุดเข้า Activities Overview ได้ชั่วขณะตอนเริ่ม kiosk (ต่อจาก toggle `disable_touch_gestures` ด้านล่างในไฟล์นี้)
+- **ที่มา**: ผู้ใช้ส่งคลิปวิดีโอถามว่าทำไม "Boost" (หน้าจอแรกสุดที่ HapyMed โชว์หลัง login) เกิด gesture ยุบจอเองได้ — วิเคราะห์คลิปพบว่าเป็น GNOME Activities Overview โผล่ทับ (เห็น "Activities" มุมซ้ายบน + ไดอะล็อก "Connect Your Online Accounts" ค้างอยู่เบื้องหลัง) สืบสวนร่วมกับผู้ใช้ผ่าน SSH บนเครื่อง `hapymed-sterile-00` หลายรอบ: (1) พบว่า `hapymed` ที่ผู้ใช้ SSH เข้ามาไม่ใช่ user auto-login จริง (ตัวจริงคือ `kios2-user` ยืนยันจาก `AutomaticLogin=` ใน `/etc/gdm3/custom.conf` — เครื่องนี้มี 3 บัญชีซ้อนกัน: `hapymed` admin/SSH, `kiosk-user` ค้างเก่าไม่ได้ใช้, `kios2-user` ตัวจริง) (2) หน้าต่าง gnome-initial-setup ค้างอยู่จริง (`pid 2107 --existing-user`) เพราะ Ubuntu มี 2 ทางเปิด wizard นี้ — XDG autostart `.desktop` (ปิดไปแล้วก่อนหน้า) กับ systemd user unit `gnome-initial-setup-first-login.service` ที่ผูกกับ `gnome-session.target` แยกต่างหาก (ยังไม่มี toggle ปิดในโค้ด แก้เฉพาะกิจด้วยมือผ่าน `systemctl --global mask` บนเครื่องนี้เครื่องเดียวไปก่อน ยังไม่ได้ฝังเข้า `os_notifications.py`) (3) ผู้ใช้เปิด toggle `disable_touch_gestures` แล้วทดสอบ — gesture ยังยุบจอได้แค่ตอนเริ่ม "Boost" ครั้งแรกเท่านั้น หลังจากนั้นเข้า kiosk เต็มจอแล้วไม่เป็นอีก — log `kiosk-launch.log` ของ `kios2-user` ยืนยันว่า extension enable สำเร็จจริง (`gnome-extensions list --enabled` ขึ้น `disable-gestures-2021@verycrazydog.gmail.com`) แต่ preamble เดิมไม่มี timestamp ให้เทียบว่า enable เสร็จก่อนหรือหลัง chromium เปิด — สรุปสาเหตุที่เข้ากับอาการมากที่สุด: `gnome-extensions enable` เป็นแค่ D-Bus call ที่ return เกือบทันที ไม่ synchronous กับตอนที่ gnome-shell โหลด extension เข้ามาจริงและ disconnect touch-gesture handler ของ mutter สำเร็จ — ผู้ใช้ approve ให้แก้โดยเพิ่ม wait-loop รอ enable เสร็จจริงก่อนเปิด chromium
+- `src/features/kiosk/manager.py`: เพิ่มค่าคงที่ `_GESTURE_LOCKDOWN_EXTENSION_UUID`/`_GESTURE_LOCKDOWN_ENABLE_WAIT_SECONDS` (แทนที่จะ hardcode UUID ซ้ำ 2 ที่), เพิ่มฟังก์ชันใหม่ `_build_gesture_lockdown_wait_block()` สร้าง shell for-loop poll `gnome-extensions list --enabled | grep -qx <uuid>` สูงสุด 5 วิ (มี timeout กันค้างถ้า extension โหลดไม่สำเร็จด้วยเหตุผลอื่น จะปล่อยผ่านไปเหมือนพฤติกรรมเดิมก่อนแก้ ไม่ block การเปิด chromium ถาวร) — `build_gnome_lockdown_preamble()` แทรก wait-loop นี้ต่อท้าย "เฉพาะ" คำสั่งของ flag `disable_touch_gestures` เท่านั้น (ตัวอื่นเป็น gsettings/gnome-extensions disable ที่ effect ทันที ไม่ต้องรอ)
+- `tests/test_kiosk_manager.py`: เพิ่ม `test_touch_gestures_wait_block_follows_enable_and_omitted_when_disabled()` ยืนยันว่า wait-loop อยู่ "หลัง" คำสั่ง enable เสมอ, หายไปเมื่อ toggle ปิด, และไม่ถูกแทรกผิดให้ toggle อื่นที่ใช้ `gnome-extensions` เหมือนกัน (`disable_ubuntu_dock`)
+- **ตรวจสอบ**: เจอปัญหา mount-sync ค้างซ้ำอีกครั้งกับทั้ง `manager.py` และ `test_kiosk_manager.py` (bash เห็นไฟล์ตัดขาดกลาง docstring ภาษาไทยที่เพิ่งเพิ่ม, `git diff --stat` ขึ้นเป็น "97 deletions" ปลอมทั้งที่ edit จริงมีแต่เพิ่มบรรทัด) — แก้ด้วยวิธีเดิมที่เคยบันทึกไว้ในหลาย entry ก่อนหน้า: ดึง `git show HEAD` ของทั้ง 2 ไฟล์มา patch ซ้ำด้วย python string-replace ใน bash โดยตรง (เขียนผ่าน bash เองแทนที่จะผ่าน Read/Write/Edit tool ที่ bash mount cache ค้าง) แล้ว `py_compile` ผ่านทั้งคู่ก่อนค่อย copy ทับไฟล์จริง ยืนยันเนื้อหาตรงกับที่ Edit tool เขียนไว้แล้ว 100% — `ruff check` ผ่านสะอาดทั้ง 2 ไฟล์, `mypy --strict --no-incremental` (ต้องปิด incremental cache เพราะ sqlite cache db เจอ `disk I/O error` บน mount นี้) ผ่านไม่มี error, `pytest tests/test_kiosk_manager.py` ผ่านครบ 13 เคส (รวม test ใหม่) — รัน `pytest` เต็ม suite เจอ 8 ไฟล์ทดสอบอื่น (`test_status.py`, `test_display.py`, `test_server.py`, ฯลฯ) collect error ด้วย `ModuleNotFoundError` ที่ import path ชี้ไปคนละ session mount (`/sessions/elegant-loving-hawking/...` ทั้งที่ cwd จริงคือ `/sessions/amazing-determined-ptolemy/...`) — ยืนยันว่าเป็น sandbox artifact ที่มีอยู่ก่อนแล้ว ไม่เกี่ยวกับไฟล์ที่แก้รอบนี้เลย (ไม่ได้แตะไฟล์เหล่านั้น) — **ยังไม่ได้ทดสอบบนเครื่องจริง**: ต้องกด Apply ที่หน้า Kiosk ให้ regenerate `kiosk-launch.sh` ใหม่ (script เดิมที่มีอยู่แล้วบนเครื่องจะไม่มี wait-loop จนกว่าจะ Apply ซ้ำ) แล้ว reboot ทดสอบว่าปัดขึ้นตอน "Boost" หน้าแรกสุดไม่หลุดเข้า Activities Overview อีก — **ยังไม่ได้ commit** (ขั้นตอนถัดไป รอผู้ใช้ยืนยัน) — ส่วนปัญหา gnome-initial-setup ทางที่ 2 (systemd unit mask) ที่แก้เฉพาะกิจไปก่อนหน้านี้ ยังไม่ได้ฝังเป็น toggle ถาวรใน `os_notifications.py` เป็นงานที่เหลือแยกต่างหาก รอ approve เพิ่ม
+
 ### เพิ่ม toggle ปิด touch gesture (ปัดขวาสลับ workspace / ปัดขึ้น 4 นิ้วยุบแอปเข้า Activities Overview) ผ่าน extension "Disable Gestures 2021" + auto-install อัตโนมัติตอนสร้าง kiosk user
 - **ที่มา**: ต่อจากปัญหา Ubuntu Dock (entry ด้านล่างในไฟล์นี้) — ผู้ใช้ส่งคลิป/ภาพเพิ่มเติมพบว่ายังปัดขวาสลับ workspace ได้ และปัดขึ้น 4 นิ้วยุบแอปเข้า Activities Overview ได้ ซึ่ง 4 flag เดิม (`disable_hot_corner`, `disable_terminal_shortcut`, `disable_super_key`, `disable_ubuntu_dock`) ไม่ครอบคลุม เพราะเป็น touch gesture ของ GNOME Shell เองที่ไม่ผ่านคีย์บอร์ด/มุมจอ/dock เลย — ผู้ใช้ขอให้ทดสอบ manual บนเครื่องจริง `hapymed-sterile-00` ก่อนเขียนแผน ยืนยันสำเร็จว่า extension "Disable Gestures 2021" (`disable-gestures-2021@verycrazydog.gmail.com`) ปิด gesture ได้จริง (ทดสอบบน kios2-user, GNOME Shell 42.9, extension v5 — ต้อง reboot 1 ครั้งหลัง install ครั้งแรกให้ gnome-shell rescan extension directory) จากนั้นเขียนแผน (`docs/plans/2026-07-13-gnome-gesture-touch-lockdown-spec.md`) และได้รับ approve ให้ implement เต็มรูปแบบ โดยผู้ใช้เน้นว่าห้ามกระทบ flow อื่น
 - vendor extension source ทั้ง 2 เวอร์ชันเข้าโปรเจกต์ที่ `src/features/packages/vendor/gnome-disable-gestures/{v5,v9}/` (v5 รองรับ GNOME Shell 3.36-44, v9 รองรับ 45-47) ดึงจาก GitHub tags ของ `VeryCrazyDog/gnome-disable-gestures` (MIT license, ติดไฟล์ `LICENSE` ไว้ด้วยทั้งคู่)
@@ -539,4 +545,86 @@
 - เพิ่ม CRUD functions ใน `core/database.py`: `list/get/create/update/delete_mqtt_broker`, `list/add/update/delete_mqtt_topic`
 - เพิ่ม helper functions ใน `features/mqtt/client.py`: `broker_db_to_config`, `start_mqtt_broker`, `get_broker_connection_status`, `get_primary_broker_id`
 - API endpoints ใหม่: `POST/PUT/DELETE /api/mqtt/brokers/<id>`, `POST /api/mqtt/brokers/<id>/connect`, `/disconnect`, `/test`, `/status`, `POST/PUT/DELETE /api/mqtt/topics/<id>`
-- UI ตาม INSTRUCTIONS.md conv
+- UI ตาม INSTRUCTIONS.md convention: Page Header + Section Menu (tabs) + Content Section, ui-minimal design system
+
+
+
+### ระบบจัดการผู้ใช้งาน (Auth & User Management)
+- เพิ่ม `src/core/auth.py` — auth module: สร้าง/แก้ไข/ลบผู้ใช้, hash password ด้วย werkzeug, roles: root/admin/user
+- เพิ่ม `users` table ใน SQLite (เรียก `init_users()` จาก `init_db`)
+- หน้า First-run Setup (`/setup`) — ครั้งแรกที่ไม่มี user ให้สร้าง Root ก่อน
+- หน้า Login (`/login`) — form login พร้อม toggle show/hide password
+- หน้า User Management (`/users`) — ตาราง users, เพิ่ม/แก้ไข/ลบ, reset password ผ่าน modal
+- `before_request` guard — ป้องกัน route ที่ต้อง login, redirect first-run อัตโนมัติ
+- Navbar: user dropdown แสดงชื่อ+role, แก้ไขโปรไฟล์, เปลี่ยนรหัสผ่าน, ออกจากระบบ
+- Sidebar: เมนู "ผู้ใช้งาน" แสดงเฉพาะ root/admin
+- API: `/api/users`, `/api/users/<id>`, `/api/users/<id>/reset-password`, `/api/profile`, `/api/profile/password`
+
+### QR Device Catalog & Integration System
+- เพิ่มหน้า **อุปกรณ์** (`/qr/devices`) — catalog ของ hardware ที่รองรับ, ปุ่มติดตั้ง/ถอน, แสดง device ที่ install แล้ว
+- เพิ่มหน้า **ZKTeco QR500** (`/qr/device/zkteco/qr500`) — tab ตั้งค่า device (hidraw/evdev) + tab Integration (Webhook, MQTT Publish, Named Pipe I/O)
+- Integration Webhook: กำหนด URL, HTTP Method, Retry (1/5/10 ครั้ง), Timeout, แสดง Payload ตัวอย่าง
+- Integration MQTT: เลือก broker จากที่ตั้งไว้ในหน้า MQTT หรือกรอกใหม่, กำหนด topic และ QoS
+- Integration Pipe I/O: สร้าง named pipe (`mkfifo`) ให้ process อื่นอ่านข้อมูลสแกนได้
+- เพิ่ม `qr_device_registry.py` — จัดการ installed devices + integration config (JSON)
+- ปรับ `qr.html` — เพิ่มปุ่ม Copy Clipboard ชัดเจน, ลบ scan animation, เพิ่ม Flow Diagram แบบ pipeline
+- ปรับ `base.html` sidebar — เพิ่ม "อุปกรณ์" nav, conditional "QR500" sub-item เมื่อ install
+- เพิ่ม API: `/api/qr/devices/<id>/install`, `/api/qr/devices/<id>/uninstall`, `/api/qr/integrations`, `/api/qr/integrations/<type>`, `/api/qr/integrations/pipe/create`
+
+### แก้ SPA Router โหลดซ้ำหลายรอบ (base.html)
+- **FIX 1**: เพิ่ม `e.isTrusted` check — ป้องกัน synthetic click events จาก web components (เช่น `<iconify-icon>`) trigger navigation ซ้ำ
+- **FIX 2**: เพิ่ม `e.stopPropagation()` — ป้องกัน listener อื่นจับ event ซ้ำ
+- **FIX 3**: เพิ่ม `AbortController` — cancel fetch ที่ค้างอยู่เมื่อ navigate ใหม่, ป้องกัน concurrent navigation ทำให้ content ถูกเขียนทับหลายรอบ
+- **FIX 4**: เปลี่ยน `window.__vasCleanup = []` → `window.__vasCleanup = window.__vasCleanup || []` — ป้องกัน SPA init ลบ cleanup functions ที่ page scripts ลงทะเบียนไว้ก่อนหน้า (เพราะ `{% block extra_scripts %}` รันก่อน SPA init)
+
+### ปรับ Monitor ตาม page convention
+- ย้าย styles จาก `{% block extra_styles %}` (ไม่ได้ defined ใน base.html) มาเป็น `<style>` tag ใน content block
+- เพิ่ม Page Header (eyebrow + h1 + subtitle) ตาม INSTRUCTIONS.md convention
+- ปรับโครงสร้าง content block ให้ถูกต้อง: Page Header → Content Section
+
+### Re-Design หน้า Monitor
+- ออกแบบหน้า System Monitor ใหม่ด้วย UI-Minimal Design System
+- เพิ่ม Summary Stat Row (4 cards: CPU%, RAM%, Load Avg, Temperature) ไว้ด้านบน
+- เพิ่ม Loading skeleton แทน spinner เพื่อประสบการณ์ที่ดีขึ้น
+- ปรับ CPU/RAM card: bar usage + grid metric ที่อ่านง่ายขึ้น
+- ปรับ per-core bars เป็น micro-bar grid แบบ compact
+- Disk section: เพิ่ม icon, fstype badge, และ layout ที่สะอาดขึ้น
+- Network section: เพิ่ม interface icon และจัด layout ชัดเจน
+- ใช้สี dynamic (safe/caution/danger) ตาม threshold บน stat cards
+
+## [2026-06-23]
+
+### OpenSSH Server
+- เพิ่ม `vas install/reset --component openssh` ติดตั้งและรีเซ็ต openssh-server
+- แสดงสถานะ OpenSSH ใน `vas check` และ dashboard
+
+### HomeOffice Theme
+- ย้าย web templates มาใช้ HomeOffice Design System (sidebar, cf-* components)
+- เพิ่ม `homeoffice.css` และ `app.js` สำหรับ layout และ UI interactions
+
+### QR Code Reader (ZKTeco QR500-BM)
+- อ่าน QR ผ่าน hidraw HID keyboard mode พร้อม CLI (`vas qr`) และ web UI (`/qr`)
+- SSE stream สำหรับ real-time scan, API start/stop/config
+- ติดตั้ง udev rule ผ่าน `vas install --component qr-udev`
+- เพิ่ม agent skill และเอกสารอ้างอิง ZKTeco QR500
+
+## [2026-06-20]
+
+### เพิ่ม MCP tool specs และปรับปรุง TODO
+- เพิ่ม spec สำหรับ MCP tool `diagnose_touchscreen` — วิเคราะห์ปัญหา touchscreen แบบ step-by-step (kernel → xinput → xorg → session)
+- เพิ่ม spec สำหรับ MCP tool `diagnose_remote_access` — วิเคราะห์ปัญหา AnyDesk เข้าไม่ได้ (service → network → logs)
+- เพิ่ม spec สำหรับ MCP tool `diagnose_display` — วิเคราะห์ปัญหาหน้าจอไม่แสดงผลหรือ rotation ผิด
+- เพิ่ม improvement notes สำหรับ production server (gunicorn), Basic Auth dashboard, และ pytest-cov
+- เพิ่ม retrospective: MCP server startup และ mount() fix
+
+## [2026-06-18]
+
+### ปรับปรุง agentflow และโครงสร้างโปรเจกต์
+- อัปเดต `.agents/README.md`, `.agents/workflows/` ให้ใช้ config.json แทน hardcode path
+- ลบ `AGENTS.md` (ย้ายเนื้อหาไปใช้ผ่าน `@AGENTS.md` ใน CLAUDE.md)
+- อัปเดต `AGENTS.md.bak` ให้ตรงกับเนื้อหาล่าสุด
+- เพิ่ม `.agents/config.json` สำหรับ resolve `agentsPath` และ `wikiPath` แบบ dynamic
+- เพิ่ม `.agents/skills/grill-me/` skill ใหม่
+- เพิ่มโฟลเดอร์ `wiki/` สำหรับ project wiki
+- เพิ่ม `.mcp.json` ใน `.gitignore` เพื่อป้องกัน machine-specific config รั่วไหล
+- แก้ไข `CLAUDE.md` ให้ reference `@AGENTS.md` ตัวพิมพ์ถูกต้อง
