@@ -107,6 +107,7 @@ from features.kiosk.manager import (
     stop_kiosk_mode,
 )
 from features.kiosk.os_notifications import (
+    APPORT_DEFAULT_PATH,
     GNOME_INITIAL_SETUP_AUTOSTART_PATH,
     NEEDRESTART_CONF_PATH,
     OS_NOTIFY_FLAG_DEFS,
@@ -3919,6 +3920,7 @@ def _allowed_kiosk_config_paths() -> dict[str, Path]:
         "update_notifier_autostart": UPDATE_NOTIFIER_AUTOSTART_PATH,
         "needrestart_conf": NEEDRESTART_CONF_PATH,
         "gnome_initial_setup_autostart": GNOME_INITIAL_SETUP_AUTOSTART_PATH,
+        "apport_default": APPORT_DEFAULT_PATH,
     }
 
 

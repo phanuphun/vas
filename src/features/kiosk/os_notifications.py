@@ -12,11 +12,17 @@ kiosk-launch.sh แล้วรันซ้ำทุกครั้งที่ 
 3. needrestart interactive prompt — /etc/needrestart/needrestart.conf
 4. apt-mark hold บน update-notifier/update-manager กันพฤติกรรมเปลี่ยนตอน apt upgrade
 5. gnome-initial-setup (First Login Wizard) — /etc/xdg/autostart/gnome-initial-setup-first-login.desktop
+6. apport/whoopsie crash report popup ("Report a problem...") — /etc/default/apport คีย์ enabled
 
 ทุกไฟล์เป็น system config ที่มาจาก apt package อยู่แล้ว — ถ้าไฟล์ไม่มีอยู่จริง (เช่น
 ยังไม่ได้ติดตั้ง package) ฟังก์ชันจะไม่พยายามสร้างไฟล์ปลอมขึ้นมาเอง แค่ถือว่า
 "ไม่มีผลอะไรต้องปิดอยู่แล้ว" (no-op) เพื่อไม่ให้เขียน config ที่ไม่ตรงกับของจริงที่ package
 จะสร้างให้ตอนติดตั้ง
+
+หมายเหตุ toggle 6 (apport): ปิดแค่ enabled=0 ใน /etc/default/apport เท่านั้น — ไม่ได้ไปสั่ง
+systemctl disable whoopsie.service/whoopsie.path หรือลบไฟล์เก่าใน /var/crash เพราะเมื่อ apport
+ปิด (enabled=0) เคอร์เนลจะไม่ route crash เข้า apport อีกต่อไป จึงไม่มีไฟล์ .crash ใหม่เกิดขึ้นให้
+whoopsie เจอ — whoopsie เองไม่มีอะไรต้อง "ปิด" เพิ่ม เป็นแค่ตัวเฝ้าดูโฟลเดอร์ที่ apport เติมไฟล์ให้
 """
 from __future__ import annotations
 
@@ -30,6 +36,7 @@ from core.runner import CommandRunner
 from system.utils import dev_fake_installed
 
 __all__ = [
+    "APPORT_DEFAULT_PATH",
     "GNOME_INITIAL_SETUP_AUTOSTART_PATH",
     "HELD_PACKAGE_NAMES",
     "NEEDRESTART_CONF_PATH",
@@ -46,9 +53,10 @@ RELEASE_UPGRADES_PATH = Path("/etc/update-manager/release-upgrades")
 UPDATE_NOTIFIER_AUTOSTART_PATH = Path("/etc/xdg/autostart/update-notifier.desktop")
 NEEDRESTART_CONF_PATH = Path("/etc/needrestart/needrestart.conf")
 GNOME_INITIAL_SETUP_AUTOSTART_PATH = Path("/etc/xdg/autostart/gnome-initial-setup-first-login.desktop")
+APPORT_DEFAULT_PATH = Path("/etc/default/apport")
 HELD_PACKAGE_NAMES: "tuple[str, ...]" = ("update-notifier", "update-manager")
 
-# ── คำจำกัดความ 5 toggle — ใช้ทั้งฝั่ง template (loop แสดงผล) และฝั่ง API (validate key) ──
+# ── คำจำกัดความ 6 toggle — ใช้ทั้งฝั่ง template (loop แสดงผล) และฝั่ง API (validate key) ──
 OS_NOTIFY_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
     {
         "key": "release_upgrade",
@@ -80,6 +88,16 @@ OS_NOTIFY_FLAG_DEFS: "tuple[dict[str, str], ...]" = (
         "desc": "ปิด autostart entry ของ gnome-initial-setup ทั้งระบบ — กัน 'Connect Your Online Accounts' โผล่ตอนสร้าง user ใหม่",
         "path": GNOME_INITIAL_SETUP_AUTOSTART_PATH.as_posix(),
     },
+    {
+        "key": "apport_crash_report",
+        "label": "ปิดแจ้งเตือน crash report (apport/whoopsie)",
+        "desc": (
+            "ตั้ง enabled=0 ที่ /etc/default/apport กัน popup \"Report a problem...\" เด้งขึ้นจอทับ "
+            "หน้าเว็บ kiosk เวลามีโปรแกรมพัง (whoopsie เป็นแค่ตัวเฝ้าดู /var/crash — ปิด apport "
+            "ตรงนี้แล้วจะไม่มีไฟล์ .crash ใหม่เกิดให้ whoopsie แจ้งอีกเลย)"
+        ),
+        "path": APPORT_DEFAULT_PATH.as_posix(),
+    },
 )
 
 _VALID_KEYS = {item["key"] for item in OS_NOTIFY_FLAG_DEFS}
@@ -103,6 +121,7 @@ class OsNotificationStatus:
     needrestart_prompt: bool
     hold_packages: bool
     gnome_initial_setup: bool
+    apport_crash_report: bool
 
     def as_dict(self) -> "dict[str, bool]":
         return {
@@ -111,6 +130,7 @@ class OsNotificationStatus:
             "needrestart_prompt": self.needrestart_prompt,
             "hold_packages": self.hold_packages,
             "gnome_initial_setup": self.gnome_initial_setup,
+            "apport_crash_report": self.apport_crash_report,
         }
 
 
@@ -146,6 +166,14 @@ def _needrestart_auto(path: Path = NEEDRESTART_CONF_PATH) -> bool:
     return match is not None and match.group(1).strip().lower() == "a"
 
 
+def _apport_disabled(path: Path = APPORT_DEFAULT_PATH) -> bool:
+    content = _read_or_none(path)
+    if content is None:
+        return False
+    match = re.search(r"^\s*enabled\s*=\s*(\S+)\s*$", content, re.MULTILINE)
+    return match is not None and match.group(1).strip() == "0"
+
+
 def _packages_held(names: "tuple[str, ...]" = HELD_PACKAGE_NAMES) -> bool:
     try:
         result = subprocess.run(
@@ -163,6 +191,7 @@ def collect_os_notification_status() -> OsNotificationStatus:
         return OsNotificationStatus(
             release_upgrade=True, update_notifier_autostart=True,
             needrestart_prompt=False, hold_packages=False, gnome_initial_setup=True,
+            apport_crash_report=False,
         )
     return OsNotificationStatus(
         release_upgrade=_release_upgrade_disabled(),
@@ -170,6 +199,7 @@ def collect_os_notification_status() -> OsNotificationStatus:
         needrestart_prompt=_needrestart_auto(),
         hold_packages=_packages_held(),
         gnome_initial_setup=_autostart_disabled(GNOME_INITIAL_SETUP_AUTOSTART_PATH),
+        apport_crash_report=_apport_disabled(),
     )
 
 
@@ -232,6 +262,27 @@ def build_needrestart_conf_content(existing_content: str, auto: bool) -> str:
     return "\n".join(new_lines) + "\n"
 
 
+def build_apport_content(existing_content: str, disabled: bool) -> str:
+    """ตั้ง/แก้ค่า enabled= ใน /etc/default/apport — ไม่แตะบรรทัด comment อื่นที่ package
+    ใส่มาให้ (คำอธิบาย enabled=0/1) ถ้าไม่เจอบรรทัด enabled= เดิมเลยจะเติมต่อท้ายไฟล์แทน
+    (โครงสร้างเดียวกับ build_release_upgrades_content ด้านบน — ไฟล์นี้เป็น key=value แบบเดียวกัน)"""
+    value = "0" if disabled else "1"
+    lines = existing_content.splitlines() if existing_content else []
+    pattern = re.compile(r"^(\s*)enabled\s*=.*$")
+    replaced = False
+    new_lines: "list[str]" = []
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            new_lines.append(f"{match.group(1)}enabled={value}")
+            replaced = True
+        else:
+            new_lines.append(line)
+    if not replaced:
+        new_lines.append(f"enabled={value}")
+    return "\n".join(new_lines) + "\n"
+
+
 class OsNotificationManager:
     """เขียน system config จริง — ทุกเมธอดเช็ค self.runner.dry_run ก่อนเขียนเสมอ (เหมือน
     KioskManager ใน manager.py) และข้ามการเขียนถ้าไฟล์ปลายทางไม่มีอยู่จริง (ไม่สร้างไฟล์
@@ -269,6 +320,11 @@ class OsNotificationManager:
     def set_gnome_initial_setup(self, disabled: bool) -> bool:
         return self._write_if_exists(GNOME_INITIAL_SETUP_AUTOSTART_PATH, build_autostart_toggle_content, disabled)
 
+    def set_apport_crash_report(self, disabled: bool) -> bool:
+        # /etc/default/apport อาจไม่มีอยู่จริงถ้ายังไม่ได้ apt install apport — ในกรณีนั้น
+        # ไม่มี apport ให้ route crash เข้าอยู่แล้ว (ไม่มี popup ให้ suppress)
+        return self._write_if_exists(APPORT_DEFAULT_PATH, build_apport_content, disabled)
+
     def set_packages_held(self, held: bool) -> None:
         if self.runner.dry_run:
             print(f"apt-mark {'hold' if held else 'unhold'} {' '.join(HELD_PACKAGE_NAMES)}")
@@ -289,3 +345,5 @@ class OsNotificationManager:
             self.set_packages_held(flags["hold_packages"])
         if "gnome_initial_setup" in flags:
             self.set_gnome_initial_setup(flags["gnome_initial_setup"])
+        if "apport_crash_report" in flags:
+            self.set_apport_crash_report(flags["apport_crash_report"])

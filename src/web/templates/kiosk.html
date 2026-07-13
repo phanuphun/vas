@@ -664,7 +664,19 @@
         "all"
       ) %}
 
-      {% set cfg_files = [gdm_card, accounts_service_card, openbox_autostart_card, autostart_desktop_card, kiosk_launch_script_card, release_upgrades_card, update_notifier_autostart_card, needrestart_conf_card, gnome_initial_setup_autostart_card] %}
+      {% set apport_default_card = (
+        "apport_default",
+        "lucide:bell-off",
+        "/etc/default/apport",
+        "apport Crash Report",
+        "ตั้ง enabled=0 กัน popup \"Report a problem...\" เด้งทับหน้าเว็บ kiosk เวลามีโปรแกรมพัง (whoopsie เป็นแค่ตัวเฝ้าดูไฟล์ที่ apport สร้าง)",
+        os_notify_status.apport_crash_report,
+        "ปิดแล้ว (enabled=0)" if os_notify_status.apport_crash_report else "ยังเปิดอยู่ (enabled=1 — ค่า default)",
+        "(กด Reload เพื่อดูเนื้อหาจริง)",
+        "all"
+      ) %}
+
+      {% set cfg_files = [gdm_card, accounts_service_card, openbox_autostart_card, autostart_desktop_card, kiosk_launch_script_card, release_upgrades_card, update_notifier_autostart_card, needrestart_conf_card, gnome_initial_setup_autostart_card, apport_default_card] %}
 
       <div class="flex flex-col gap-4">
         {% for key, icon, path, title, desc, ok, status_text, mock_content, scope in cfg_files %}
@@ -894,6 +906,7 @@
     update_notifier_autostart: "update_notifier_autostart",
     needrestart_prompt: "needrestart_conf",
     gnome_initial_setup: "gnome_initial_setup_autostart",
+    apport_crash_report: "apport_default",
     // hold_packages ไม่มี config file ให้ดู (เป็น apt-mark state ไม่ใช่ไฟล์)
   };
 
