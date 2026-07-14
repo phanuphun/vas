@@ -335,18 +335,30 @@ PACKAGES: list[dict[str, Any]] = [
         "depends":     [],
         "children":    [],
         "check":       _which_any_check(("chromium-browser", "chromium")),
+        # เปลี่ยนจาก "apt-get install chromium-browser" (transitional package ที่ดึง snap มาแทน
+        # เสมอบน Ubuntu 22.04 — ดูคอมเมนต์ยาวที่ uninstall_cmds ด้านล่างสำหรับปัญหาที่เจอจริง) มาใช้
+        # PPA "xtradeb/apps" ติดตั้งเป็น .deb ตรงๆ แทน (ชื่อ package เปลี่ยนเป็น "chromium" ไม่ใช่
+        # "chromium-browser") เหตุผล: (1) ไม่มี snapd auto-refresh ที่อาจรีสตาร์ท Chromium เองกลาง
+        # ที่ลูกค้ากำลังใช้ตู้ (2) boot เร็วกว่า ไม่มี snap mount overhead — ยอมรับข้อแลกเปลี่ยนว่า
+        # xtradeb เป็น third-party PPA ไม่ใช่ official Canonical/Google repo ตัดสินใจร่วมกับผู้ใช้
+        # แล้วหลังเทียบทางเลือก snap/PPA/Google Chrome official repo (2026-07-14)
         "install_cmds": [
             ["apt-get", "update"],
-            ["apt-get", "install", "-y", "chromium-browser"],
+            ["apt-get", "install", "-y", "software-properties-common"],
+            ["add-apt-repository", "-y", "ppa:xtradeb/apps"],
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "chromium"],
         ],
         # "chromium-browser" บน Ubuntu 22.04 เป็นแค่ transitional package — apt purge ตัวนี้
         # ลบแค่ metapackage เปล่าๆ ไม่เคยเรียก "snap remove" ให้ (ไม่มี prerm/postrm hook คู่กับ
         # postinst ที่เรียก "snap install chromium" ตอนติดตั้ง) ทำให้ snap "chromium" ตัวจริงยัง
         # ค้างอยู่เต็มเครื่อง ต้องเข้า Ubuntu Software (GUI ที่เรียก snapd ตรงๆ) ไปลบเองถึงจะหาย —
         # ยืนยันจริงจากผู้ใช้ที่ clone OS ไปตู้ vending แล้วกด uninstall ผ่านหน้า "โปรแกรมเพิ่มเติม"
-        # ไม่หลุดจริงตามนี้เป๊ะ (2026-07-14) — เพิ่ม "snap remove --purge chromium" ต่อท้าย apt purge
-        # เป็น best-effort (stop_on_error=False ของ _run_commands อยู่แล้ว ถ้าเครื่องไม่มี snap
-        # ตัวนี้ติดตั้งอยู่ หรือไม่มีคำสั่ง snap เลย คำสั่งนี้ fail แล้วข้ามไปเฉยๆ ไม่ทำให้ flow ทั้งหมดพัง)
+        # ไม่หลุดจริงตามนี้เป๊ะ (2026-07-14) — คง "snap remove --purge chromium" ไว้เป็น safety net
+        # ต่อไปแม้ install_cmds เปลี่ยนมาใช้ PPA .deb แล้ว (ข้างบน) เพราะเครื่องที่เคยติดตั้งด้วยโค้ด
+        # เก่า (ก่อนเปลี่ยนมาใช้ PPA) อาจยังมี snap ค้างอยู่ — เป็น best-effort เสมอ
+        # (stop_on_error=False ของ _run_commands อยู่แล้ว ถ้าเครื่องไม่มี snap ตัวนี้ติดตั้งอยู่ หรือ
+        # ไม่มีคำสั่ง snap เลย คำสั่งนี้ fail แล้วข้ามไปเฉยๆ ไม่ทำให้ flow ทั้งหมดพัง)
         "uninstall_cmds": [
             ["apt-get", "purge", "-y", "chromium-browser", "chromium"],
             ["snap", "remove", "--purge", "chromium"],

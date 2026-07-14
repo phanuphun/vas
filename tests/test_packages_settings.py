@@ -68,3 +68,14 @@ def test_chromium_uninstall_removes_snap_not_just_apt_transitional_package() -> 
     pkg = _PKG_MAP["chromium"]
     assert ["apt-get", "purge", "-y", "chromium-browser", "chromium"] in pkg["uninstall_cmds"]
     assert ["snap", "remove", "--purge", "chromium"] in pkg["uninstall_cmds"]
+
+
+def test_chromium_install_uses_ppa_deb_instead_of_snap_transitional_package() -> None:
+    """เปลี่ยนจาก apt-get install chromium-browser (transitional package ที่ดึง snap มาแทนเสมอบน
+    Ubuntu 22.04 — snapd auto-refresh อาจรีสตาร์ท Chromium เองกลางที่ลูกค้ากำลังใช้ตู้) มาใช้ PPA
+    xtradeb/apps ติดตั้งเป็น .deb ตรงๆ แทน (ตัดสินใจร่วมกับผู้ใช้ 2026-07-14) — กันเผลอเปลี่ยนกลับไป
+    ใช้ chromium-browser แล้วเจอปัญหา snap auto-refresh/boot ช้า/uninstall ไม่หลุดแบบเดิมอีก"""
+    pkg = _PKG_MAP["chromium"]
+    assert ["add-apt-repository", "-y", "ppa:xtradeb/apps"] in pkg["install_cmds"]
+    assert ["apt-get", "install", "-y", "chromium"] in pkg["install_cmds"]
+    assert ["apt-get", "install", "-y", "chromium-browser"] not in pkg["install_cmds"]
