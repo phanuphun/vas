@@ -226,7 +226,10 @@
             <div class="flex flex-col gap-0.5">
               {{ nav_link('monitor_page',      'lucide:activity',         'Monitor',  'CPU, RAM, Disk แบบเรียลไทม์') }}
               {{ nav_link('display_settings',  'lucide:monitor',          'จอแสดงผล', 'ตั้งค่าหน้าจอและความละเอียด') }}
-              {{ nav_link('kiosk_page',        'lucide:monitor-play',     'คีออส',    'user, auto-login และ autostart') }}
+              {# ปิดใช้งานหน้าคีออสชั่วคราว — แผนใหม่ย้ายไป manual Openbox setup แทน
+                 (route/API เดิม /kiosk, /api/kiosk/* ยังทำงานอยู่ แค่ไม่มีทางเข้าจาก sidebar
+                 ดูเมนู "เคลียร์ค่า Kiosk" ใน section ท้ายสุดสำหรับล้าง config เก่า) #}
+              {{ nav_link('kiosk_page',        'lucide:monitor-play',     'คีออส',    'user, auto-login และ autostart', disabled=true) }}
             </div>
           </div>
 
@@ -275,6 +278,17 @@
               {{ nav_link('users_page',    'lucide:users',       'ผู้ใช้งาน',   'จัดการผู้ใช้และสิทธิ์') }}
               {{ nav_link('qr_devices_page','lucide:cpu',          'ฮาร์ดแวร์ระบบ',     'จัดการอุปกรณ์ QR/Hardware') }}
               {{ nav_link('apps_page',      'lucide:package-plus', 'ซอฟต์แวร์ระบบ',    'ติดตั้ง/ถอนแพ็กเกจเสริม') }}
+            </div>
+          </div>
+          {%- endif %}
+
+          {# ── บำรุงรักษา (เมนูเฉพาะกิจ — เคลียร์ config เก่าของ kiosk mode ก่อนย้ายไป
+             manual Openbox setup) เฉพาะ root/admin เห็น เหมือน section "ระบบ" ด้านบน ── #}
+          {%- if current_user and current_user.role in ('root', 'admin') %}
+          <div class="nav-section px-2 pt-4 pb-1">
+            <span class="nav-label text-[0.72rem] font-bold text-accent block px-2.5 pb-1.5">บำรุงรักษา</span>
+            <div class="flex flex-col gap-0.5">
+              {{ nav_link('kiosk_clear_config_page', 'lucide:eraser', 'เคลียร์ค่า Kiosk', 'ล้าง config ตั้งค่า kiosk mode เก่าทั้งหมด') }}
             </div>
           </div>
           {%- endif %}

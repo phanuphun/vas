@@ -1,0 +1,243 @@
+{% extends base_template %}
+{% block page_title %}เคลียร์ค่า Kiosk — VAS{% endblock %}
+{% block header_title %}เคลียร์ค่า Kiosk{% endblock %}
+
+{% block content %}
+<style>
+  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open { display:flex; }
+  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+</style>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── 1. Page Header ─────────────────────────────────────────── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · บำรุงรักษา</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">เคลียร์ค่า Kiosk</h1>
+    <p class="text-[0.82rem] text-muted mt-1">ล้าง config ตั้งค่า kiosk mode เก่าทั้งหมด ก่อนย้ายไปตั้งค่า Openbox ด้วยมือ</p>
+  </div>
+
+  <!-- ── Caution banner ─────────────────────────────────────────── -->
+  <div class="bg-caution/10 border border-caution/25 rounded-lg px-4 py-4 text-[0.8rem] text-ink flex items-start gap-2.5">
+    <svg width="15" height="15" class="flex-shrink-0 mt-0.5" style="color:#92660b;"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+    <div>
+      <p class="font-semibold mb-1">หน้านี้เฉพาะกิจสำหรับล้างค่า kiosk mode เก่า</p>
+      <p class="text-muted leading-relaxed">
+        หน้า "คีออส" ถูกซ่อนออกจากเมนูหลักแล้ว (แผนใหม่ย้ายไปตั้งค่า Openbox ด้วยมือแทน) ปุ่มด้านล่างจะปิด GDM
+        auto-login, ลบไฟล์ autostart ทั้ง GNOME และ Openbox, ลบคีย์ session-type ใน AccountsService, และลบ
+        <code class="text-[0.72rem]">~/.config/monitors.xml</code> ของ kiosk user (เฉพาะไฟล์ที่ VAS เขียนไว้เอง) —
+        <strong>ไม่ลบ</strong> Linux user เอง และไม่กระทบข้อมูลใน database เรียกซ้ำได้โดยไม่ error
+        แต่<strong>ย้อนกลับไม่ได้</strong>
+      </p>
+    </div>
+  </div>
+
+  {% if not kiosk_user_found %}
+  <div class="bg-caution/10 border border-caution/25 rounded-lg px-4 py-4 text-[0.8rem] text-ink flex items-start gap-2.5">
+    <svg width="15" height="15" class="flex-shrink-0 mt-0.5" style="color:#92660b;"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+    <span>ไม่พบ kiosk user บนเครื่องนี้ — path ด้านล่างเป็นค่า fallback (<code class="text-[0.72rem]">{{ kiosk_home }}</code>) เท่านั้น</span>
+  </div>
+  {% endif %}
+
+  <!-- ── Target user ─────────────────────────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-center gap-3">
+    <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0">
+      <iconify-icon icon="lucide:user" width="16" height="16" class="text-muted"></iconify-icon>
+    </div>
+    <div class="min-w-0 flex-1">
+      <p class="text-[0.82rem] font-semibold text-ink">{{ kiosk_username or "ไม่พบ kiosk user" }}</p>
+      <code class="text-[0.68rem] text-faint font-mono">{{ kiosk_home }}</code>
+    </div>
+  </div>
+
+  <!-- ── File list ───────────────────────────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="px-4 py-4 border-b border-line/8">
+      <h2 class="text-[0.88rem] font-semibold text-ink">ไฟล์ที่จะถูกเคลียร์</h2>
+      <p class="text-[0.72rem] text-faint mt-0.5">สถานะปัจจุบัน ณ ตอนโหลดหน้านี้ — กด "เคลียร์" ด้านล่างเพื่ออัปเดต</p>
+    </div>
+    <div class="flex flex-col">
+      {% for e in entries %}
+      <div class="flex items-start gap-3 px-4 py-3 border-b border-line/8 last:border-b-0" id="entry-row-{{ e.key }}">
+        <div class="w-8 h-8 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+          <iconify-icon icon="{{ e.icon }}" width="14" height="14" class="text-muted"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-[0.82rem] text-ink">{{ e.title }}</span>
+            <span id="entry-zone-{{ e.key }}" class="zone {{ 'zone-safe' if e.exists else 'zone-mute' }}">{{ 'พบไฟล์' if e.exists else 'ไม่พบไฟล์' }}</span>
+          </div>
+          <code class="text-[0.68rem] text-faint font-mono block mt-0.5 truncate">{{ e.path }}</code>
+          <p class="text-[0.72rem] text-muted mt-1 leading-snug">{{ e.desc }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ── Action card ─────────────────────────────────────────────── -->
+  <div class="bg-card border border-danger/15 rounded-xl overflow-hidden">
+    <div class="px-4 py-3 border-b border-danger/10">
+      <h3 class="text-[0.88rem] font-semibold text-ink">เคลียร์ Config Files ทั้งหมด</h3>
+    </div>
+    <div class="px-4 py-4 flex flex-col gap-3">
+      <label class="flex items-start gap-2.5 text-[0.8rem] text-ink cursor-pointer">
+        <input type="checkbox" id="confirm-understand-checkbox" class="mt-0.5 w-4 h-4 flex-shrink-0" onchange="window.toggleClearBtn()">
+        <span>ฉันเข้าใจว่าการกระทำนี้ไม่สามารถย้อนกลับได้ และต้องตั้งค่าใหม่ทั้งหมดถ้าจะใช้ kiosk mode อีกครั้ง</span>
+      </label>
+      <button type="button" id="btn-clear-config" disabled onclick="window.confirmClearKioskConfig()"
+              class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-start">
+        <iconify-icon icon="lucide:eraser" width="13" height="13"></iconify-icon>
+        เคลียร์ Config Files ทั้งหมด
+      </button>
+      <div id="clear-result-msg" class="text-[0.78rem] hidden"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Confirm Modal ──────────────────────────────────────── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-danger/8 border border-danger/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:eraser" width="16" height="16" class="text-danger"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">
+        ยกเลิก
+      </button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors">
+        <iconify-icon icon="lucide:eraser" width="13" height="13"></iconify-icon>
+        เคลียร์
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  function apiRequest(method, url, body) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(url, opts).then(function (res) {
+      return res.json().then(function (data) {
+        return { ok: res.ok, data: data };
+      });
+    }).catch(function (err) {
+      return { ok: false, data: { errors: [String(err)] } };
+    });
+  }
+
+  function firstError(data) {
+    if (data && Array.isArray(data.errors) && data.errors.length) return data.errors[0];
+    if (data && data.error) return data.error;
+    return "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  }
+
+  // ── Confirm modal helper (ตาม convention ของ INSTRUCTIONS.md — ต้องประกาศต่อหน้า) ──
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, btnOk);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการลบ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) btnOk.childNodes[1].textContent = " " + opts.okLabel;
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
+
+  // ── Checkbox → enable ปุ่มเคลียร์ ─────────────────────────────
+  window.toggleClearBtn = function () {
+    var cb = document.getElementById("confirm-understand-checkbox");
+    var btn = document.getElementById("btn-clear-config");
+    if (btn) btn.disabled = !(cb && cb.checked);
+  };
+
+  // ── Confirm → เรียก API จริง ───────────────────────────────────
+  window.confirmClearKioskConfig = function () {
+    window.showConfirm({
+      title:   "เคลียร์ config kiosk ทั้งหมด?",
+      body:    "จะปิด auto-login, ลบไฟล์ autostart ทั้งหมด, ลบ session-type และ monitors.xml ของ kiosk user — ย้อนกลับไม่ได้",
+      okLabel: "เคลียร์ทั้งหมด",
+      onOk: function () { window.doClearKioskConfig(); }
+    });
+  };
+
+  function setEntryCleared(key) {
+    var zone = document.getElementById("entry-zone-" + key);
+    if (zone) {
+      zone.textContent = "ไม่พบไฟล์";
+      zone.className = "zone zone-mute";
+    }
+  }
+
+  window.doClearKioskConfig = function () {
+    var btn = document.getElementById("btn-clear-config");
+    var msgEl = document.getElementById("clear-result-msg");
+    if (btn) btn.disabled = true;
+
+    apiRequest("POST", "/api/kiosk/clear-config", {}).then(function (result) {
+      if (result.ok) {
+        showToast("เคลียร์ config kiosk เรียบร้อย", "success");
+        ["gdm_custom", "openbox_autostart", "autostart_desktop", "kiosk_launch_script"].forEach(setEntryCleared);
+        if (result.data.session_type_reset) setEntryCleared("accounts_service");
+        if (result.data.monitors_xml_removed) setEntryCleared("monitors_xml_user");
+        if (msgEl) {
+          msgEl.textContent = "เคลียร์เรียบร้อย — ต้องตั้งค่าใหม่ทั้งหมดถ้าจะใช้ kiosk mode อีกครั้ง";
+          msgEl.className = "text-[0.78rem] text-safe";
+          msgEl.classList.remove("hidden");
+        }
+      } else {
+        showToast(firstError(result.data), "error");
+        if (btn) btn.disabled = false;
+        if (msgEl) {
+          msgEl.textContent = firstError(result.data);
+          msgEl.className = "text-[0.78rem] text-danger";
+          msgEl.classList.remove("hidden");
+        }
+      }
+    });
+  };
+})();
+</script>
+{% endblock %}

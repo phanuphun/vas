@@ -92,6 +92,7 @@ from features.kiosk.manager import (
     accounts_service_path_for,
     build_kiosk_launch_script,
     check_url_reachable,
+    clear_kiosk_config,
     collect_accounts_service_status,
     collect_gdm_autologin_status,
     collect_kiosk_autostart_status,
@@ -1502,6 +1503,17 @@ def create_app() -> Flask:
     def kiosk_page() -> str:
         return render_template("kiosk.html", **_kiosk_page_context())
 
+    # เมนูเฉพาะกิจ "เคลียร์ค่า Kiosk" — หน้าคีออสหลักถูกซ่อนจาก sidebar แล้ว (ดู base.html)
+    # หน้านี้แยกต่างหาก ไม่ผูกกับ /kiosk เพื่อให้ล้าง config เก่าได้แม้เมนูหลักถูกซ่อนไปแล้ว
+    # เฉพาะ root/admin เท่านั้น (เหมือน /users) — ไม่ใช่แค่ซ่อนเมนูฝั่ง frontend
+    @app.get("/kiosk/clear-config")
+    def kiosk_clear_config_page() -> str:
+        user = _current_session_user()
+        if user is None or user["role"] not in ("root", "admin"):
+            from flask import abort
+            abort(403)
+        return render_template("kiosk_clear_config.html", **_kiosk_clear_config_page_context())
+
     @app.post("/api/kiosk/users")
     def kiosk_create_user_api() -> "tuple[dict[str, object], int] | dict[str, object]":
         import re as _re
@@ -1751,6 +1763,41 @@ def create_app() -> Flask:
         _db_audit("kiosk_stopped", {"username": match.username})
         # stop_kiosk_mode ปิด autologin และลบไฟล์ autostart เสมอ — ผลลัพธ์คงที่ ไม่ต้อง query ซ้ำ
         return {"status": "ok", "username": match.username, "autologin_enabled": False, "autostart_configured": False}
+
+    # เมนูเฉพาะกิจ "เคลียร์ค่า Kiosk" — destructive กว่า /api/kiosk/stop (ลบ session-type +
+    # monitors.xml เพิ่มด้วย) จึงจำกัดเฉพาะ root/admin ผ่าน _require_admin_user() แบบเดียวกับ
+    # /api/system/shutdown ไม่ใช่แค่ซ่อนปุ่มฝั่ง frontend เท่านั้น
+    @app.post("/api/kiosk/clear-config")
+    def kiosk_clear_config_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        admin_user = _require_admin_user()
+        if admin_user is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username", "")).strip() or None
+
+        users = list_kiosk_linux_users()
+        match = next((u for u in users if u.username == username), None) if username else None
+        if match is None:
+            match = resolve_kiosk_target_user(users)
+        if match is None:
+            return {"status": "error", "errors": ["ไม่พบ kiosk user ที่จะเคลียร์ config ให้"]}, 404
+
+        try:
+            result = clear_kiosk_config(CommandRunner(), match.home, match.username)
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        from core.database import log_audit as _db_audit
+        result_payload = {
+            "username": match.username,
+            "autologin_disabled": result.autologin_disabled,
+            "autostart_files_removed": list(result.autostart_files_removed),
+            "session_type_reset": result.session_type_reset,
+            "monitors_xml_removed": result.monitors_xml_removed,
+        }
+        _db_audit("kiosk_config_cleared", result_payload)
+        return {"status": "ok", **result_payload}
 
     @app.get("/api/kiosk/audit")
     def kiosk_audit_api() -> dict[str, object]:
@@ -3932,6 +3979,68 @@ def _allowed_kiosk_config_paths() -> dict[str, Path]:
         "needrestart_conf": NEEDRESTART_CONF_PATH,
         "gnome_initial_setup_autostart": GNOME_INITIAL_SETUP_AUTOSTART_PATH,
         "apport_default": APPORT_DEFAULT_PATH,
+    }
+
+
+def _safe_path_exists(path: Path) -> bool:
+    """path.exists() ธรรมดาโยน PermissionError ได้ถ้าอ่าน home directory ของ user อื่นไม่ได้
+    (เช่น kiosk user home ที่ permission ปิดไว้) — Python 3.10 (เวอร์ชันที่ Ubuntu 22.04 มาพร้อม)
+    ยัง catch แค่ FileNotFoundError เองใน exists() ไม่ครอบ OSError อื่น (แก้ใน 3.11+) หน้า
+    "เคลียร์ค่า Kiosk" ไม่ควร 500 ทั้งหน้าแค่เพราะไฟล์ preview บางรายการอ่านสิทธิ์ไม่ได้ — คืน
+    False (เหมือน "ไม่พบไฟล์") ในกรณีนั้นแทน ตรงกับ pattern เดียวกับ _path_exists() ใน
+    features/kiosk/manager.py"""
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _kiosk_clear_config_page_context() -> dict[str, object]:
+    """Context สำหรับหน้า "เคลียร์ค่า Kiosk" (เมนูเฉพาะกิจท้าย sidebar, เฉพาะ root/admin) —
+    แสดง preview ของไฟล์ที่ปุ่ม "เคลียร์ Config Files" จะไปแตะ ก่อนผู้ใช้กดจริง ตรงตาม scope
+    ของ clear_kiosk_config() เป๊ะ (autologin + autostart 3 ไฟล์ + session-type + monitors.xml
+    ของ user) — ตั้งใจ**ไม่รวม** release_upgrades/needrestart/apport ฯลฯ ที่ _allowed_kiosk_
+    config_paths() มี เพราะเป็น OS-level de-noise settings คนละเรื่องกับ kiosk session/autostart
+    ล้างพวกนั้นไปด้วยจะเปิดทาง popup รบกวนกลับมาโดยไม่จำเป็น"""
+    users = list_kiosk_linux_users()
+    target_user = resolve_kiosk_target_user(users)
+    username = target_user.username if target_user is not None else "kiosk-user"
+    home = target_user.home if target_user is not None else Path("/home/kiosk-user")
+
+    file_defs: "list[tuple[str, str, str, Path, str]]" = [
+        ("gdm_custom", "lucide:log-in", "GDM Auto-login", GDM_CUSTOM_CONFIG_PATH,
+         "ปิด auto-login ที่ /etc/gdm3/custom.conf"),
+        ("accounts_service", "lucide:user-cog", "AccountsService Session Type",
+         accounts_service_path_for(username),
+         "ลบคีย์ Session=/XSession= เท่านั้น — คืนเป็นค่า default ของ GDM ไม่ลบทั้งไฟล์"),
+        ("openbox_autostart", "lucide:terminal", "Openbox Autostart",
+         kiosk_openbox_autostart_path(home), "~/.config/openbox/autostart"),
+        ("autostart_desktop", "lucide:file-text", "GNOME Autostart Desktop",
+         kiosk_gnome_autostart_desktop_path(home), "~/.config/autostart/vas-kiosk.desktop"),
+        ("kiosk_launch_script", "lucide:terminal", "Kiosk Launch Script",
+         kiosk_launch_script_path(home), "~/.config/vending-auto-setup/kiosk-launch.sh"),
+        ("monitors_xml_user", "lucide:monitor", "Monitors XML (user)",
+         user_monitors_xml_path(home),
+         "~/.config/monitors.xml — ลบเฉพาะไฟล์ที่ VAS เขียนไว้เอง (มี signature) เท่านั้น"),
+    ]
+
+    entries: "list[dict[str, object]]" = [
+        {
+            "key": key,
+            "icon": icon,
+            "title": title,
+            "path": path.as_posix(),
+            "desc": desc,
+            "exists": _safe_path_exists(path),
+        }
+        for key, icon, title, path, desc in file_defs
+    ]
+
+    return {
+        "kiosk_username": target_user.username if target_user is not None else None,
+        "kiosk_home": home.as_posix(),
+        "kiosk_user_found": target_user is not None,
+        "entries": entries,
     }
 
 

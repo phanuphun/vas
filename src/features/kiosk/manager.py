@@ -30,6 +30,10 @@ from urllib.parse import urlparse
 
 from core.runner import CommandRunner
 from features.display.display import DISPLAY_READY_MARKER_NAME
+from features.display.monitors_xml import (
+    MonitorsXmlManager,
+    user_has_own_monitors_xml,
+)
 from system.status import GDM_CUSTOM_CONFIG_PATH
 from system.utils import dev_fake_installed
 
@@ -58,6 +62,7 @@ __all__ = [
     "AccountsServiceStatus",
     "GdmAutologinStatus",
     "KioskAutostartStatus",
+    "KioskConfigClearResult",
     "KioskLinuxUser",
     "KioskManager",
     "KioskReadiness",
@@ -70,6 +75,7 @@ __all__ = [
     "build_kiosk_launch_script",
     "build_openbox_autostart_preamble",
     "check_url_reachable",
+    "clear_kiosk_config",
     "collect_accounts_service_status",
     "collect_gdm_autologin_status",
     "collect_kiosk_autostart_status",
@@ -416,6 +422,17 @@ class KioskReadiness:
     autostart_ok: bool
 
 
+@dataclass(frozen=True)
+class KioskConfigClearResult:
+    """ผลลัพธ์ของ clear_kiosk_config() — ใช้แสดงในหน้า "เคลียร์ค่า Kiosk" (เมนูเฉพาะกิจ
+    ท้าย sidebar) ทีละรายการว่าแต่ละส่วนถูกเคลียร์จริงไหม ไม่ใช่แค่ "สั่งเคลียร์" เฉยๆ —
+    เพราะหลายรายการเป็น idempotent (ไม่มีอะไรให้ลบตั้งแต่แรกก็ได้)"""
+    autologin_disabled: bool
+    autostart_files_removed: "tuple[str, ...]"
+    session_type_reset: bool
+    monitors_xml_removed: bool
+
+
 # ---------------------------------------------------------------------------
 # Manager — write actions (ต้องรันเป็น root บนเครื่องจริง)
 # ---------------------------------------------------------------------------
@@ -535,6 +552,36 @@ class KioskManager:
             path.unlink()
         except FileNotFoundError:
             pass
+
+    def reset_session_type(self, username: str) -> bool:
+        """ลบคีย์ Session=/XSession= ที่ set_session_type() เคยเขียนไว้ใน AccountsService config
+        ของ user นี้ (คืนเป็นค่า default ที่ GDM เลือกเอง) — ตั้งใจ**ไม่ลบทั้งไฟล์**เพราะ GNOME/
+        AccountsService เขียนคีย์อื่นลงไฟล์เดียวกันนี้ด้วย (Icon, Language, XKeyboardLayouts ฯลฯ)
+        ที่ไม่เกี่ยวกับ kiosk เลย ลบทั้งไฟล์จะเสียค่าพวกนั้นไปโดยไม่จำเป็น — ใช้ parser เดียวกับ
+        build_accounts_service_config() (_find_section_bounds/_ini_key_name) เพื่อแก้เฉพาะ
+        2 คีย์นี้เท่านั้น คืน True ถ้ามีการแก้ไขไฟล์จริง, False ถ้าไม่มีไฟล์หรือไม่มีคีย์ให้ลบอยู่แล้ว
+        (idempotent — เรียกซ้ำได้เสมอ)"""
+        path = accounts_service_path_for(username)
+        if not path.exists():
+            return False
+        existing_content = path.read_text(encoding="utf-8")
+        lines = existing_content.splitlines()
+        user_start, user_end = _find_section_bounds(lines, "user")
+        if user_start is None:
+            return False
+        body = lines[user_start + 1 : user_end]
+        remove_keys = {"session", "xsession"}
+        filtered = [line for line in body if _ini_key_name(line) not in remove_keys]
+        if filtered == body:
+            return False
+        new_lines = [*lines[: user_start + 1], *filtered, *lines[user_end:]]
+        content = "\n".join(new_lines) + "\n"
+        print(f"write {path.as_posix()}")
+        if self.runner.dry_run:
+            print(content.rstrip())
+            return True
+        path.write_text(content, encoding="utf-8")
+        return True
 
 
 def _insert_after_shebang(script_content: str, extra: str) -> str:
@@ -1068,6 +1115,51 @@ def stop_kiosk_mode(runner: CommandRunner, home: Path) -> None:
     manager = KioskManager(runner)
     manager.set_autologin(None, enabled=False)
     manager.remove_autostart(home)
+
+
+def clear_kiosk_config(runner: CommandRunner, home: Path, username: str) -> KioskConfigClearResult:
+    """เคลียร์ config ทั้งหมดที่ VAS เคยเขียนไว้สำหรับ kiosk mode ของ user นี้ — ใช้กับเมนู
+    เฉพาะกิจ "เคลียร์ค่า Kiosk" (แผนใหม่ปิดหน้าคีออสแล้วย้ายไปตั้งค่า Openbox แบบ manual แทน)
+
+    เคลียร์ 4 ส่วน (ตรงกับ 4 ส่วนที่ไฟล์ module docstring ด้านบนอธิบายไว้):
+    1. GDM auto-login (custom.conf) — ปิด (เหมือน stop_kiosk_mode)
+    2. ไฟล์ autostart ทั้ง GNOME (.desktop + launch script) และ Openbox — ลบ (เหมือน stop_kiosk_mode)
+    3. AccountsService session-type (คีย์ Session=/XSession=) — ลบเฉพาะคีย์นี้ (ต่างจาก
+       stop_kiosk_mode ที่จงใจไม่แตะ เพราะที่นั่นออกแบบให้ "หยุดชั่วคราว เปิดใหม่ได้เร็ว" ส่วน
+       ฟังก์ชันนี้ออกแบบให้ "ล้างให้สะอาดที่สุดก่อนเปลี่ยนไปตั้งค่าด้วยมือ")
+    4. ~/.config/monitors.xml ของ user นี้ — ลบเฉพาะไฟล์ที่ VAS เขียนไว้เอง (มี signature) ผ่าน
+       MonitorsXmlManager.remove_user_level() ที่มีอยู่แล้ว ไม่แตะไฟล์ที่ user เคยตั้งเองผ่าน
+       GNOME Settings
+
+    **ไม่ลบ**: Linux user เอง (useradd/userdel), DB records (audit log, MQTT heartbeat
+    integration, config_history) — อยู่นอก scope ของฟังก์ชันนี้โดยตั้งใจ
+
+    Idempotent — เรียกซ้ำได้เสมอโดยไม่ error แม้ไม่มีอะไรให้เคลียร์แล้ว"""
+    manager = KioskManager(runner)
+
+    manager.set_autologin(None, enabled=False)
+
+    autostart_paths = (
+        kiosk_openbox_autostart_path(home),
+        kiosk_gnome_autostart_desktop_path(home),
+        kiosk_launch_script_path(home),
+    )
+    removed_autostart = tuple(p.as_posix() for p in autostart_paths if _path_exists(p))
+    manager.remove_autostart(home)
+
+    session_type_reset = manager.reset_session_type(username)
+
+    monitors_xml_present_before = user_has_own_monitors_xml(home)
+    if monitors_xml_present_before:
+        MonitorsXmlManager(runner).remove_user_level(home)
+    monitors_xml_removed = monitors_xml_present_before and not user_has_own_monitors_xml(home)
+
+    return KioskConfigClearResult(
+        autologin_disabled=True,
+        autostart_files_removed=removed_autostart,
+        session_type_reset=session_type_reset,
+        monitors_xml_removed=monitors_xml_removed,
+    )
 
 
 def check_url_reachable(url: str, timeout: int = 10) -> dict[str, object]:
