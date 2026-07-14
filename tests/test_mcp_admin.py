@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from core.runner import CommandRunner
-from mcp.service import (
+from vas_mcp.service import (
     MCP_VALID_ACTIONS,
     McpConfig,
     default_mcp_config,
@@ -43,8 +43,8 @@ def test_collect_mcp_status_real_mode_not_installed(monkeypatch: pytest.MonkeyPa
     fake_path = Mock()
     fake_path.exists.return_value = False
 
-    with patch("mcp.service.runtime_ready", return_value=False), \
-         patch("mcp.service.MCP_SERVICE_PATH", fake_path), \
+    with patch("vas_mcp.service.runtime_ready", return_value=False), \
+         patch("vas_mcp.service.MCP_SERVICE_PATH", fake_path), \
          patch("system.status._read_command_first_line", return_value="unknown"):
         status = collect_mcp_status()
 
@@ -67,8 +67,8 @@ def test_collect_mcp_status_real_mode_enabled_and_active(monkeypatch: pytest.Mon
             return "active"
         return "unknown"
 
-    with patch("mcp.service.runtime_ready", return_value=True), \
-         patch("mcp.service.MCP_SERVICE_PATH", fake_path), \
+    with patch("vas_mcp.service.runtime_ready", return_value=True), \
+         patch("vas_mcp.service.MCP_SERVICE_PATH", fake_path), \
          patch("system.status._read_command_first_line", side_effect=fake_first_line):
         status = collect_mcp_status()
 
@@ -93,12 +93,12 @@ def test_mcp_status_is_frozen_dataclass() -> None:
 # ---------------------------------------------------------------------------
 
 def test_runtime_ready_true_when_all_packages_importable() -> None:
-    with patch("mcp.service._can_import", return_value=True):
+    with patch("vas_mcp.service._can_import", return_value=True):
         assert runtime_ready() is True
 
 
 def test_runtime_ready_false_when_any_package_missing() -> None:
-    with patch("mcp.service._can_import", side_effect=lambda p: p != "uvicorn"):
+    with patch("vas_mcp.service._can_import", side_effect=lambda p: p != "uvicorn"):
         assert runtime_ready() is False
 
 
@@ -134,8 +134,8 @@ def test_service_action_disable_calls_stop_not_start(monkeypatch: pytest.MonkeyP
     def fake_start(self: object, config: object) -> None:
         calls.append("start")
 
-    with patch("mcp.service.McpServiceManager.stop", fake_stop), \
-         patch("mcp.service.McpServiceManager.start", fake_start):
+    with patch("vas_mcp.service.McpServiceManager.stop", fake_stop), \
+         patch("vas_mcp.service.McpServiceManager.start", fake_start):
         service_action(CommandRunner(dry_run=True), "disable")
 
     assert calls == ["stop"]
@@ -147,7 +147,7 @@ def test_service_action_enable_and_restart_both_call_start(monkeypatch: pytest.M
     def fake_start(self: object, config: object) -> None:
         calls.append("start")
 
-    with patch("mcp.service.McpServiceManager.start", fake_start):
+    with patch("vas_mcp.service.McpServiceManager.start", fake_start):
         service_action(CommandRunner(dry_run=True), "enable")
         service_action(CommandRunner(dry_run=True), "restart")
 

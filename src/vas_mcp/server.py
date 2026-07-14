@@ -4,8 +4,8 @@ import argparse
 
 from fastmcp import FastMCP
 
-from mcp.service import MCP_PORT, default_mcp_config
-from mcp.tools import display, docker, logs, network, shell, system
+from vas_mcp.service import MCP_PORT, default_mcp_config
+from vas_mcp.tools import display, docker, logs, network, shell, system
 
 mcp = FastMCP("vas-mcp")
 

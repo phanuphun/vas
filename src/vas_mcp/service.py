@@ -119,8 +119,10 @@ def _can_import(package: str) -> bool:
 def runtime_ready() -> bool:
     """True ถ้า MCP_RUNTIME_PACKAGES (fastmcp, uvicorn) ติดตั้งครบแล้ว — เรียกจาก
     system.status.collect_mcp_status() เพื่อแสดงสถานะในหน้าเว็บ ไม่ต้อง import fastmcp จริง
-    (แค่เช็คว่ามี module spec เท่านั้น) จึงไม่โดน collision กับ pip package "mcp" ที่ fastmcp พึ่งพา
-    (ดู docstring บนสุดของ core/exec_guard.py สำหรับรายละเอียดปัญหานั้น)"""
+    (แค่เช็คว่ามี module spec เท่านั้น) เดิมยังมีเหตุผลเรื่อง import collision กับ pip package
+    "mcp" ด้วย (ตอนที่ package ภายในยังชื่อ src/mcp/) — แก้ไปแล้วด้วยการเปลี่ยนชื่อเป็น
+    src/vas_mcp/ (ดู docstring บนสุดของ core/exec_guard.py) แต่ยังคงไม่ import fastmcp จริงไว้
+    เหมือนเดิมเพราะไม่จำเป็นต้อง import แค่เช็คสถานะ"""
     return all(_can_import(package) for package in MCP_RUNTIME_PACKAGES)
 
 

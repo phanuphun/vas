@@ -134,7 +134,7 @@ class OpenSshStatus:
 
 @dataclass(frozen=True)
 class McpStatus:
-    runtime_installed: bool  # fastmcp/uvicorn ติดตั้งแล้วหรือยัง (ดู mcp.service.MCP_RUNTIME_PACKAGES)
+    runtime_installed: bool  # fastmcp/uvicorn ติดตั้งแล้วหรือยัง (ดู vas_mcp.service.MCP_RUNTIME_PACKAGES)
     service_installed: bool  # มี systemd unit file แล้วหรือยัง (ยังไม่เคยกด "เปิดใช้งาน" = False)
     service_enabled: str     # "enabled" | "disabled" | "unknown"
     service_active: str      # "active" | "inactive" | "unknown"
@@ -256,14 +256,15 @@ def collect_openssh_status() -> OpenSshStatus:
     )
 
 
-# tool module ที่ mount เข้า MCP server จริง (ดู src/mcp/server.py) — รายชื่อ hardcode ไว้ที่นี่
-# เพราะ import mcp.tools.* ตรงๆ จะไปโดน collision กับ pip package "mcp" (ดู docstring บนสุดของ
-# core/exec_guard.py) — ใช้เป็น static catalog สำหรับแสดงผลหน้าเว็บเท่านั้น ไม่ได้ import จริง
+# tool module ที่ mount เข้า MCP server จริง (ดู src/vas_mcp/server.py) — รายชื่อ hardcode ไว้ที่นี่
+# เพื่อไม่ต้องดึง tool ทั้งชุดเข้ามาแค่จะ list ชื่อในหน้าเว็บ — ใช้เป็น static catalog สำหรับ
+# แสดงผลเท่านั้น ไม่ได้ import จริง (เดิมชื่อ package คือ src/mcp/ ซึ่งชนกับ pip package "mcp"
+# ที่ fastmcp ต้องพึ่ง — เปลี่ยนชื่อเป็น src/vas_mcp/ แล้วแก้ปัญหานี้ไปแล้ว)
 MCP_TOOL_MODULES: tuple[str, ...] = ("system", "network", "display", "docker", "logs", "shell")
 
 
 def collect_mcp_status() -> McpStatus:
-    from mcp.service import MCP_SERVICE_PATH, MCP_SERVICE_UNIT, default_mcp_config, runtime_ready
+    from vas_mcp.service import MCP_SERVICE_PATH, MCP_SERVICE_UNIT, default_mcp_config, runtime_ready
 
     cfg = default_mcp_config()
     if dev_fake_installed():

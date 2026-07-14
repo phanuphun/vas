@@ -62,7 +62,7 @@ from system.status import (
     collect_vpn_status,
     collect_xorg_touchscreen_config_status,
 )
-from mcp.service import MCP_VALID_ACTIONS, service_action as mcp_service_action
+from vas_mcp.service import MCP_VALID_ACTIONS, service_action as mcp_service_action
 from features.remote.anydesk import (
     VALID_SERVICE_ACTIONS as ANYDESK_SERVICE_ACTIONS,
     service_action as anydesk_service_action,
@@ -151,7 +151,7 @@ def _require_admin_user() -> dict[str, Any] | None:
 
 WEB_DIR = Path(__file__).parent / "web"
 
-# แสดงผลในหน้า /mcp เท่านั้น — รายชื่อ tool จริงต้องตรงกับที่ mount ใน src/mcp/server.py
+# แสดงผลในหน้า /mcp เท่านั้น — รายชื่อ tool จริงต้องตรงกับที่ mount ใน src/vas_mcp/server.py
 # (mcp.mount(...) แต่ละบรรทัด) แก้ที่นี่ทุกครั้งที่เพิ่ม/ลบ tool module จริง
 MCP_TOOL_CATALOG: tuple[dict[str, object], ...] = (
     {

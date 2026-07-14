@@ -1,18 +1,17 @@
 """
 Guarded shell-command policy — ตรวจว่าคำสั่งเข้าข่าย delete/install/update หรือไม่
 
-แยกออกมาจาก mcp/tools/shell.py เป็นโมดูลอิสระใน core/ (ไม่ depend on fastmcp หรืออะไรใน
-project) ด้วยเหตุผล 2 ข้อ:
-1. ตาม convention ของไฟล์อื่นใน core/ (ดู core/runner.py) — เป็น infra กลางที่ควร test ได้
-   โดยไม่ต้องพึ่ง framework ภายนอก
-2. mcp/tools/shell.py import `fastmcp` ซึ่งพึ่งพา pip package ชื่อ "mcp" — โปรเจกต์นี้เองก็มี
-   subpackage ชื่อ "mcp" (src/mcp/) จึงชนกันเมื่อรันด้วย PYTHONPATH=src (convention หลักของ
-   โปรเจกต์ตาม INSTRUCTIONS.md) ทำให้ `from fastmcp import FastMCP` fail ด้วย
-   `ModuleNotFoundError: No module named 'mcp.types'` เพราะ src/mcp ถูก resolve ก่อน
-   pip package "mcp" จริง — บั๊กนี้มีอยู่ก่อนแล้วกับทุกไฟล์ใน mcp/tools/ (system.py, docker.py,
-   network.py, logs.py) ไม่ใช่สิ่งที่ไฟล์นี้สร้างขึ้นใหม่ แต่แยก logic การเช็ค policy ออกมาที่นี่
-   ทำให้อย่างน้อย unit test ของ policy เองรันได้โดยไม่ชนปัญหานี้ — การแก้ collision จริง (เช่น
-   เปลี่ยนชื่อ src/mcp/ เป็นชื่ออื่น) เป็นงานแยกต่างหาก ไม่ได้อยู่ใน scope ของงานนี้
+แยกออกมาจาก vas_mcp/tools/shell.py เป็นโมดูลอิสระใน core/ (ไม่ depend on fastmcp หรืออะไรใน
+project) ตาม convention ของไฟล์อื่นใน core/ (ดู core/runner.py) — เป็น infra กลางที่ควร test ได้
+โดยไม่ต้องพึ่ง framework ภายนอก
+
+หมายเหตุประวัติ: ตอนแรกไฟล์นี้ต้องแยกออกมาเพราะ vas_mcp/tools/shell.py import `fastmcp`
+ซึ่งพึ่งพา pip package ชื่อ "mcp" — ตอนนั้น package ภายในโปรเจกต์เองยังชื่อ "mcp" (src/mcp/)
+จึงชนกันเมื่อรันด้วย PYTHONPATH=src ทำให้ `from fastmcp import FastMCP` fail ด้วย
+`ModuleNotFoundError: No module named 'mcp.types'` — ยืนยัน bug นี้จริงจาก journalctl บนเครื่อง
+kiosk จริง (`vending-auto-setup-mcp.service` crash-loop ตั้งแต่ deploy เพราะ import ชนกัน)
+แก้ไปแล้วโดยเปลี่ยนชื่อ package ภายในจาก src/mcp/ → src/vas_mcp/ (ดู CHANGELOG) การแยก policy
+logic มาไว้ที่นี่ยังมีประโยชน์อยู่เหมือนเดิม (test ได้โดยไม่ต้องพึ่ง fastmcp) จึงไม่ย้ายกลับ
 """
 from __future__ import annotations
 

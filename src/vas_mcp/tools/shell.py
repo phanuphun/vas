@@ -1,7 +1,7 @@
 """
 MCP tool: guarded arbitrary shell execution (`run_command`)
 
-ต่างจาก tool อื่นใน mcp/tools/ (system.py, docker.py, network.py, logs.py) ที่เป็น read-only
+ต่างจาก tool อื่นใน vas_mcp/tools/ (system.py, docker.py, network.py, logs.py) ที่เป็น read-only
 diagnostics — ไฟล์นี้ให้ AI agent รันคำสั่งอะไรก็ได้บนเครื่อง (ไม่ fix เป็น whitelist คำสั่งตายตัว)
 แต่กันไว้ 3 หมวดตามที่ผู้ใช้ยืนยัน: ลบไฟล์ (delete), ติดตั้งแพ็กเกจ (install), และอัปเดตระบบ/ตัวเอง
 (update) — คำสั่งที่เข้าข่ายจะถูกปฏิเสธ "ก่อน" รันจริงเสมอ ไม่ใช่ retroactive

@@ -15,7 +15,7 @@ from services.reset import (
     count_uninstall_operations,
 )
 from core.runner import CommandRunner
-from mcp.service import McpConfig, McpServiceManager, default_mcp_config
+from vas_mcp.service import McpConfig, McpServiceManager, default_mcp_config
 from services.server_service import ServerConfig, ServerServiceManager
 from system.status import print_status
 from system.utils import require_linux, require_root
@@ -434,7 +434,7 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
                 print(f"start MCP server {url}")
                 return 0
             try:
-                from mcp.server import run_server
+                from vas_mcp.server import run_server
             except ImportError as error:
                 if error.name != "fastmcp":
                     raise

@@ -40,7 +40,9 @@ vas/
 │   │   ├── reset.py                     # LifecycleManager, reset/uninstall components
 │   │   └── updater.py                   # SelfUpdater — GitHub release download & replace
 │   │
-│   ├── mcp/                             # MCP server layer
+│   ├── vas_mcp/                          # MCP server layer (ตั้งชื่อ "vas_mcp" ไม่ใช่ "mcp" —
+│   │   │                                 # ชนกับ pip package "mcp" ที่ fastmcp ต้องพึ่ง ถ้าใช้ชื่อ "mcp"
+│   │   │                                 # จะทำให้ import fastmcp fail ตอนรันจริง ดู CHANGELOG)
 │   │   ├── server.py                    # FastMCP app entry point
 │   │   ├── service.py                   # McpServiceManager, systemd integration
 │   │   └── tools/                       # MCP tool modules (mounted into FastMCP)
@@ -48,6 +50,7 @@ vas/
 │   │       ├── docker.py
 │   │       ├── logs.py
 │   │       ├── network.py
+│   │       ├── shell.py                 # run_command — guarded arbitrary shell exec (blocklist)
 │   │       └── system.py
 │   │
 │   └── web/                             # Flask static assets & Jinja2 templates
@@ -99,7 +102,7 @@ from services.server_service import ServerServiceManager
 from services.reset import LifecycleManager
 from services.updater import SelfUpdater
 
-from mcp.service import McpServiceManager
+from vas_mcp.service import McpServiceManager
 ```
 
 ## Environment Variables
