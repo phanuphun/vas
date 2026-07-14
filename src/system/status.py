@@ -132,6 +132,18 @@ class OpenSshStatus:
     service_active: str
 
 
+@dataclass(frozen=True)
+class McpStatus:
+    runtime_installed: bool  # fastmcp/uvicorn ติดตั้งแล้วหรือยัง (ดู mcp.service.MCP_RUNTIME_PACKAGES)
+    service_installed: bool  # มี systemd unit file แล้วหรือยัง (ยังไม่เคยกด "เปิดใช้งาน" = False)
+    service_enabled: str     # "enabled" | "disabled" | "unknown"
+    service_active: str      # "active" | "inactive" | "unknown"
+    host: str
+    port: int
+    url: str
+    tool_modules: tuple[str, ...]
+
+
 XORG_TOUCHSCREEN_CONFIG_PATH = Path("/etc/X11/xorg.conf.d/99-vending-touchscreen.conf")
 # หมายเลข 98 ต้องโหลด "ก่อน" 99 เสมอ (Xorg อ่านไฟล์ใน xorg.conf.d ตามลำดับตัวเลข/ชื่อไฟล์) —
 # ทั้งคู่เป็น machine-level config ที่ X server อ่านตอน start ครั้งแรก (ก่อน login ใครทั้งสิ้น)
@@ -241,6 +253,40 @@ def collect_openssh_status() -> OpenSshStatus:
         version=_read_version((ssh_path, "-V")) if ssh_path is not None else None,
         service_enabled=_read_command_first_line(("systemctl", "is-enabled", "ssh")),
         service_active=_read_command_first_line(("systemctl", "is-active", "ssh")),
+    )
+
+
+# tool module ที่ mount เข้า MCP server จริง (ดู src/mcp/server.py) — รายชื่อ hardcode ไว้ที่นี่
+# เพราะ import mcp.tools.* ตรงๆ จะไปโดน collision กับ pip package "mcp" (ดู docstring บนสุดของ
+# core/exec_guard.py) — ใช้เป็น static catalog สำหรับแสดงผลหน้าเว็บเท่านั้น ไม่ได้ import จริง
+MCP_TOOL_MODULES: tuple[str, ...] = ("system", "network", "display", "docker", "logs", "shell")
+
+
+def collect_mcp_status() -> McpStatus:
+    from mcp.service import MCP_SERVICE_PATH, MCP_SERVICE_UNIT, default_mcp_config, runtime_ready
+
+    cfg = default_mcp_config()
+    if dev_fake_installed():
+        return McpStatus(
+            runtime_installed=True,
+            service_installed=True,
+            service_enabled="enabled",
+            service_active="active",
+            host=cfg.host,
+            port=cfg.port,
+            url=cfg.url,
+            tool_modules=MCP_TOOL_MODULES,
+        )
+
+    return McpStatus(
+        runtime_installed=runtime_ready(),
+        service_installed=MCP_SERVICE_PATH.exists(),
+        service_enabled=_read_command_first_line(("systemctl", "is-enabled", MCP_SERVICE_UNIT)),
+        service_active=_read_command_first_line(("systemctl", "is-active", MCP_SERVICE_UNIT)),
+        host=cfg.host,
+        port=cfg.port,
+        url=cfg.url,
+        tool_modules=MCP_TOOL_MODULES,
     )
 
 

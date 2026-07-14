@@ -1,0 +1,341 @@
+{% extends base_template %}
+{% block page_title %}MCP Server — VAS{% endblock %}
+{% block header_title %}MCP Server{% endblock %}
+
+{% block content %}
+<style>
+  .msg { font-size: 0.82rem; min-height: 1.2rem; }
+  .msg-ok    { color: #0f766e; }
+  .msg-error { color: #b1453a; }
+
+  /* ── Confirm modal (page convention) ── */
+  #confirm-modal { display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; }
+  #confirm-modal.is-open { display:flex; }
+  #confirm-backdrop { position:absolute; inset:0; background:rgb(var(--c-ink)/0.35); backdrop-filter:blur(2px); }
+  #confirm-box { position:relative; background:rgb(var(--c-card)); border:1px solid rgb(var(--c-line)/0.12); border-radius:1rem; box-shadow:0 8px 32px rgb(0 0 0/0.12); width:100%; max-width:400px; margin:1rem; padding:1.5rem; animation:fadeUp 0.18s ease forwards; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── 1. PAGE HEADER ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · ระบบ</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">MCP Server</h1>
+    <p class="text-[0.82rem] text-muted mt-1">เปิดใช้งาน AI agent เข้าถึงเครื่องผ่าน Model Context Protocol (MCP)</p>
+  </div>
+
+  <!-- ── Security caution ── -->
+  <div class="bg-caution/10 border border-caution/25 rounded-lg px-4 py-4 text-[0.8rem] text-ink flex items-start gap-2.5">
+    <svg width="15" height="15" class="flex-shrink-0 mt-0.5" style="color:#92660b;"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
+    </svg>
+    <div>
+      <p class="font-semibold mb-1">ก่อนเปิดใช้งาน</p>
+      <p class="text-muted leading-relaxed">
+        MCP server รันด้วยสิทธิ์ root และเปิดผ่านเครือข่ายที่ <code class="text-[0.76rem] bg-surface px-1 py-0.5 rounded">0.0.0.0:{{ mcp.port }}</code>
+        โดย<span class="font-semibold">ไม่มี authentication</span> — ใครก็ตามที่เข้าถึงเครือข่ายนี้ได้จะเรียก tool ได้ทั้งหมด
+        รวมถึง <code class="text-[0.76rem] bg-surface px-1 py-0.5 rounded">run_command</code> ที่รันคำสั่ง shell ใดก็ได้ (บล็อกเฉพาะคำสั่งลบ/ติดตั้ง/อัปเดต — ดูรายละเอียดด้านล่าง)
+        เปิดใช้งานเฉพาะบนเครือข่ายที่ควบคุมได้เท่านั้น
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Status strip ── -->
+  <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+    <div class="flex items-center gap-2">
+      <iconify-icon icon="lucide:package-check" width="14" height="14" class="text-faint"></iconify-icon>
+      <span class="text-[0.78rem] text-muted font-medium">Runtime:</span>
+      <span class="text-[0.78rem] font-semibold {{ 'text-safe' if mcp.runtime_installed else 'text-danger' }}" id="mcp-runtime-label">
+        {{ 'ติดตั้งแล้ว' if mcp.runtime_installed else 'ยังไม่ติดตั้ง (fastmcp/uvicorn)' }}
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+      <span class="text-[0.78rem] text-muted font-medium">Service Enabled:</span>
+      <span class="text-[0.78rem] font-semibold {{ 'text-safe' if mcp.service_enabled == 'enabled' else 'text-caution' }}" id="mcp-enabled-label">
+        {{ mcp.service_enabled or 'unknown' }}
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <iconify-icon icon="lucide:activity" width="14" height="14" class="text-faint"></iconify-icon>
+      <span class="text-[0.78rem] text-muted font-medium">Service Active:</span>
+      <span class="text-[0.78rem] font-semibold {{ 'text-safe' if mcp.service_active == 'active' else 'text-danger' }}" id="mcp-active-label">
+        {{ mcp.service_active or 'unknown' }}
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <iconify-icon icon="lucide:plug" width="14" height="14" class="text-faint"></iconify-icon>
+      <span class="text-[0.78rem] text-muted font-medium">URL:</span>
+      <span class="text-[0.78rem] font-semibold text-ink font-mono">{{ mcp.url }}/sse</span>
+    </div>
+  </div>
+
+  <!-- ── System info card ── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+      <iconify-icon icon="lucide:info" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+      <h2 class="text-[0.88rem] font-semibold text-ink">ข้อมูลระบบ</h2>
+    </div>
+    <div class="divide-y divide-line/7">
+      <div class="flex items-start gap-3 px-4 py-3">
+        <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Runtime</span>
+        <span class="zone {{ 'zone-safe' if mcp.runtime_installed else 'zone-danger' }}" id="mcp-runtime-zone">
+          {{ 'OK' if mcp.runtime_installed else 'MISSING' }}
+        </span>
+      </div>
+      <div class="flex items-start gap-3 px-4 py-3">
+        <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Service</span>
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="zone {{ 'zone-safe' if mcp.service_enabled == 'enabled' else 'zone-mute' }}" id="mcp-service-enabled-zone">{{ mcp.service_enabled or 'unknown' }}</span>
+          <span class="text-faint text-[0.72rem]">/</span>
+          <span class="zone {{ 'zone-safe' if mcp.service_active == 'active' else 'zone-mute' }}" id="mcp-service-active-zone">{{ mcp.service_active or 'unknown' }}</span>
+          {% if not mcp.service_installed %}<span class="zone zone-mute">ยังไม่เคยเปิดใช้งาน</span>{% endif %}
+        </div>
+      </div>
+      <div class="flex items-start gap-3 px-4 py-3">
+        <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Listen</span>
+        <code class="flex-1 text-[0.82rem] text-ink font-mono break-all min-w-0">{{ mcp.host }}:{{ mcp.port }}</code>
+      </div>
+      <div class="flex items-start gap-3 px-4 py-3">
+        <span class="text-[0.75rem] font-semibold text-muted w-32 min-w-[8rem] pt-0.5 flex-shrink-0">Transport</span>
+        <span class="text-[0.82rem] text-ink">SSE (Server-Sent Events)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Service control ── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+      <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+      <h2 class="text-[0.88rem] font-semibold text-ink">ควบคุม Service</h2>
+    </div>
+    <div class="p-4 flex flex-col gap-3">
+      <div class="flex flex-wrap gap-2">
+        <button data-mcp-action="enable" data-mcp-confirm="1" type="button"
+                class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent/20 rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-600 transition-colors">
+          <iconify-icon icon="lucide:toggle-right" width="13" height="13"></iconify-icon>เปิดใช้งาน MCP
+        </button>
+        <button data-mcp-action="restart" data-mcp-confirm="1" type="button"
+                class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+          <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>รีสตาร์ท
+        </button>
+        <button data-mcp-action="disable" data-mcp-confirm="1" type="button"
+                class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-danger/20 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
+          <iconify-icon icon="lucide:toggle-left" width="13" height="13"></iconify-icon>ปิดใช้งาน
+        </button>
+      </div>
+      <p class="text-[0.72rem] text-faint">"เปิดใช้งาน" จะติดตั้ง fastmcp/uvicorn (ถ้ายังไม่มี), เขียน systemd unit, enable และ start service ให้ครบในขั้นตอนเดียว — ทุก action ถูกบันทึกลง audit log</p>
+      <div class="msg" id="mcp-service-msg" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <!-- ── Tool catalog ── -->
+  <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+      <iconify-icon icon="lucide:wrench" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+      <h2 class="text-[0.88rem] font-semibold text-ink">Tool ที่เปิดให้ AI agent เรียกใช้</h2>
+    </div>
+    <div class="divide-y divide-line/7">
+      {% for mod in tool_catalog %}
+      <div class="flex items-start gap-4 px-4 py-4">
+        <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 mt-0.5">
+          <iconify-icon icon="{{ mod.icon }}" width="16" height="16" class="{{ 'text-danger' if mod.danger else 'text-muted' }}"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-[0.88rem] text-ink font-display">{{ mod.label }}</span>
+            {% if mod.danger %}<span class="zone zone-danger">รันคำสั่งได้จริง</span>{% else %}<span class="zone zone-mute">Read-only</span>{% endif %}
+          </div>
+          <p class="text-[0.73rem] text-muted mt-1 leading-snug">{{ mod.desc }}</p>
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            {% for t in mod.tools %}
+            <code class="text-[0.68rem] text-faint bg-surface px-1.5 py-0.5 rounded font-mono">{{ t }}</code>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ── Client connection snippet ── -->
+  <div class="bg-card border border-line/10 rounded-xl">
+    <div class="px-4 py-4 border-b border-line/10 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <iconify-icon icon="lucide:code" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+        <h2 class="text-[0.88rem] font-semibold text-ink">การเชื่อมต่อ (client config)</h2>
+      </div>
+      <button type="button" onclick="window.copyMcpConfig()"
+              class="inline-flex items-center gap-1 px-2.5 py-1 border border-line/15 rounded-md bg-card text-[0.72rem] font-semibold text-muted hover:text-ink hover:bg-surface transition-colors">
+        <iconify-icon icon="lucide:copy" width="11" height="11"></iconify-icon>คัดลอก
+      </button>
+    </div>
+    <textarea id="mcp-config-snippet" readonly spellcheck="false"
+              class="w-full px-3 py-2.5 border-0 bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[120px] outline-none resize-y cursor-default select-all">{
+  "mcpServers": {
+    "vas": {
+      "type": "sse",
+      "url": "{{ mcp.url }}/sse"
+    }
+  }
+}</textarea>
+    <p class="text-[0.72rem] text-faint px-4 py-3 border-t border-line/10">วางไฟล์นี้เป็น <code class="text-[0.72rem] bg-surface px-1 py-0.5 rounded">.mcp.json</code> ใน client ที่ต้องการเชื่อมต่อ (เช่น Claude Code)</p>
+  </div>
+
+</div>
+
+<!-- ── Confirm Modal ──────────────────────────────────────── -->
+<div id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="confirm-backdrop" onclick="window._confirmModal && window._confirmModal.cancel()"></div>
+  <div id="confirm-box">
+    <div class="flex items-start gap-3 mb-4">
+      <div class="w-9 h-9 rounded-lg bg-caution/8 border border-caution/15 grid place-items-center flex-shrink-0">
+        <iconify-icon icon="lucide:shield-alert" width="16" height="16" class="text-caution"></iconify-icon>
+      </div>
+      <div class="min-w-0">
+        <h2 id="confirm-title" class="text-[0.95rem] font-semibold text-ink leading-snug"></h2>
+        <p id="confirm-body" class="text-[0.78rem] text-muted mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-3 border-t border-line/10">
+      <button id="confirm-cancel"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors"
+              onclick="window._confirmModal && window._confirmModal.cancel()">
+        ยกเลิก
+      </button>
+      <button id="confirm-ok"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent/20 rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-600 transition-colors">
+        <iconify-icon icon="lucide:check" width="13" height="13"></iconify-icon>ยืนยัน
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var serviceMsgEl = document.getElementById("mcp-service-msg");
+
+  function setMsg(el, text, type) {
+    if (!el) return;
+    el.className = "msg" + (type === "ok" ? " msg-ok" : type === "error" ? " msg-error" : "");
+    el.textContent = text;
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d.errors || ["Request failed"]).join(" "));
+        return d;
+      });
+    });
+  }
+
+  function setText(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+  function setZoneText(id, text, ok) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("zone-safe", ok);
+    el.classList.toggle("zone-mute", !ok);
+  }
+
+  function refreshMcpStatus() {
+    fetch("{{ url_for('mcp_status_api') }}")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status !== "ok") return;
+        setText("mcp-enabled-label", d.service_enabled || "unknown");
+        setText("mcp-active-label", d.service_active || "unknown");
+        setZoneText("mcp-service-enabled-zone", d.service_enabled || "unknown", d.service_enabled === "enabled");
+        setZoneText("mcp-service-active-zone", d.service_active || "unknown", d.service_active === "active");
+      })
+      .catch(function () {});
+  }
+
+  var ACTION_LABELS = { enable: "เปิดใช้งาน", disable: "ปิดใช้งาน", restart: "รีสตาร์ท" };
+  var ACTION_BODIES = {
+    enable: "ระบบจะติดตั้ง fastmcp/uvicorn (ถ้ายังไม่มี), เขียน systemd unit, และ start service ที่ฟังทุก IP โดยไม่มี authentication — ยืนยันว่าเครือข่ายนี้ควบคุมได้",
+    restart: "จะตัดการเชื่อมต่อของ AI agent ที่กำลังใช้งาน MCP server อยู่ชั่วคราว",
+    disable: "AI agent ที่เชื่อมต่ออยู่จะใช้งานไม่ได้ทันที"
+  };
+
+  document.querySelectorAll("[data-mcp-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var action = btn.dataset.mcpAction;
+      var needsConfirm = btn.dataset.mcpConfirm === "1";
+      function run() {
+        setMsg(serviceMsgEl, ACTION_LABELS[action] + " กำลังดำเนินการ...");
+        postJson("{{ url_for('mcp_action_api') }}", { action: action })
+          .then(function (d) {
+            setMsg(serviceMsgEl, d.message || (ACTION_LABELS[action] + " เสร็จสิ้น"), "ok");
+            refreshMcpStatus();
+          })
+          .catch(function (e) { setMsg(serviceMsgEl, e.message, "error"); });
+      }
+      if (needsConfirm) {
+        window.showConfirm({
+          title: ACTION_LABELS[action] + " MCP server?",
+          body: ACTION_BODIES[action] || "",
+          okLabel: "ยืนยัน" + ACTION_LABELS[action],
+          onOk: run,
+        });
+      } else {
+        run();
+      }
+    });
+  });
+
+  window.copyMcpConfig = function () {
+    var el = document.getElementById("mcp-config-snippet");
+    if (!el) return;
+    el.select();
+    try {
+      document.execCommand("copy");
+      if (window.showToast) window.showToast("คัดลอกแล้ว", "ok");
+    } catch (e) { /* no-op */ }
+  };
+
+  /* ── Confirm modal helper (per-page convention) ── */
+  window.showConfirm = function (opts) {
+    var modal = document.getElementById("confirm-modal");
+    var btnOk = document.getElementById("confirm-ok");
+    var clone = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(clone, clone);
+    btnOk = document.getElementById("confirm-ok");
+
+    document.getElementById("confirm-title").textContent = opts.title || "ยืนยันการดำเนินการ";
+    document.getElementById("confirm-body").textContent  = opts.body  || "";
+    if (opts.okLabel) btnOk.childNodes[1].textContent = " " + opts.okLabel;
+
+    window._confirmModal = {
+      cancel: function () { modal.classList.remove("is-open"); window._confirmModal = null; }
+    };
+    btnOk.onclick = function () {
+      modal.classList.remove("is-open"); window._confirmModal = null;
+      if (opts.onOk) opts.onOk();
+    };
+    modal.classList.add("is-open");
+    document.getElementById("confirm-cancel").focus();
+  };
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
+  });
+
+})();
+</script>
+{% endblock %}

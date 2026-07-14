@@ -52,6 +52,7 @@ from system.status import (
     collect_display_session_config_status,
     collect_display_session_script_status,
     collect_display_session_status,
+    collect_mcp_status,
     collect_openssh_status,
     collect_qr_reader_status,
     collect_remote_access_status,
@@ -61,6 +62,7 @@ from system.status import (
     collect_vpn_status,
     collect_xorg_touchscreen_config_status,
 )
+from mcp.service import MCP_VALID_ACTIONS, service_action as mcp_service_action
 from features.remote.anydesk import (
     VALID_SERVICE_ACTIONS as ANYDESK_SERVICE_ACTIONS,
     service_action as anydesk_service_action,
@@ -148,6 +150,48 @@ def _require_admin_user() -> dict[str, Any] | None:
 
 
 WEB_DIR = Path(__file__).parent / "web"
+
+# แสดงผลในหน้า /mcp เท่านั้น — รายชื่อ tool จริงต้องตรงกับที่ mount ใน src/mcp/server.py
+# (mcp.mount(...) แต่ละบรรทัด) แก้ที่นี่ทุกครั้งที่เพิ่ม/ลบ tool module จริง
+MCP_TOOL_CATALOG: tuple[dict[str, object], ...] = (
+    {
+        "module": "system", "icon": "lucide:cpu", "label": "System",
+        "desc": "สถานะ tools หลัก (Git/Node/Docker/AnyDesk), OS info, web server, remote access",
+        "tools": ("get_system_status", "get_os_info", "get_web_server_status", "get_remote_access_status"),
+        "danger": False,
+    },
+    {
+        "module": "network", "icon": "lucide:network", "label": "Network",
+        "desc": "สถานะ WireGuard VPN และ network interfaces",
+        "tools": ("get_vpn_status", "get_network_status"),
+        "danger": False,
+    },
+    {
+        "module": "display", "icon": "lucide:monitor", "label": "Display",
+        "desc": "สถานะจอแสดงผลและ USB devices",
+        "tools": ("get_display_status", "get_usb_devices"),
+        "danger": False,
+    },
+    {
+        "module": "docker", "icon": "simple-icons:docker", "label": "Docker",
+        "desc": "สถานะ Docker daemon และ containers",
+        "tools": ("get_docker_status",),
+        "danger": False,
+    },
+    {
+        "module": "logs", "icon": "lucide:file-text", "label": "Logs",
+        "desc": "System log snapshots, journalctl, ผู้ใช้ที่ login อยู่",
+        "tools": ("get_logs", "get_journal_logs", "get_logged_in_users"),
+        "danger": False,
+    },
+    {
+        "module": "shell", "icon": "lucide:terminal", "label": "Shell (run_command)",
+        "desc": "รันคำสั่ง shell ใดก็ได้บนเครื่อง — บล็อกเฉพาะ delete/install/update ทุกคำสั่งถูกบันทึก audit log",
+        "tools": ("run_command", "get_exec_policy"),
+        "danger": True,
+    },
+)
+
 INSTALL_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk", "openssh", "qr-udev")
 LIFECYCLE_COMPONENTS = ("all", "git", "node", "docker", "wireguard", "anydesk", "openssh", "qr-udev")
 WIREGUARD_ACTIONS = (
@@ -400,6 +444,45 @@ def create_app() -> Flask:
             fail2ban=openssh_manager.collect_fail2ban_status(runner),
             recent_attempts=openssh_manager.collect_recent_login_attempts(runner),
         )
+
+    @app.get("/mcp")
+    def mcp_page() -> str:
+        return render_template("mcp.html", mcp=collect_mcp_status(), tool_catalog=MCP_TOOL_CATALOG)
+
+    @app.get("/api/mcp/status")
+    def mcp_status_api() -> dict[str, object]:
+        s = collect_mcp_status()
+        return {
+            "status": "ok",
+            "runtime_installed": s.runtime_installed,
+            "service_installed": s.service_installed,
+            "service_enabled": s.service_enabled,
+            "service_active": s.service_active,
+            "host": s.host,
+            "port": s.port,
+            "url": s.url,
+        }
+
+    @app.post("/api/mcp/action")
+    def mcp_action_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action", "")).strip()
+        if action not in MCP_VALID_ACTIONS:
+            return {"status": "error", "errors": [f"Unknown MCP action: {action}"]}, 400
+        try:
+            ok, message = mcp_service_action(CommandRunner(), action)
+        except (CommandExecutionError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        if not ok:
+            return {"status": "error", "errors": [message]}, 500
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("mcp_service_action", {"action": action})
+        except Exception:
+            pass
+        return {"status": "ok", "action": action, "message": message}
 
     @app.get("/docker")
     def docker_page() -> str:

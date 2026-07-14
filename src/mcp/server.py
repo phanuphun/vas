@@ -5,7 +5,7 @@ import argparse
 from fastmcp import FastMCP
 
 from mcp.service import MCP_PORT, default_mcp_config
-from mcp.tools import display, docker, logs, network, system
+from mcp.tools import display, docker, logs, network, shell, system
 
 mcp = FastMCP("vas-mcp")
 
@@ -14,6 +14,7 @@ mcp.mount(network.mcp)
 mcp.mount(display.mcp)
 mcp.mount(docker.mcp)
 mcp.mount(logs.mcp)
+mcp.mount(shell.mcp)
 
 
 def run_server(host: str, port: int) -> None:
@@ -22,7 +23,10 @@ def run_server(host: str, port: int) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="mcp_server", description="VAS MCP server (read-only AI diagnostic interface).")
+    parser = argparse.ArgumentParser(
+        prog="mcp_server",
+        description="VAS MCP server (system diagnostics + guarded shell execution — see mcp/tools/shell.py).",
+    )
     parser.add_argument("--host", default=default_mcp_config().host)
     parser.add_argument("--port", type=int, default=MCP_PORT)
     return parser.parse_args()

@@ -16,6 +16,11 @@ MCP_SERVICE_UNIT = f"{MCP_SERVICE_NAME}.service"
 MCP_SERVICE_PATH = Path("/etc/systemd/system") / MCP_SERVICE_UNIT
 MCP_BIN = "/usr/local/bin/vas"
 
+# action ที่หน้าเว็บ /mcp เรียกผ่าน POST /api/mcp/action ได้ — "enable" ทำ install+enable+start
+# ครบในตัว (ดู McpServiceManager.start), "disable" คือ systemctl disable --now, "restart" เรียก
+# start() ซ้ำ (idempotent — เขียน unit file/ensure package ซ้ำได้ปลอดภัย แล้ว restart จริง)
+MCP_VALID_ACTIONS = ("enable", "disable", "restart")
+
 
 @dataclass(frozen=True)
 class McpConfig:
@@ -109,3 +114,37 @@ def _ensure_pip(runner: CommandRunner) -> None:
 
 def _can_import(package: str) -> bool:
     return importlib.util.find_spec(package) is not None
+
+
+def runtime_ready() -> bool:
+    """True ถ้า MCP_RUNTIME_PACKAGES (fastmcp, uvicorn) ติดตั้งครบแล้ว — เรียกจาก
+    system.status.collect_mcp_status() เพื่อแสดงสถานะในหน้าเว็บ ไม่ต้อง import fastmcp จริง
+    (แค่เช็คว่ามี module spec เท่านั้น) จึงไม่โดน collision กับ pip package "mcp" ที่ fastmcp พึ่งพา
+    (ดู docstring บนสุดของ core/exec_guard.py สำหรับรายละเอียดปัญหานั้น)"""
+    return all(_can_import(package) for package in MCP_RUNTIME_PACKAGES)
+
+
+def service_action(runner: CommandRunner, action: str, config: McpConfig | None = None) -> tuple[bool, str]:
+    """Web-friendly wrapper รอบ McpServiceManager — ใช้กับปุ่มควบคุม service ในหน้า /mcp
+
+    action ต้องเป็นหนึ่งใน MCP_VALID_ACTIONS — raise ValueError ถ้าไม่ใช่ (pattern เดียวกับ
+    features.remote.openssh.service_action) คืน (True, ข้อความสำเร็จ) เสมอถ้าไม่มี exception —
+    ความล้มเหลวจริง (systemctl/pip ล้มเหลว) จะ propagate เป็น CommandExecutionError ให้ route
+    handler จับแทน (ดู openssh_action_api ใน server.py เป็นตัวอย่าง)
+    """
+    if action not in MCP_VALID_ACTIONS:
+        raise ValueError(f"Unknown MCP action: {action}")
+
+    cfg = config or default_mcp_config()
+    manager = McpServiceManager(runner)
+
+    if action == "enable":
+        manager.start(cfg)
+        return True, f"เปิดใช้งาน MCP server เรียบร้อย — {cfg.url}"
+    if action == "disable":
+        manager.stop()
+        return True, "ปิดใช้งาน MCP server เรียบร้อย"
+    # action == "restart" — start() เขียน unit file/ensure package ซ้ำได้แบบ idempotent
+    # แล้วค่อย systemctl restart จริงท้ายสุด จึงใช้แทน restart เดี่ยวๆ ได้ปลอดภัย
+    manager.start(cfg)
+    return True, "รีสตาร์ท MCP server เรียบร้อย"
