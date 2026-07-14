@@ -302,6 +302,14 @@ log() { echo "$(date -Iseconds) $*" >> "$LOG_FILE"; }
 # 1) พื้นหลังดำ กันเห็นสีเทาดิบของ X root window ตอน Chromium ยังไม่ขึ้น
 xsetroot -solid "#000000" 2>/dev/null || true
 
+# (เสริม) ตั้ง resolution + refresh rate ด้วย xrandr ตรงๆ — ใช้แทนปุ่ม Resolution/Refresh Rate
+# ของหน้า "จอแสดงผล" ใน VAS ไม่ได้ เพราะปุ่มนั้นเรียกผ่าน D-Bus ไปหา mutter (GNOME Shell
+# compositor) ซึ่ง Openbox ไม่มีให้เรียก — ต้องหา output name + mode ที่มีจริงก่อนด้วย
+# `DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority xrandr --query` (รันตอน login อยู่จริง) แล้วค่อย
+# ใส่ค่าที่ถูกต้องแทน Virtual1/1920x1080/60 ด้านล่าง — ไม่ต้องใส่ DISPLAY=/XAUTHORITY= ตรงนี้
+# เพราะสคริปต์รันอยู่ใน X session ของ kiosk-user เองอยู่แล้ว
+xrandr --output Virtual1 --mode 1920x1080 --rate 60 2>/dev/null || true
+
 # 2) ปิด screensaver / DPMS / screen blank — ตู้ kiosk ต้องไม่ดับจอเอง
 xset s off
 xset s noblank
@@ -337,24 +345,31 @@ if ! command -v chromium >/dev/null 2>&1; then
   exit 1
 fi
 
-# 6) เปิด Chromium แบบ kiosk พร้อม flag ป้องกันหลุดออกจากโหมด kiosk
-CHROME_FLAGS=(
-  --kiosk
-  --no-first-run
-  --disable-translate
-  --disable-infobars
-  --noerrdialogs
-  --disable-suggestions-service
-  --disable-save-password-bubble
-  --overscroll-history-navigation=0
-  --disable-pinch
-  --disable-features=Translate,OverscrollHistoryNavigation,TouchpadOverscrollHistoryNavigation
-)
+# 6) เปิด Chromium แบบ kiosk พร้อม flag ป้องกันหลุดออกจากโหมด kiosk — ใช้ตัวแปรสตริงธรรมดา
+# "ห้ามใช้ bash array" (VAR=( ... ) กับ "${VAR[@]}") เพราะ Debian/Ubuntu รัน autostart ของ
+# Openbox ผ่าน /bin/sh (dash) เสมอ ไม่สนใจ shebang "#!/usr/bin/env bash" ของไฟล์เลย (helper
+# "openbox-autostart" source ไฟล์นี้ด้วย sh ตรงๆ) — array ไม่ใช่ POSIX syntax ทำให้ dash หยุด
+# รันสคริปต์เงียบๆ ตรงบรรทัดนี้พอดี ไม่มี error โผล่ที่ไหนเลย (อาการที่เจอจริง: kiosk-launch.log
+# หยุดแค่ "network ready" ไม่มี "starting chromium" ต่อ, chromium ไม่ขึ้นเลยแม้ Openbox รันอยู่)
+# ยืนยันได้ด้วย: sudo -u kiosk-user sh -n ~/.config/openbox/autostart (syntax check เฉยๆ)
+#
+# --password-store=basic: กันป๊อปอัพ "Choose password for new keyring" ของ GNOME Keyring
+# ที่เด้งขึ้นมาบล็อกจอตอน Chromium พยายามเข้าถึง keyring ครั้งแรก (เก็บ cookie encryption
+# key/saved password) — auto-login ของ kiosk-user ไม่มีการกรอกรหัสผ่านเลย (ข้าม PAM password
+# ไปตามดีไซน์) ทำให้ gnome-keyring ไม่มีรหัสผ่านมา auto-unlock login keyring ให้ พอแอปมาขอใช้
+# keyring ครั้งแรกเลยต้องถามสร้างรหัสใหม่แบบ interactive ซึ่งไม่มีใครอยู่หน้าจอมาตอบให้ทำให้
+# ค้างเป็น dialog บล็อกอยู่แบบนั้น — สั่งให้ Chromium ใช้ที่เก็บรหัสผ่านแบบ plain local file
+# แทน (ไม่เข้ารหัสผ่าน keyring) จึงไม่ต้องพึ่ง gnome-keyring เลย เหมาะกับ kiosk ที่ไม่มีใคร
+# login ด้วยรหัสผ่านจริงอยู่แล้ว
+CHROME_FLAGS="--kiosk --no-first-run --password-store=basic --disable-translate --disable-infobars --noerrdialogs --disable-suggestions-service --disable-save-password-bubble --overscroll-history-navigation=0 --disable-pinch --disable-features=Translate,OverscrollHistoryNavigation,TouchpadOverscrollHistoryNavigation"
 
 # 7) Restart loop — ถ้า Chromium ปิดตัว/crash ให้เปิดใหม่อัตโนมัติ (ไม่ปล่อยให้จอค้างดำ)
 while true; do
   log "starting chromium"
-  chromium "${CHROME_FLAGS[@]}" "$KIOSK_URL" >> "$LOG_FILE" 2>&1
+  # ไม่ใส่ quote รอบ $CHROME_FLAGS ตั้งใจ — ต้องการให้ shell แยกคำตาม space (word splitting)
+  # เป็น argument หลายตัวให้ chromium ไม่ใช่ argument เดียวยาวๆ (ปลอดภัยเพราะไม่มี flag ไหนมี
+  # space อยู่ในค่าของตัวเอง)
+  chromium $CHROME_FLAGS "$KIOSK_URL" >> "$LOG_FILE" 2>&1
   log "chromium exited — restarting in 2s"
   sleep 2
 done &
@@ -377,13 +392,55 @@ sudo chown -R kiosk-user:kiosk-user /home/kiosk-user/.config
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 ```
 
-### 10.2 ปิด popup แจ้งอัปเดตอัตโนมัติของ Chromium (ถ้าใช้ apt/.deb เวอร์ชันมี auto-update)
+### 10.2 ป้องกัน Chromium อัปเดตเองแบบไม่ทันตั้งตัว (ควบคุมจังหวะอัปเดตเอง)
 
-เพิ่ม flag `--simulate-outdated-no-au` หรือปิด service อัปเดตของแพ็กเกจนั้นแยกตามที่มา (PPA ส่วนใหญ่ไม่ auto-update บังคับ ต่างจาก snap ที่ auto-refresh ตามรอบของ snapd)
+> แก้ไขจากฉบับก่อนหน้า: `--simulate-outdated-no-au` **ไม่ใช่คำตอบที่ถูก** — flag นี้เป็น flag ทดสอบของ Chromium ที่จำลองให้เบราว์เซอร์ *ขึ้นแจ้งเตือนว่าล้าสมัย* (ตรงข้ามกับที่ต้องการ) ไม่ใช่ flag ที่ปิดการแจ้งเตือน ตัดออกไป ใช้วิธีด้านล่างแทน
+
+ไม่ใช่คำสั่ง `systemctl` — เป็นคนละคำสั่งแยกจากข้อ 10.1 ห้ามต่อท้ายกัน รันแยกบรรทัด:
+
+```bash
+sudo apt-mark hold chromium
+```
+
+ผลคือ `apt upgrade`/`unattended-upgrades` จะข้าม chromium ไปเฉยๆ ไม่อัปเดตให้เองจนกว่าจะสั่ง `sudo apt-mark unhold chromium` แล้วอัปเดตเองตอนพร้อม (เช่น maintenance window) — เช็คว่า hold อยู่จริงด้วย:
+
+```bash
+apt-mark showhold
+```
+
+ส่วน popup/infobar "restart to update" ที่อาจขึ้นระหว่างใช้งาน ถูกปิดอยู่แล้วโดย flag `--disable-infobars`/`--noerrdialogs` ที่ใส่ไว้ในคำสั่ง chromium ของสคริปต์ autostart ข้อ 9 ไม่ต้องเพิ่ม flag อะไรอีก — Chromium ที่ติดตั้งจาก PPA community อย่าง `xtradeb/apps` ไม่มี Google Update client ฝังอยู่เหมือน Google Chrome ทางการ จึงไม่มี "Chrome is out of date" banner แบบนั้นให้ปิดตั้งแต่แรก
 
 ### 10.3 ปิดคีย์ลัดหลุดออกจาก Openbox (ถ้ามีคีย์บอร์ดต่ออยู่กับตู้)
 
 แก้ `~/.config/openbox/rc.xml` ของ `kiosk-user` — ลบ/comment ทิ้งทุก `<keybind>` ที่ผูกกับ `A-Tab` (สลับหน้าต่าง), `W-e` (เปิด terminal), หรือคีย์ลัดอื่นที่ default มากับ Openbox หากไม่มีคีย์บอร์ดต่อจริงบนตู้ ข้ามขั้นนี้ได้
+
+### 10.4 ปิด Translate bar ด้วย Enterprise Policy (เชื่อถือได้กว่า flag)
+
+`--disable-translate` และ `--disable-features=Translate` ที่ใส่ไว้ใน `CHROME_FLAGS` ของข้อ 9 **อาจใช้ไม่ได้ผล** กับ Chromium เวอร์ชันใหม่ๆ — Google ทยอยเลิกรองรับ command-line switch พวกนี้ในหลายเวอร์ชันหลังๆ แล้วย้ายไปใช้ **Enterprise Policy** แทน ซึ่งยังใช้งานได้แน่นอนในทุกเวอร์ชันปัจจุบัน ถ้าเจอ popup แถบแปลภาษาเด้งขึ้นมาทั้งที่ตั้ง flag ไว้แล้ว ให้เพิ่ม policy นี้:
+
+```bash
+sudo mkdir -p /etc/chromium/policies/managed
+sudo tee /etc/chromium/policies/managed/vending-kiosk-policy.json > /dev/null << 'EOF'
+{
+  "TranslateEnabled": false
+}
+EOF
+```
+
+Chromium แต่ละ build อาจมองหา policy คนละ path กัน (ขึ้นกับชื่อ package ตอน build) ปลอดภัยสุดให้สร้างซ้ำไว้ทุก path ที่เป็นไปได้ (มีไฟล์เกินไม่มีผลเสีย):
+
+```bash
+sudo mkdir -p /etc/chromium-browser/policies/managed
+sudo cp /etc/chromium/policies/managed/vending-kiosk-policy.json /etc/chromium-browser/policies/managed/
+```
+
+kill chromium ให้ restart loop เปิดใหม่ (หรือ reboot):
+
+```bash
+sudo pkill chromium
+```
+
+ยืนยันว่า policy ถูกอ่านจริง — เปิด terminal ชั่วคราวแล้วรัน `chromium --new-window chrome://policy` ต้องเห็น `TranslateEnabled = false` พร้อม status "OK" ถ้ายังไม่เห็นหรือ path ไม่ตรง ให้เช็คว่า build นี้อ่าน policy จาก path ไหนจริงจากหน้านี้แล้วย้ายไฟล์ไปตามนั้น
 
 ---
 
