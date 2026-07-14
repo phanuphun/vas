@@ -58,3 +58,13 @@ def test_vendored_extension_files_exist_for_both_shell_versions() -> None:
         assert (base / "metadata.json").is_file(), f"missing {version_dir}/metadata.json"
         metadata_content = (base / "metadata.json").read_text(encoding="utf-8")
         assert _GESTURE_LOCKDOWN_UUID in metadata_content
+
+
+def test_chromium_uninstall_removes_snap_not_just_apt_transitional_package() -> None:
+    """"chromium-browser" บน Ubuntu 22.04 เป็นแค่ transitional package — apt purge ตัวนี้ไม่เคย
+    เรียก "snap remove" ให้เอง (ยืนยันจริงจากผู้ใช้ที่ clone OS ไปตู้ vending แล้วกด uninstall ผ่าน
+    หน้า "โปรแกรมเพิ่มเติม" chromium ไม่หลุดจริง ต้องไปลบเองผ่าน Ubuntu Software) — กันเผลอลบคำสั่ง
+    "snap remove --purge chromium" ออกในอนาคตแล้วบั๊กเดิมกลับมา"""
+    pkg = _PKG_MAP["chromium"]
+    assert ["apt-get", "purge", "-y", "chromium-browser", "chromium"] in pkg["uninstall_cmds"]
+    assert ["snap", "remove", "--purge", "chromium"] in pkg["uninstall_cmds"]

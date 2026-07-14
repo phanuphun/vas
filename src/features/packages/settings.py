@@ -339,10 +339,22 @@ PACKAGES: list[dict[str, Any]] = [
             ["apt-get", "update"],
             ["apt-get", "install", "-y", "chromium-browser"],
         ],
+        # "chromium-browser" บน Ubuntu 22.04 เป็นแค่ transitional package — apt purge ตัวนี้
+        # ลบแค่ metapackage เปล่าๆ ไม่เคยเรียก "snap remove" ให้ (ไม่มี prerm/postrm hook คู่กับ
+        # postinst ที่เรียก "snap install chromium" ตอนติดตั้ง) ทำให้ snap "chromium" ตัวจริงยัง
+        # ค้างอยู่เต็มเครื่อง ต้องเข้า Ubuntu Software (GUI ที่เรียก snapd ตรงๆ) ไปลบเองถึงจะหาย —
+        # ยืนยันจริงจากผู้ใช้ที่ clone OS ไปตู้ vending แล้วกด uninstall ผ่านหน้า "โปรแกรมเพิ่มเติม"
+        # ไม่หลุดจริงตามนี้เป๊ะ (2026-07-14) — เพิ่ม "snap remove --purge chromium" ต่อท้าย apt purge
+        # เป็น best-effort (stop_on_error=False ของ _run_commands อยู่แล้ว ถ้าเครื่องไม่มี snap
+        # ตัวนี้ติดตั้งอยู่ หรือไม่มีคำสั่ง snap เลย คำสั่งนี้ fail แล้วข้ามไปเฉยๆ ไม่ทำให้ flow ทั้งหมดพัง)
         "uninstall_cmds": [
             ["apt-get", "purge", "-y", "chromium-browser", "chromium"],
+            ["snap", "remove", "--purge", "chromium"],
         ],
-        "uninstall_warning": "การถอน Chromium จะทำให้หน้าจอ kiosk mode (ถ้าตั้งค่าไว้) เปิดเบราว์เซอร์ไม่ได้อีก",
+        "uninstall_warning": (
+            "การถอน Chromium จะทำให้หน้าจอ kiosk mode (ถ้าตั้งค่าไว้) เปิดเบราว์เซอร์ไม่ได้อีก — "
+            "จะลบทั้ง apt package และ snap package (รวมข้อมูล/โปรไฟล์ที่บันทึกไว้) ให้ครบในขั้นตอนเดียว"
+        ),
     },
     {
         "id":          "gnome-gesture-lockdown",

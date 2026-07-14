@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vending-auto-setup"
-version = "0.1.9"
+version = "0.1.10"
 description = "Typed Python CLI for preparing Ubuntu vending machines."
 readme = "README.md"
 requires-python = ">=3.10"
