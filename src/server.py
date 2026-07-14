@@ -1795,6 +1795,8 @@ def create_app() -> Flask:
             "autostart_files_removed": list(result.autostart_files_removed),
             "session_type_reset": result.session_type_reset,
             "monitors_xml_removed": result.monitors_xml_removed,
+            "gnome_lockdown_reset": result.gnome_lockdown_reset,
+            "gnome_lockdown_skip_reason": result.gnome_lockdown_skip_reason,
         }
         _db_audit("kiosk_config_cleared", result_payload)
         return {"status": "ok", **result_payload}

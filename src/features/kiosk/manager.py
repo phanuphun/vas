@@ -61,6 +61,7 @@ __all__ = [
     "OPENBOX_XSESSION_ID",
     "AccountsServiceStatus",
     "GdmAutologinStatus",
+    "GnomeLockdownResetResult",
     "KioskAutostartStatus",
     "KioskConfigClearResult",
     "KioskLinuxUser",
@@ -423,6 +424,17 @@ class KioskReadiness:
 
 
 @dataclass(frozen=True)
+class GnomeLockdownResetResult:
+    """ผลลัพธ์ของ KioskManager.reset_gnome_lockdown() — แยกจาก KioskConfigClearResult เพราะ
+    นี่ไม่ใช่ "ไฟล์ที่ลบได้แน่ๆ" เหมือนรายการอื่น แต่เป็นคำสั่ง gsettings/gnome-extensions ที่
+    ต้องมี D-Bus session bus ของ user เป้าหมายอยู่จริงถึงจะรันได้ (ดูคอมเมนต์ที่
+    reset_gnome_lockdown()) จึง**อาจ skip ได้แบบไม่ถือว่า error** — applied=False +
+    skipped_reason ไว้บอกเหตุผลกลับไปแสดงในหน้าเว็บ แทนที่จะเงียบเหมือนเดิม"""
+    applied: bool
+    skipped_reason: "str | None"
+
+
+@dataclass(frozen=True)
 class KioskConfigClearResult:
     """ผลลัพธ์ของ clear_kiosk_config() — ใช้แสดงในหน้า "เคลียร์ค่า Kiosk" (เมนูเฉพาะกิจ
     ท้าย sidebar) ทีละรายการว่าแต่ละส่วนถูกเคลียร์จริงไหม ไม่ใช่แค่ "สั่งเคลียร์" เฉยๆ —
@@ -431,6 +443,12 @@ class KioskConfigClearResult:
     autostart_files_removed: "tuple[str, ...]"
     session_type_reset: bool
     monitors_xml_removed: bool
+    # เพิ่ม 2026-07-14 — bug จริงบนเครื่อง ubuntu2204-first-test: เคลียร์ config ไปแล้วแต่
+    # enable-hot-corners/overlay-key/terminal shortcut ยังค้างเป็นค่า kiosk อยู่ และ ubuntu-dock
+    # ยัง state INITIALIZED ไม่ใช่ ENABLED เพราะ clear_kiosk_config() เดิมลบแค่ไฟล์สคริปต์ที่จะ
+    # สั่ง gsettings ในอนาคต ไม่เคย revert ค่าที่ apply ไปแล้วใน dconf ของ user เลย
+    gnome_lockdown_reset: bool
+    gnome_lockdown_skip_reason: "str | None"
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +600,77 @@ class KioskManager:
             return True
         path.write_text(content, encoding="utf-8")
         return True
+
+    def reset_gnome_lockdown(self, username: str) -> GnomeLockdownResetResult:
+        """คืนค่า gsettings/extension lockdown ที่ build_gnome_lockdown_preamble() เคยสั่งไว้
+        ตอน kiosk-launch.sh รันเป็น GNOME session ของ user นี้ (ดู GNOME_LOCKDOWN_FLAG_DEFS
+        ด้านบนสำหรับชุดคำสั่ง "set" ต้นทาง) — จำเป็นเพราะ clear_kiosk_config()/stop_kiosk_mode()
+        ลบแค่ **ไฟล์สคริปต์** ที่จะสั่ง gsettings ในอนาคต ไม่เคยทำให้ค่าที่ apply ไปแล้วครั้งก่อนๆ
+        ใน dconf ของ user คืนกลับเป็น default เลย (ยืนยัน bug จริงบนเครื่อง
+        ubuntu2204-first-test วันที่ 2026-07-14: เคลียร์ config แล้ว enable-hot-corners/
+        overlay-key/terminal shortcut ยังค้างเป็นค่า kiosk อยู่ครบ และ ubuntu-dock ยัง state
+        INITIALIZED ไม่ใช่ ENABLED — Activities Overview เลยโผล่เองแทนที่จะเป็น desktop ปกติ)
+
+        ใช้ pattern เดียวกับ DisplayManager.apply_gnome_screen_blank() ใน
+        features/display/display.py (ดูคอมเมนต์ที่นั่นเรื่อง DBUS_SESSION_BUS_ADDRESS) เพราะ
+        gsettings/gnome-extensions ต้องรันในบริบท D-Bus session bus ของ user เป้าหมายเท่านั้น —
+        เรียกจาก root ตรงๆ (VAS server รันเป็น root เสมอ) จะ fail เงียบๆ ไม่มี error ให้เห็นเลย
+
+        ต่างจาก apply_gnome_screen_blank() ตรงที่ฟังก์ชันนี้**ไม่ raise** ถ้าไม่มี session bus —
+        clear_kiosk_config() ต้อง idempotent เรียกได้เสมอแม้ไม่มีใคร login เข้า GNOME session
+        อยู่เลยตอนนั้น (เช่นเคลียร์จากเครื่องอื่นผ่าน VPN ตอนไม่มีใครนั่งหน้าเครื่องจริง) — กรณีนั้น
+        แค่ skip แล้วคืนเหตุผลกลับไปให้ผู้ใช้เห็นในหน้าเว็บแทนที่จะเงียบเหมือนเดิม ผู้ใช้ต้องรันซ้ำ
+        เองตอนที่ user คนนั้น login เข้าจอจริงแล้ว
+
+        ไม่เรียก _ensure_dconf_dir แบบ apply_gnome_screen_blank เพราะนี่คือ "reset" ไม่ใช่ "set" —
+        ถ้าไม่เคยมีใครตั้งค่าอะไรไว้เลย (~/.config/dconf ไม่มีอยู่จริง) ก็ไม่มีอะไรให้ reset อยู่ดี
+        gsettings reset ค่าที่ไม่เคยถูก override จะเป็น no-op เงียบๆ ไม่ error"""
+        uid = _kiosk_user_uid(username)
+        if uid is None:
+            return GnomeLockdownResetResult(
+                applied=False, skipped_reason=f"ไม่พบ user '{username}' ในระบบ (pwd lookup ล้มเหลว)",
+            )
+        bus_path = Path(f"/run/user/{uid}/bus")
+        if not self.runner.dry_run and not bus_path.exists():
+            return GnomeLockdownResetResult(
+                applied=False,
+                skipped_reason=(
+                    f"user '{username}' ไม่มี D-Bus session bus ที่ {bus_path.as_posix()} — ต้อง login "
+                    "เข้า GNOME session อยู่จริงถึงจะคืนค่า gsettings/extension ได้ กด 'เคลียร์' ซ้ำอีกครั้ง "
+                    "ตอนที่ user คนนี้ login เข้าจอจริงแล้ว"
+                ),
+            )
+        dbus_address = f"unix:path={bus_path.as_posix()}"
+        # เรียงตามลำดับย้อนกลับของ GNOME_LOCKDOWN_FLAG_DEFS ด้านบน — "reset" คืนเป็น default ของ
+        # gsettings เอง (ไม่ hardcode ค่าเดิมของ Ubuntu) ส่วน 2 extension ใช้ enable/disable ตรงข้าม
+        # กับตอน "set" เป๊ะ (ubuntu-dock: set=disable → reset=enable, gesture lockdown: set=enable
+        # → reset=disable) — check=False ทุกคำสั่งเพราะ extension บางตัว (เช่น gesture lockdown)
+        # อาจไม่เคยถูกติดตั้งในเครื่องนี้เลย ห้ามให้ทั้งฟังก์ชันล้มเพราะ command เดียว fail
+        commands: "tuple[tuple[str, ...], ...]" = (
+            ("gsettings", "reset", "org.gnome.desktop.interface", "enable-hot-corners"),
+            ("gsettings", "reset", "org.gnome.settings-daemon.plugins.media-keys", "terminal"),
+            ("gsettings", "reset", "org.gnome.mutter", "overlay-key"),
+            ("gnome-extensions", "enable", "ubuntu-dock@ubuntu.com"),
+            ("gnome-extensions", "disable", _GESTURE_LOCKDOWN_EXTENSION_UUID),
+        )
+        print(f"reset GNOME lockdown gsettings/extensions for {username}")
+        for command in commands:
+            args = ["runuser", "-u", username, "--", "env", f"DBUS_SESSION_BUS_ADDRESS={dbus_address}", *command]
+            self.runner.run(args, check=False)
+        return GnomeLockdownResetResult(applied=True, skipped_reason=None)
+
+
+def _kiosk_user_uid(username: str) -> "int | None":
+    """หา uid ของ username — คืน None ถ้าหา user ไม่เจอ (คนละ helper จาก _chown_to_user เพราะ
+    ที่นี่ต้องการแค่ uid ไม่ต้อง chown อะไร) ใช้ PWD_MODULE ตัวเดียวกับส่วนอื่นของไฟล์นี้แทนการ
+    import _user_info จาก features/display/display.py ตรงๆ เพื่อไม่ให้โมดูลนี้พึ่ง private
+    helper ของโมดูลอื่นข้ามไฟล์"""
+    if PWD_MODULE is None:
+        return None
+    try:
+        return cast(int, PWD_MODULE.getpwnam(username).pw_uid)
+    except KeyError:
+        return None
 
 
 def _insert_after_shebang(script_content: str, extra: str) -> str:
@@ -1121,7 +1210,8 @@ def clear_kiosk_config(runner: CommandRunner, home: Path, username: str) -> Kios
     """เคลียร์ config ทั้งหมดที่ VAS เคยเขียนไว้สำหรับ kiosk mode ของ user นี้ — ใช้กับเมนู
     เฉพาะกิจ "เคลียร์ค่า Kiosk" (แผนใหม่ปิดหน้าคีออสแล้วย้ายไปตั้งค่า Openbox แบบ manual แทน)
 
-    เคลียร์ 4 ส่วน (ตรงกับ 4 ส่วนที่ไฟล์ module docstring ด้านบนอธิบายไว้):
+    เคลียร์ 5 ส่วน (4 ส่วนแรกตรงกับที่ไฟล์ module docstring ด้านบนอธิบายไว้ ส่วนที่ 5 เพิ่มเข้ามา
+    2026-07-14 หลังพบ bug จริงบนเครื่อง ubuntu2204-first-test):
     1. GDM auto-login (custom.conf) — ปิด (เหมือน stop_kiosk_mode)
     2. ไฟล์ autostart ทั้ง GNOME (.desktop + launch script) และ Openbox — ลบ (เหมือน stop_kiosk_mode)
     3. AccountsService session-type (คีย์ Session=/XSession=) — ลบเฉพาะคีย์นี้ (ต่างจาก
@@ -1130,6 +1220,14 @@ def clear_kiosk_config(runner: CommandRunner, home: Path, username: str) -> Kios
     4. ~/.config/monitors.xml ของ user นี้ — ลบเฉพาะไฟล์ที่ VAS เขียนไว้เอง (มี signature) ผ่าน
        MonitorsXmlManager.remove_user_level() ที่มีอยู่แล้ว ไม่แตะไฟล์ที่ user เคยตั้งเองผ่าน
        GNOME Settings
+    5. GNOME lockdown gsettings/extensions (hot corner, terminal shortcut, overlay-key/Super
+       key, ubuntu-dock, gesture lockdown) — คืนเป็นค่า default ผ่าน
+       KioskManager.reset_gnome_lockdown() เพราะ 4 ข้อด้านบนลบแค่ "ไฟล์สคริปต์" ที่จะสั่ง
+       gsettings ในอนาคต ไม่เคย revert ค่าที่เคย apply ไปแล้วใน dconf ของ user เลย (bug จริง:
+       เคลียร์ config แล้ว Activities Overview ยังโผล่เอง แทนที่จะเป็น desktop ปกติ เพราะ
+       enable-hot-corners/overlay-key/ubuntu-dock ยังค้างเป็นค่า kiosk) — ข้อนี้**อาจ skip ได้**
+       ถ้า user เป้าหมายไม่มี GNOME session graphical เปิดอยู่ตอนนั้น (ดูเหตุผลใน
+       reset_gnome_lockdown()) ไม่ถือว่าทั้งฟังก์ชันล้มเหลว
 
     **ไม่ลบ**: Linux user เอง (useradd/userdel), DB records (audit log, MQTT heartbeat
     integration, config_history) — อยู่นอก scope ของฟังก์ชันนี้โดยตั้งใจ
@@ -1154,11 +1252,15 @@ def clear_kiosk_config(runner: CommandRunner, home: Path, username: str) -> Kios
         MonitorsXmlManager(runner).remove_user_level(home)
     monitors_xml_removed = monitors_xml_present_before and not user_has_own_monitors_xml(home)
 
+    gnome_lockdown = manager.reset_gnome_lockdown(username)
+
     return KioskConfigClearResult(
         autologin_disabled=True,
         autostart_files_removed=removed_autostart,
         session_type_reset=session_type_reset,
         monitors_xml_removed=monitors_xml_removed,
+        gnome_lockdown_reset=gnome_lockdown.applied,
+        gnome_lockdown_skip_reason=gnome_lockdown.skipped_reason,
     )
 
 

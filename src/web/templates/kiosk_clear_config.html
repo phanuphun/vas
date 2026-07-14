@@ -223,8 +223,17 @@
         if (result.data.session_type_reset) setEntryCleared("accounts_service");
         if (result.data.monitors_xml_removed) setEntryCleared("monitors_xml_user");
         if (msgEl) {
-          msgEl.textContent = "เคลียร์เรียบร้อย — ต้องตั้งค่าใหม่ทั้งหมดถ้าจะใช้ kiosk mode อีกครั้ง";
-          msgEl.className = "text-[0.78rem] text-safe";
+          var baseMsg = "เคลียร์เรียบร้อย — ต้องตั้งค่าใหม่ทั้งหมดถ้าจะใช้ kiosk mode อีกครั้ง";
+          if (result.data.gnome_lockdown_reset) {
+            msgEl.textContent = baseMsg + " (คืนค่า GNOME lockdown — hot corner/Super key/คีย์ลัด Terminal/Ubuntu Dock — กลับเป็นค่าเดิมแล้วด้วย)";
+            msgEl.className = "text-[0.78rem] text-safe";
+          } else if (result.data.gnome_lockdown_skip_reason) {
+            msgEl.textContent = baseMsg + " แต่ยังไม่ได้คืนค่า GNOME lockdown (hot corner/Super key/Ubuntu Dock): " + result.data.gnome_lockdown_skip_reason;
+            msgEl.className = "text-[0.78rem] text-caution";
+          } else {
+            msgEl.textContent = baseMsg;
+            msgEl.className = "text-[0.78rem] text-safe";
+          }
           msgEl.classList.remove("hidden");
         }
       } else {

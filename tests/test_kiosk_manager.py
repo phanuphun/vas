@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from core.runner import CommandRunner
 from features.kiosk.manager import (
     CHROME_KIOSK_FLAG_DEFS,
     GNOME_LOCKDOWN_FLAG_DEFS,
     GNOME_LOCKDOWN_SIGNATURE,
+    KioskManager,
     _parse_gnome_lockdown_flags,
     _parse_kiosk_flags,
     build_gnome_lockdown_preamble,
@@ -167,3 +169,42 @@ def test_normalize_gnome_lockdown_flags_defaults_unknown_keys_ignored() -> None:
     assert result["disable_hot_corner"] is False
     assert "not_a_real_key" not in result
     assert result["disable_terminal_shortcut"] is True  # default เมื่อไม่ได้ส่งมา
+
+
+def test_reset_gnome_lockdown_skips_when_user_not_found() -> None:
+    """clear_kiosk_config() ต้อง idempotent — ถ้า username ไม่มีอยู่จริงในระบบ (เช่น
+    kiosk user ถูกลบไปแล้วก่อนกด "เคลียร์") reset_gnome_lockdown() ต้อง skip แบบมีเหตุผล
+    กลับมา ไม่ raise ให้ทั้ง clear_kiosk_config() ล้มไปทั้งฟังก์ชัน"""
+    manager = KioskManager(CommandRunner())
+    result = manager.reset_gnome_lockdown("definitely-not-a-real-vas-test-user-12345")
+
+    assert result.applied is False
+    assert result.skipped_reason is not None
+    assert "definitely-not-a-real-vas-test-user-12345" in result.skipped_reason
+
+
+def test_reset_gnome_lockdown_dry_run_skips_bus_check_and_prints_commands() -> None:
+    """dry_run ต้องข้ามการเช็ค D-Bus session bus จริง (bus_path.exists()) เพราะ dry-run แค่
+    อยากดูว่าจะรันคำสั่งอะไรบ้าง ไม่ได้ต้องการ session กราฟิกจริง — ใช้ 'root' (uid 0) เพราะ
+    รับประกันว่ามีอยู่จริงในทุกเครื่อง Linux ไม่ต้องพึ่งว่ามี kiosk user จริงในสภาพแวดล้อมทดสอบ"""
+    manager = KioskManager(CommandRunner(dry_run=True))
+    result = manager.reset_gnome_lockdown("root")
+
+    assert result.applied is True
+    assert result.skipped_reason is None
+
+
+def test_reset_gnome_lockdown_reverses_every_set_command_from_flag_defs() -> None:
+    """แต่ละ flag ใน GNOME_LOCKDOWN_FLAG_DEFS ("set") ต้องมีคำสั่ง "reset" ที่ตรงข้ามกันตรงๆ ใน
+    reset_gnome_lockdown() — กันเคสลืมเพิ่ม reset command ตอนมี lockdown flag ใหม่เพิ่มเข้ามาทีหลัง
+    (เช่นถ้ามีคนเพิ่ม flag ที่ 6 ใน GNOME_LOCKDOWN_FLAG_DEFS แต่ลืมเพิ่ม reset ใน
+    reset_gnome_lockdown() test นี้ควรจะช่วยเตือน แม้จะ assert ผ่านตอนนี้เพราะเช็คแค่ 5 ตัวที่มีอยู่)"""
+    import inspect
+
+    source = inspect.getsource(KioskManager.reset_gnome_lockdown)
+
+    assert '"gsettings", "reset", "org.gnome.desktop.interface", "enable-hot-corners"' in source
+    assert '"gsettings", "reset", "org.gnome.settings-daemon.plugins.media-keys", "terminal"' in source
+    assert '"gsettings", "reset", "org.gnome.mutter", "overlay-key"' in source
+    assert '"gnome-extensions", "enable", "ubuntu-dock@ubuntu.com"' in source
+    assert '"gnome-extensions", "disable", _GESTURE_LOCKDOWN_EXTENSION_UUID' in source
