@@ -545,11 +545,18 @@
       <div class="flex flex-col gap-1.5">
         <label class="text-[0.75rem] font-semibold text-muted">Payload (ตัวอย่าง)</label>
         <pre class="payload-box">{
-  "scan": "1234567890",
   "device": "/dev/hidraw0",
-  "ts": "2026-06-27T11:40:18Z",
-  "source": "zkteco-qr500"
+  "mode": "full",
+  "read_mode": "hidraw",
+  "scan": "1234567890",
+  "raw_keycode": [30, 48, 46, 18, 33, 34, 35, 36],
+  "raw_report": ["a1000000041e00000000"],
+  "raw_bytes": "undefined",
+  "scan_source": "undefined",
+  "rfid_uids": "undefined",
+  "timestamp": "2026-06-27T11:40:18Z"
 }</pre>
+        <p class="text-[0.71rem] text-faint mt-0.5">ส่งทุก field พร้อมกันเสมอ (ไม่แยก mode) — field ไหนไม่มีข้อมูลสำหรับ read_mode ปัจจุบันจะเป็น <code class="font-display bg-surface px-1 rounded text-[0.68rem]">"undefined"</code> แทน</p>
       </div>
       <div class="flex items-center justify-end gap-2">
         <button onclick="disableInteg('webhook', this)" type="button"
@@ -627,26 +634,20 @@
         </div>
       </div>
       <div class="flex flex-col gap-1.5">
-        <label class="text-[0.75rem] font-semibold text-muted">Payload Mode</label>
-        <select id="mqtt-payload-mode"
-                class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition font-display">
-          <option value="" {{ 'selected' if not integrations.mqtt.payload_mode else '' }}>ใช้ค่า default ของ Broker ที่เลือก</option>
-          <option value="decoded" {{ 'selected' if integrations.mqtt.payload_mode == 'decoded' else '' }}>Decoded — ข้อความที่ decode แล้ว</option>
-          <option value="raw_keycode" {{ 'selected' if integrations.mqtt.payload_mode == 'raw_keycode' else '' }}>Raw Keycode — HID keycode/scancode ดิบ</option>
-          <option value="raw_report" {{ 'selected' if integrations.mqtt.payload_mode == 'raw_report' else '' }}>Raw Report — HID byte report ดิบทั้งก้อน (hidraw เท่านั้น)</option>
-        </select>
-        <p class="text-[0.72rem] text-faint mt-0.5">กำหนดรูปแบบข้อมูลที่ publish จากตัวอ่าน QR นี้โดยเฉพาะ — ถ้าไม่เลือกจะใช้ payload mode ของ Broker แทน</p>
-      </div>
-      <div class="flex flex-col gap-1.5">
         <label class="text-[0.75rem] font-semibold text-muted">Payload (ตัวอย่าง)</label>
-        <div class="flex items-center gap-1.5">
-          <button type="button" class="scan-mode-btn is-active" data-payload-mode="decoded" onclick="window.setPayloadExampleMode('decoded')">Decoded</button>
-          <button type="button" class="scan-mode-btn" data-payload-mode="raw_keycode" onclick="window.setPayloadExampleMode('raw_keycode')">Raw Keycode</button>
-          <button type="button" class="scan-mode-btn" data-payload-mode="raw_report" onclick="window.setPayloadExampleMode('raw_report')">Raw Report</button>
-        </div>
-        <textarea id="payload-example-textarea" readonly spellcheck="false" rows="7"
-                  class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.75rem] font-mono leading-relaxed outline-none resize-y cursor-default select-all"></textarea>
-        <p class="text-[0.72rem] text-faint mt-0.5">รูปแบบ payload จริงมาจาก <code class="font-display bg-surface px-1 rounded text-[0.68rem]">publish_qr_scan()</code> — กดปุ่มด้านบนเพื่อดูตัวอย่างของแต่ละโหมด</p>
+        <pre class="payload-box">{
+  "device": "/dev/hidraw0",
+  "mode": "full",
+  "read_mode": "hidraw",
+  "scan": "1234567890",
+  "raw_keycode": [30, 48, 46, 18, 33, 34, 35, 36],
+  "raw_report": ["a1000000041e00000000"],
+  "raw_bytes": "undefined",
+  "scan_source": "undefined",
+  "rfid_uids": "undefined",
+  "timestamp": "2026-06-27T11:40:18Z"
+}</pre>
+        <p class="text-[0.71rem] text-faint mt-0.5">ส่งทุก field พร้อมกันเสมอ (ไม่แยก mode) — field ไหนไม่มีข้อมูลสำหรับ read_mode ปัจจุบันจะเป็น <code class="font-display bg-surface px-1 rounded text-[0.68rem]">"undefined"</code> แทน — รูปแบบเดียวกับ Webhook ด้านบน</p>
       </div>
       <div class="flex items-center justify-end gap-2">
         <button onclick="disableInteg('mqtt', this)" type="button"
@@ -1131,22 +1132,6 @@
 
   function initFlowPipeline() { renderPipelineChips(); checkInitialMqttStatus(); }
 
-  /* ══ Payload example — ตัวอย่าง payload จริงจาก publish_qr_scan() แยกตามโหมด
-     แสดงทีละโหมดเท่านั้น สลับด้วย button group (เหมือน scan-mode-btn ของ Live Monitor) ═ */
-  var PAYLOAD_EXAMPLES = {
-    decoded: '{\n  "data": "1234567890",\n  "device": "/dev/hidraw0",\n  "mode": "decoded",\n  "read_mode": "hidraw",\n  "timestamp": "2026-06-27T11:40:18Z"\n}',
-    raw_keycode: '{\n  "data": [30, 48, 46, 18, 33, 34, 35, 36, 37, 38],\n  "device": "/dev/hidraw0",\n  "mode": "raw_keycode",\n  "read_mode": "hidraw",\n  "timestamp": "2026-06-27T11:40:18Z"\n}',
-    raw_report: '{\n  "data": ["a1000000000000000000000000000000", "a1000000000000000000000000000000"],\n  "device": "/dev/hidraw0",\n  "mode": "raw_report",\n  "read_mode": "hidraw",\n  "timestamp": "2026-06-27T11:40:18Z"\n}'
-  };
-
-  window.setPayloadExampleMode = function (mode) {
-    var ta = document.getElementById('payload-example-textarea');
-    if (ta) ta.value = PAYLOAD_EXAMPLES[mode] || '';
-    document.querySelectorAll('[data-payload-mode]').forEach(function (btn) {
-      btn.classList.toggle('is-active', btn.dataset.payloadMode === mode);
-    });
-  };
-
   /* ══ Scan history — DB-backed, pagination ═════════════════════════════════ */
   function formatTs(iso) {
     if (!iso) return '—';
@@ -1541,7 +1526,6 @@
       payload.broker_id    = parseInt((document.getElementById('mqtt-broker-id') || {}).value || '0', 10) || null;
       payload.topic        = (document.getElementById('mqtt-topic')       || {}).value || 'vas/qr/scan';
       payload.qos          = parseInt((document.getElementById('mqtt-qos') || {}).value || '1', 10);
-      payload.payload_mode = (document.getElementById('mqtt-payload-mode') || {}).value || null;
     } else if (type === 'pipe') {
       payload.path = (document.getElementById('pipe-path') || {}).value || '/tmp/vas_qr_pipe';
     }
@@ -1764,7 +1748,6 @@
   loadTodayStats();
   loadScanHistory();
   loadMqttHistory();
-  setPayloadExampleMode({{ integrations.mqtt.payload_mode | default('decoded', true) | tojson }});
 
 })();
 </script>

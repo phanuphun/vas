@@ -125,6 +125,8 @@ class ScanPublisherThread(threading.Thread):
                     scan_raw_keycode=scan_raw_keycode,
                     scan_raw_report=scan_raw_report,
                     read_mode=read_mode,
+                    scan_source=scan_source,
+                    rfid_uid=scan_rfid_uid,
                 )
             except Exception as exc:
                 mqtt_status = {"enabled": True, "connected": False, "published": False, "error": str(exc)}

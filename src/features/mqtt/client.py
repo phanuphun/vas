@@ -337,63 +337,41 @@ class VasMqttClient:
         scan_raw_keycode: "list[int] | None" = None,
         scan_raw_report: "list[str] | None" = None,
         read_mode: "str | None" = None,
+        scan_source: "str | None" = None,
+        rfid_uid: "list[str] | None" = None,
         topic_override: "str | None" = None,
-        payload_mode_override: "str | None" = None,
     ) -> bool:
         """
         Publish QR scan ไปยัง topic ที่ config ไว้ (หรือ topic_override ถ้าระบุ)
 
-        payload_mode == "decoded"     → {"data": "<decoded_text>",  "device":"...", "mode":"decoded",     "read_mode":"...", "timestamp":"..."}
-        payload_mode == "raw_keycode" → {"data": [39,30,30,...],    "device":"...", "mode":"raw_keycode", "read_mode":"...", "timestamp":"..."}
-        payload_mode == "raw_report"  → {"data": ["a1000000...",..],"device":"...", "mode":"raw_report",  "read_mode":"...", "timestamp":"..."}
+        Payload เป็นแบบ "full" เสมอ (ทุก field พร้อมกันในก้อนเดียว) ประกอบผ่าน
+        features.qr.payload.build_scan_body() ตัวเดียวกับที่ webhook.py ใช้ -- ดูรูปแบบ/เหตุผล
+        เต็มที่นั่น (ตรงกับ qr500_reader.payload.build_scan_body() ของโปรเจกต์พี่น้อง ยกเว้นชื่อ
+        field "scan" แทน "data" และไม่มี field "source")
 
-        ทุก mode แนบ "mode"/"read_mode"/"timestamp" เข้า payload เสมอ (เดิม key ชื่อ "scan"/"ts" —
-        เปลี่ยนเป็น "data"/"timestamp" ให้อ่านง่ายขึ้น และเพิ่ม "mode" บอกว่า data เป็นรูปแบบไหน)
-
-        ถ้าข้อมูลของ payload_mode ที่เลือกเป็น None (เช่นขอ raw_report แต่ read_mode="evdev"
-        ทำให้ scan_raw_report=None) → **ไม่ publish**, return False, log ผ่าน log_mqtt_event(ok=False)
-        พร้อมเหตุผล -- ห้าม silent fallback ไปโหมดอื่น
+        เดิม (ก่อนหน้านี้) มี concept "payload_mode" ให้เลือกส่งแค่ data field เดียว
+        (decoded/raw_keycode/raw_report) แล้ว skip การ publish ทั้งก้อนถ้า field ที่เลือกไม่มี
+        ข้อมูลสำหรับ read_mode ปัจจุบัน (เช่นขอ raw_report ตอน read_mode="evdev") -- ตอนนี้ส่งครบ
+        ทุก field เสมอ (field ที่ไม่มีข้อมูลจริงใส่ "undefined" แทน) จึงไม่มีเคส "ไม่ publish" จาก
+        payload mismatch อีกต่อไป (`self.config.enabled` เท่านั้นที่ยัง block publish)
 
         topic_override: ถ้าไม่ใช่ None ใช้แทน self.config.topic ทั้งใน publish() และใน
         payload/error-log construction — ใช้สำหรับ device-aware publish
         (ดู publish_qr_scan_for_device()) ที่ topic มาจาก device_integrations แทน broker เอง
-
-        payload_mode_override: ถ้าไม่ใช่ None และอยู่ใน PAYLOAD_MODES ใช้แทน
-        self.config.payload_mode — ให้ device_integrations (ต้นทางข้อมูลจริงคือฝั่ง QR
-        reader) กำหนดรูปแบบ payload ต่อ device ได้ แทนที่จะผูกตายตัวกับ broker เพียงอย่างเดียว
-        (broker.payload_mode ยังเป็นค่า default เผื่อ device ไม่ได้ override)
         """
         if not self.config.enabled:
             return False
 
         topic = topic_override if topic_override is not None else self.config.topic
 
-        mode = self.config.payload_mode
-        if payload_mode_override is not None and payload_mode_override in PAYLOAD_MODES:
-            mode = payload_mode_override
-        if mode == "raw_keycode":
-            scan_value: object = scan_raw_keycode
-        elif mode == "raw_report":
-            scan_value = scan_raw_report
-        else:
-            scan_value = scan
+        from features.qr.payload import build_scan_body
+        event = {
+            "scan": scan, "device": device, "ts": ts,
+            "raw_keycode": scan_raw_keycode, "raw_report": scan_raw_report,
+            "read_mode": read_mode, "scan_source": scan_source, "rfid_uid": rfid_uid,
+        }
+        payload = json.dumps(build_scan_body(event), ensure_ascii=False)
 
-        if scan_value is None:
-            error_payload = json.dumps(
-                {"error": f"{mode} not available for read_mode={read_mode}"},
-                ensure_ascii=False,
-            )
-            try:
-                from core.database import log_mqtt_event as _db_mqtt
-                _db_mqtt(scan=scan, topic=topic, payload=error_payload, ok=False, ts=ts)
-            except Exception:
-                pass
-            return False
-
-        payload = json.dumps(
-            {"data": scan_value, "device": device, "mode": mode, "read_mode": read_mode, "timestamp": ts},
-            ensure_ascii=False,
-        )
         ok = self.publish(topic, payload)
         try:
             from core.database import log_mqtt_event as _db_mqtt
@@ -540,6 +518,8 @@ def publish_qr_scan(
     scan_raw_keycode: "list[int] | None" = None,
     scan_raw_report: "list[str] | None" = None,
     read_mode: "str | None" = None,
+    scan_source: "str | None" = None,
+    rfid_uid: "list[str] | None" = None,
 ) -> bool:
     """
     Convenience wrapper — publish ไปยัง broker ที่ is_primary=1 เท่านั้น (ไม่ device-aware
@@ -557,6 +537,8 @@ def publish_qr_scan(
         scan_raw_keycode=scan_raw_keycode,
         scan_raw_report=scan_raw_report,
         read_mode=read_mode,
+        scan_source=scan_source,
+        rfid_uid=rfid_uid,
     )
 
 
@@ -568,6 +550,8 @@ def publish_qr_scan_for_device(
     scan_raw_keycode: "list[int] | None" = None,
     scan_raw_report: "list[str] | None" = None,
     read_mode: "str | None" = None,
+    scan_source: "str | None" = None,
+    rfid_uid: "list[str] | None" = None,
 ) -> dict[str, object]:
     """
     Device-aware publish — เลือก broker ตาม device_integrations ของ device_id นั้นๆ แทน
@@ -585,11 +569,9 @@ def publish_qr_scan_for_device(
     integration chip ได้ตรงกับความเป็นจริง (เทา=idle, เหลือง/แดง=enabled แต่ไม่ได้เชื่อม broker,
     เขียว=publish สำเร็จ, แดง=publish error)
 
-    payload_mode: อ่านจาก device_integrations (mqtt_integ["payload_mode"]) ถ้าตั้งไว้ — เก็บใน
-    settings_json ผ่าน upsert_device_integration() แบบเดียวกับ field เสริมอื่นๆ (ไม่ต้อง
-    migration schema เพิ่ม) ถือเป็น override เหนือ broker.payload_mode เพราะข้อมูล raw
-    ต้นทางจริงๆ มาจากฝั่ง QR reader ต่อ device ไม่ใช่จากฝั่ง broker — ถ้า device ไม่ได้ตั้งไว้
-    (None/ค่าว่าง) จะ fallback ไปใช้ payload_mode ของ broker เอง (ดู publish_qr_scan())
+    payload ที่ publish เป็นแบบ "full" เสมอ (ดู VasMqttClient.publish_qr_scan()) — ไม่มี
+    concept "payload_mode" ต่อ device แบบเดิมอีกต่อไป (เคยอ่านจาก
+    mqtt_integ["payload_mode"] เพื่อ override broker.payload_mode)
 
     หมายเหตุ: นี่คือ code path ที่ SSE loop (server.py qr_stream_api) ใช้จริง — แยกจาก
     publish_qr_scan() ที่ยังใช้กับ `vas mqtt test` / `/api/mqtt/test` เหมือนเดิม (ยัง return bool)
@@ -610,14 +592,14 @@ def publish_qr_scan_for_device(
         return {"enabled": True, "connected": False, "published": False, "error": "broker ยังไม่ได้เชื่อมต่อ"}
 
     topic = mqtt_integ.get("topic") or None
-    payload_mode = mqtt_integ.get("payload_mode") or None
     ok = c.publish_qr_scan(
         scan, device, ts,
         scan_raw_keycode=scan_raw_keycode,
         scan_raw_report=scan_raw_report,
         read_mode=read_mode,
+        scan_source=scan_source,
+        rfid_uid=rfid_uid,
         topic_override=topic,  # type: ignore[arg-type]
-        payload_mode_override=payload_mode,  # type: ignore[arg-type]
     )
     error = None if ok else (c.last_error or "publish ไม่สำเร็จ")
     return {"enabled": True, "connected": c.is_connected, "published": ok, "error": error}

@@ -160,15 +160,8 @@ class WebhookDispatcherThread(threading.Thread):
             retry_max_attempts = int(integ.get("retry") or 5)
             timeout_seconds = float(integ.get("timeout_sec") or 5)
 
-            payload = {
-                "scan": event.get("scan"),
-                "device": event.get("device"),
-                "ts": event.get("ts"),
-                "source": DEVICE_ID,
-                "read_mode": event.get("read_mode"),
-                "scan_source": event.get("scan_source"),
-                "rfid_uid": event.get("rfid_uid"),
-            }
+            from features.qr.payload import build_scan_body
+            payload = build_scan_body(event)
 
             try:
                 ok, status_code, error = send_webhook_request(

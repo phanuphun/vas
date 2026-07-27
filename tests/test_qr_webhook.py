@@ -180,8 +180,13 @@ def test_dispatcher_sends_and_reports_published_status() -> None:
     call_kwargs = mock_send.call_args
     assert call_kwargs.args[0] == "https://example.com/hook"
     payload = call_kwargs.args[4]
+    # payload มาจาก features.qr.payload.build_scan_body() -- รูปแบบเดียวกับ qr500-reader
+    # (ยกเว้น "scan" แทน "data" และไม่มี "source") ดู tests/test_qr_payload.py สำหรับเทสของ
+    # build_scan_body() เอง ตรงนี้แค่ยืนยันว่า dispatcher เรียกมันจริงและส่ง scan ที่ถูกต้อง
     assert payload["scan"] == "abc123"
-    assert payload["source"] == "zkteco-qr500"
+    assert payload["device"] == "/dev/hidraw0"
+    assert payload["mode"] == "full"
+    assert "source" not in payload
     status = d.get_last_status()
     assert status == {"enabled": True, "connected": True, "published": True, "error": None}
 
