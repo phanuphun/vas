@@ -150,6 +150,26 @@ class ScanPublisherThread(threading.Thread):
                 "mqtt": mqtt_status,
                 "pipe": pipe_status,
             }
+
+            # Webhook ส่งแบบ async ผ่าน background dispatcher thread แยกต่างหาก (ต่างจาก
+            # mqtt/pipe ด้านบนที่เรียกตรงๆ ได้เพราะ non-blocking อยู่แล้ว) -- ดู
+            # features/qr/webhook.py ทำไมถึงต้องแยก enqueue() แค่ non-blocking, ไม่รอ HTTP
+            # response ตรงนี้ -- webhook_status ที่แนบไปกับ event นี้จึงเป็นผลลัพธ์ของ "การส่ง
+            # ครั้งก่อนหน้า" (eventually-consistent) ไม่ใช่ผลของ scan นี้เป๊ะๆ
+            webhook_status: dict[str, object] = {
+                "enabled": False, "connected": False, "published": False, "error": None,
+            }
+            try:
+                from features.qr.webhook import get_webhook_dispatcher, start_webhook_dispatcher
+                wd = get_webhook_dispatcher()
+                if wd is None or not wd.is_alive():
+                    wd = start_webhook_dispatcher()
+                wd.publish(event)
+                webhook_status = wd.get_last_status()
+            except Exception as exc:
+                webhook_status = {"enabled": True, "connected": False, "published": False, "error": str(exc)}
+            event["webhook"] = webhook_status
+
             with self._lock:
                 self._last_event = event
                 self._last_event_seq += 1

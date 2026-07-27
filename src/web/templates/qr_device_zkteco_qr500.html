@@ -552,12 +552,12 @@
 }</pre>
       </div>
       <div class="flex items-center justify-end gap-2">
-        <button onclick="disableInteg('webhook')" type="button"
+        <button onclick="disableInteg('webhook', this)" type="button"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           ปิดใช้งาน
         </button>
-        <button onclick="saveInteg('webhook')"
+        <button onclick="saveInteg('webhook', this)"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -649,12 +649,12 @@
         <p class="text-[0.72rem] text-faint mt-0.5">รูปแบบ payload จริงมาจาก <code class="font-display bg-surface px-1 rounded text-[0.68rem]">publish_qr_scan()</code> — กดปุ่มด้านบนเพื่อดูตัวอย่างของแต่ละโหมด</p>
       </div>
       <div class="flex items-center justify-end gap-2">
-        <button onclick="disableInteg('mqtt')" type="button"
+        <button onclick="disableInteg('mqtt', this)" type="button"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           ปิดใช้งาน
         </button>
-        <button onclick="saveInteg('mqtt')"
+        <button onclick="saveInteg('mqtt', this)"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -716,12 +716,12 @@
           สร้าง Pipe ตอนนี้
         </button>
         <span class="text-[0.71rem] text-faint flex-1">VAS สร้าง pipe อัตโนมัติเมื่อ start reader</span>
-        <button onclick="disableInteg('pipe')" type="button"
+        <button onclick="disableInteg('pipe', this)" type="button"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-danger/25 rounded-lg bg-card text-danger text-[0.8rem] font-semibold hover:bg-danger/5 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           ปิดใช้งาน
         </button>
-        <button onclick="saveInteg('pipe')"
+        <button onclick="saveInteg('pipe', this)"
                 class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -981,12 +981,14 @@
       }, 1400);
     }
 
-    /* pipeline flash — mqtt/pipe ใช้สถานะจริงจาก data.mqtt / data.pipe (enabled/connected/
-       published/error) ที่ backend ส่งมาจริงแล้ว (server.py qr_stream_api)
-       webhook ยังไม่มี backend เขียนจริง เลย flash แบบ generic (ok) เหมือนเดิม */
+    /* pipeline flash — mqtt/pipe/webhook ใช้สถานะจริงจาก data.mqtt / data.pipe / data.webhook
+       (enabled/connected/published/error) ที่ backend ส่งมาจริงแล้ว (server.py qr_stream_api)
+       หมายเหตุ webhook: ส่งแบบ async ผ่าน background dispatcher (features/qr/webhook.py) —
+       data.webhook อาจเป็นผลของการส่ง "ครั้งก่อนหน้า" ไม่ใช่ของ scan นี้เป๊ะๆ (eventually
+       consistent) เหมือนกับที่ mqtt "connected" ก็ไม่ได้ผูกกับ scan นี้เป๊ะๆ อยู่แล้ว */
     if (integState.mqtt) { setTimeout(function () { updateMqttChipStatus(data.mqtt); }, 200); }
     if (integState.pipe) { setTimeout(function () { updatePipeChipStatus(data.pipe); }, 200); }
-    if (integState.webhook) { setTimeout(function () { flashPipelineChip('webhook', 'ok'); }, 200); }
+    if (integState.webhook) { setTimeout(function () { updateWebhookChipStatus(data.webhook); }, 200); }
 
     /* history — DB เป็น source of truth เสมอ ถ้ากำลังดูหน้าแรกอยู่ให้ refresh ทั้งสองตาราง
        (debounce กันยิง request รัวๆ ตอนสแกนถี่ๆ) */
@@ -1088,6 +1090,22 @@
     applyChipBaseline('pipe');
     if (p.connected) {
       flashPipelineChip('pipe', p.published ? 'ok' : 'error');
+    }
+  }
+
+  /* อัปเดตสถานะ Webhook chip จาก data.webhook ที่แนบมากับ SSE 'scan' event — เหมือน
+     updateMqttChipStatus()/updatePipeChipStatus() ทุกประการ (features/qr/webhook.py ส่งกลับ
+     status dict รูปแบบเดียวกัน) ต่างแค่ "connected" ที่นี่หมายถึง "ตั้งค่าครบพอจะส่งได้"
+     (มี URL แล้ว) ไม่ใช่ persistent connection แบบ mqtt เพราะ webhook ไม่มีแนวคิดนั้น:
+       connected=false -> baseline = warn (เหลือง) เช่นเปิดใช้งานแล้วแต่ยังไม่ได้กรอก Base URL
+       connected=true  -> baseline = idle (เทา), flash เขียว/แดงตาม published ของการส่งล่าสุด */
+  function updateWebhookChipStatus(status) {
+    var w = status || {};
+    if (!w.enabled) return;
+    integBaseline.webhook = w.connected ? 'idle' : 'warn';
+    applyChipBaseline('webhook');
+    if (w.connected) {
+      flashPipelineChip('webhook', w.published ? 'ok' : 'error');
     }
   }
 
@@ -1538,9 +1556,16 @@
       (enabled ? 'bg-safe/10 border-safe/25 text-safe' : 'bg-surface border-line/15 text-muted');
   }
 
-  function postInteg(type, enabled, successMsg) {
+  /* ปุ่มบันทึก/ปิดใช้งานของทั้ง 3 การ์ด integration (webhook/mqtt/pipe) ใช้ postInteg() ร่วมกัน
+     — ระหว่างปุ่มไหนกำลัง in-flight ให้ disable ปุ่มบันทึก+ปิดใช้งานของ "การ์ดเดียวกัน" ไปด้วย
+     กันกดซ้อนสอง action ขัดแย้งกัน (เช่นกด save ค้างอยู่แล้วไปกด disable ซ้อน) แต่ไม่ต้อง disable
+     ข้ามการ์ด เพราะแต่ละ integration บันทึกแยก endpoint กันอยู่แล้ว ไม่ race กันจริง */
+  function postInteg(type, enabled, successMsg, btn) {
     var payload = buildIntegPayload(type);
     payload.enabled = enabled;
+    var siblingBtns = document.querySelectorAll('#card-' + type + ' [onclick^="saveInteg"], #card-' + type + ' [onclick^="disableInteg"]');
+    setBtnLoading(btn, true, enabled ? 'กำลังบันทึก...' : 'กำลังปิดใช้งาน...');
+    siblingBtns.forEach(function (b) { if (b !== btn) b.disabled = true; });
     fetch('/api/qr/integrations/' + type, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1558,18 +1583,22 @@
           showToast('Error: ' + (data.error || 'unknown'), 'error');
         }
       })
-      .catch(function (e) { showToast('Error: ' + e, 'error'); });
+      .catch(function (e) { showToast('Error: ' + e, 'error'); })
+      .finally(function () {
+        setBtnLoading(btn, false);
+        siblingBtns.forEach(function (b) { if (b !== btn) b.disabled = false; });
+      });
   }
 
   /* ══ Save (= บันทึกค่า + เปิดใช้งาน) ═════════════════════════════════════ */
-  window.saveInteg = function (type) {
-    postInteg(type, true, 'บันทึก ' + type + ' เรียบร้อย');
+  window.saveInteg = function (type, btn) {
+    postInteg(type, true, 'บันทึก ' + type + ' เรียบร้อย', btn);
   };
 
   /* ══ Disable (= ปิดใช้งานจริง ผูกกับ server ตรงๆ ไม่ใช่แค่ย่อ panel เหมือน toggle
      เดิม) — เก็บค่า field อื่นๆ ไว้เหมือนเดิม เปลี่ยนแค่ enabled=false ═══════════ */
-  window.disableInteg = function (type) {
-    postInteg(type, false, 'ปิดใช้งาน ' + type + ' แล้ว');
+  window.disableInteg = function (type, btn) {
+    postInteg(type, false, 'ปิดใช้งาน ' + type + ' แล้ว', btn);
   };
 
   /* ══ Create named pipe ═══════════════════════════════════════════════════ */

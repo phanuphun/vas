@@ -1978,9 +1978,11 @@ def create_app() -> Flask:
     from features.qr.reader import stop_reader as _stop_qr_reader
     from features.mqtt.client import stop_mqtt as _stop_mqtt
     from features.qr.scan_publisher import stop_scan_publisher as _stop_scan_publisher
+    from features.qr.webhook import stop_webhook_dispatcher as _stop_webhook_dispatcher
     atexit.register(_stop_qr_reader)
     atexit.register(_stop_mqtt)
     atexit.register(_stop_scan_publisher)
+    atexit.register(_stop_webhook_dispatcher)
 
     # Auto-start QR reader เมื่อ server boot (ถ้ามี device ต่ออยู่ และยังไม่ถูกถอนการติดตั้ง)
     try:
@@ -1996,6 +1998,15 @@ def create_app() -> Flask:
     # /api/qr/stream เท่านั้น ทำให้ publish หยุดทำงานทันทีที่ปิดหน้าเว็บ — ดู scan_publisher.py)
     from features.qr.scan_publisher import start_scan_publisher as _start_scan_publisher
     _start_scan_publisher()
+
+    # Auto-start webhook dispatcher เสมอเช่นกัน (ดู features/qr/webhook.py) -- scan_publisher.py
+    # จะ lazy-start ให้เองอยู่แล้วถ้าไม่ได้ start ตรงนี้ก่อน แต่ start ที่ boot ไปด้วยเลยเพื่อความ
+    # สม่ำเสมอกับ scan publisher (background thread อายุเท่า process ทั้งคู่)
+    try:
+        from features.qr.webhook import start_webhook_dispatcher as _start_webhook_dispatcher
+        _start_webhook_dispatcher()
+    except Exception:
+        pass
 
     # Auto-start ทุก MQTT broker ที่ enabled=1 ใน DB (แยก try/except ต่อ broker อยู่ภายใน)
     try:
@@ -2158,7 +2169,8 @@ def create_app() -> Flask:
                    "raw_keycode": [<int>,...]|null, "raw_report": [<hex str>,...]|null,
                    "read_mode": "hidraw"|"evdev"|null,
                    "mqtt": {"enabled": bool, "connected": bool, "published": bool, "error": str|null},
-                   "pipe": {"enabled": bool, "connected": bool, "published": bool, "error": str|null}}
+                   "pipe": {"enabled": bool, "connected": bool, "published": bool, "error": str|null},
+                   "webhook": {"enabled": bool, "connected": bool, "published": bool, "error": str|null}}
 
             event: status
             data: {"running": <bool>, "device": "<path>"|null}
