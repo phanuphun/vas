@@ -834,11 +834,26 @@ class SerialQrReaderThread(threading.Thread):
 _reader_thread: QrReaderThread | EvdevQrReaderThread | SerialQrReaderThread | None = None
 _reader_lock = threading.Lock()
 
+# True หลังจากผู้ใช้กด "หยุด Reader" (stop_reader()) โดยตั้งใจ -- ป้องกันไม่ให้
+# ScanPublisherThread (features/qr/scan_publisher.py) auto-restart reader กลับมาให้ทุก
+# RESTART_INTERVAL วินาที (เดิม 8 วิ) ทั้งที่ผู้ใช้เพิ่งสั่งหยุดไปเอง (บั๊กที่เจอจริง: กด
+# "หยุด Reader" แล้วสแกนไม่เข้าแป๊บนึง แต่สักพักกลับมาอ่านได้อีก เพราะ background thread
+# เข้าใจว่า reader "ตาย" เอง (เหมือนอุปกรณ์หลุด) เลย auto-restart ให้ตามปกติ ไม่ได้แยกแยะ
+# "ตายเอง" กับ "ผู้ใช้สั่งหยุด") เคลียร์ค่ากลับเป็น False ทุกครั้งที่มีการเรียก start_reader()
+# ไม่ว่าจากที่ไหน (หมายความว่า "ตอนนี้มีคนต้องการให้ reader ทำงาน")
+_auto_restart_suspended = False
 
-def get_reader() -> QrReaderThread | None:
+
+def get_reader() -> QrReaderThread | EvdevQrReaderThread | SerialQrReaderThread | None:
     """Return running reader thread หรือ None"""
     with _reader_lock:
         return _reader_thread
+
+
+def is_auto_restart_suspended() -> bool:
+    """True ถ้าผู้ใช้กด "หยุด Reader" ไปล่าสุด (ยังไม่ได้ start ใหม่) -- ดู _auto_restart_suspended"""
+    with _reader_lock:
+        return _auto_restart_suspended
 
 
 def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrReaderThread | SerialQrReaderThread":
@@ -866,8 +881,10 @@ def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrRea
 
     ถ้า thread กำลัง run อยู่แล้ว -> return thread เดิม (idempotent)
     """
-    global _reader_thread
+    global _reader_thread, _auto_restart_suspended
     with _reader_lock:
+        _auto_restart_suspended = False  # มีคนสั่ง start จริงจัง -- เคลียร์ suspend flag เสมอ
+
         if _reader_thread is not None and _reader_thread.is_alive():
             return _reader_thread
 
@@ -907,9 +924,14 @@ def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrRea
 
 
 def stop_reader() -> None:
-    """หยุด global reader thread ถ้ากำลัง run"""
-    global _reader_thread
+    """
+    หยุด global reader thread ถ้ากำลัง run -- ตั้ง _auto_restart_suspended=True เสมอ
+    (แม้ตอนกดตอนนั้นจะไม่มี thread รันอยู่แล้วก็ตาม) เพื่อกัน ScanPublisherThread
+    auto-restart ให้กลับมาเอง จนกว่าจะมีการเรียก start_reader() อีกครั้ง
+    """
+    global _reader_thread, _auto_restart_suspended
     with _reader_lock:
+        _auto_restart_suspended = True
         if _reader_thread is not None:
             thread = _reader_thread
             thread.stop()

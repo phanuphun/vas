@@ -236,6 +236,50 @@ def test_start_reader_auto_detect_serial_raises_when_nothing_found() -> None:
 
 
 # ---------------------------------------------------------------------------
+# stop_reader() / is_auto_restart_suspended() -- bugfix สำหรับปุ่ม "หยุด Reader" ที่
+# ScanPublisherThread เคย auto-restart กลับมาเองหลังผ่านไปสักพัก (RESTART_INTERVAL)
+# แม้ผู้ใช้จะกดหยุดเองก็ตาม -- ดู features/qr/scan_publisher.py::_try_start()
+# ---------------------------------------------------------------------------
+
+def test_stop_reader_sets_auto_restart_suspended_flag() -> None:
+    import features.qr.reader as reader_mod
+
+    mock_thread = MagicMock()
+    with patch.object(reader_mod, "_reader_thread", mock_thread):
+        with patch.object(reader_mod, "_auto_restart_suspended", False):
+            reader_mod.stop_reader()
+            assert reader_mod.is_auto_restart_suspended() is True
+    mock_thread.stop.assert_called_once()
+    mock_thread.join.assert_called_once_with(timeout=2.0)
+
+
+def test_stop_reader_sets_suspended_flag_even_when_no_thread_running() -> None:
+    """กดหยุดตอนไม่มี thread รันอยู่แล้ว (เช่นกดซ้ำ) ก็ต้อง suspend auto-restart เหมือนกัน --
+    ไม่งั้น ScanPublisherThread จะ start เองใหม่รอบถัดไปที่ poll แม้ผู้ใช้เพิ่งกดหยุดไป"""
+    import features.qr.reader as reader_mod
+
+    with patch.object(reader_mod, "_reader_thread", None):
+        with patch.object(reader_mod, "_auto_restart_suspended", False):
+            reader_mod.stop_reader()
+            assert reader_mod.is_auto_restart_suspended() is True
+
+
+def test_start_reader_clears_auto_restart_suspended_flag() -> None:
+    """หลัง stop (flag=True) แล้วมีคน start ใหม่จริงจัง (ปุ่ม start/restart) -- flag ต้องเคลียร์
+    กลับเป็น False เพื่อให้ auto-restart safety net กลับมาทำงานปกติได้อีกครั้ง"""
+    import features.qr.reader as reader_mod
+
+    with patch.object(reader_mod, "_reader_thread", None):
+        with patch.object(reader_mod, "_auto_restart_suspended", True):
+            with patch("features.qr.reader.find_zkteco_evdev_devices", return_value=["/dev/input/event5"]):
+                with patch("features.qr.reader.EvdevQrReaderThread") as MockEvdev:
+                    mock_thread = MagicMock()
+                    MockEvdev.return_value = mock_thread
+                    reader_mod.start_reader(device_path=None)
+            assert reader_mod.is_auto_restart_suspended() is False
+
+
+# ---------------------------------------------------------------------------
 # database.py migration v4 -- scan_source / rfid_uid persistence
 # ---------------------------------------------------------------------------
 

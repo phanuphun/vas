@@ -45,7 +45,7 @@ class ScanPublisherThread(threading.Thread):
             return self._last_event, self._last_event_seq
 
     def run(self) -> None:
-        from features.qr.reader import get_reader, start_reader
+        from features.qr.reader import get_reader, is_auto_restart_suspended, start_reader
         from features.qr.registry import is_installed as _qr_is_installed
 
         def _try_start():
@@ -53,6 +53,11 @@ class ScanPublisherThread(threading.Thread):
             if r is not None and r.is_alive():
                 return r
             if not _qr_is_installed("zkteco-qr500"):
+                return None
+            # ผู้ใช้เพิ่งกด "หยุด Reader" เอง (stop_reader()) -- ห้าม auto-restart ให้ จนกว่า
+            # จะมีคน start ใหม่เอง (ปุ่ม start/restart, /api/qr/start, ฯลฯ) ไม่งั้นจะเป็นบั๊ก
+            # ที่เจอจริง: กดหยุดแล้วสแกนไม่เข้าแป๊บนึง แต่สักพัก (RESTART_INTERVAL) กลับมาอ่านเอง
+            if is_auto_restart_suspended():
                 return None
             try:
                 return start_reader()

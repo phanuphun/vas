@@ -148,11 +148,11 @@
     <span class="pulse-dot" id="header-pulse" style="display:none;"></span>
     <span id="header-badge-text">{{ 'กำลังทำงาน' if qr_reader.reader_running else 'หยุด' }}</span>
   </span>
-  <button class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors" onclick="qrRestart()">
+  <button id="btn-restart-header" class="qr-restart-btn inline-flex items-center gap-1.5 px-3 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed" onclick="qrRestart()">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
     </svg>
-    Restart
+    <span class="qr-restart-btn-label">Restart</span>
   </button>
 </div>
 
@@ -427,21 +427,21 @@
                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
           <option value="">Auto-detect (ใช้อุปกรณ์แรกที่พบใน interface ที่เลือกด้านบน)</option>
           {% if evdev_devices %}
-          <optgroup label="USB — evdev (HID keyboard mode, แนะนำ)">
+          <optgroup label="USB — evdev (HID keyboard mode, แนะนำ)" data-iface="usb">
             {% for dev in evdev_devices %}
             <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
             {% endfor %}
           </optgroup>
           {% endif %}
           {% if hidraw_devices %}
-          <optgroup label="USB — hidraw (raw HID mode)">
+          <optgroup label="USB — hidraw (raw HID mode)" data-iface="usb">
             {% for dev in hidraw_devices %}
             <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
             {% endfor %}
           </optgroup>
           {% endif %}
           {% if serial_devices %}
-          <optgroup label="Serial — RS485 (ttyUSB adapter)">
+          <optgroup label="Serial — RS485 (ttyUSB adapter)" data-iface="serial">
             {% for dev in serial_devices %}
             <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
             {% endfor %}
@@ -459,19 +459,19 @@
           </svg>
           บันทึก Config
         </button>
-        <button onclick="qrRestart()"
-                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+        <button id="btn-restart-config" onclick="qrRestart()"
+                class="qr-restart-btn inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
           </svg>
-          Restart Reader
+          <span class="qr-restart-btn-label">Restart Reader</span>
         </button>
-        <button onclick="qrStop()"
-                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-caution text-[0.8rem] font-semibold hover:bg-surface transition-colors">
+        <button id="btn-stop-reader" onclick="qrStop()"
+                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-line/15 rounded-lg bg-card text-caution text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="6" y="6" width="12" height="12"/>
           </svg>
-          หยุด Reader
+          <span class="qr-stop-btn-label">หยุด Reader</span>
         </button>
       </div>
     </div>
@@ -793,6 +793,18 @@
       } catch (_) {}
     });
 
+    /* event: status — server ส่งทันทีตอน connect + ทุกครั้งที่ reader thread ตาย/ฟื้นจริงๆ
+       (server.py qr_stream_api เทียบ reader.is_alive() ทุก poll) ใช้ sync badge/dot ให้ตรงกับ
+       สถานะจริงของ backend เสมอ แทนที่จะเชื่อ optimistic update จากปุ่มเพียงอย่างเดียว —
+       กันเคส auto-restart safety net หรือ reader ตายเองแล้ว UI ไม่รู้ตัว */
+    sse.addEventListener('status', function (e) {
+      try {
+        var data = JSON.parse(e.data);
+        updateReaderBadge(!!data.running);
+        setPipelineDotState(!!data.running);
+      } catch (_) {}
+    });
+
     sse.onerror = function () {
       setSSEOnline(false);
       setTimeout(connectSSE, 3000);
@@ -877,7 +889,30 @@
     document.querySelectorAll('[data-interface]').forEach(function (btn) {
       btn.classList.toggle('is-active', btn.dataset.interface === mode);
     });
+    filterDeviceOptionsByInterface(mode);
   };
+
+  /* ซ่อน <optgroup> ของ device-select ที่ไม่ตรงกับ interface ที่เลือก (usb ↔ serial) —
+     ป้องกันเลือก device path ของ interface ที่ปิดอยู่ค้างไว้แบบไม่รู้ตัว ถ้า option ที่เลือกอยู่
+     ถูกซ่อนไป reset กลับไปที่ "Auto-detect" (value="") แทน */
+  function filterDeviceOptionsByInterface(mode) {
+    var select = document.getElementById('device-select');
+    if (!select) return;
+    var selectedHidden = false;
+    select.querySelectorAll('optgroup[data-iface]').forEach(function (group) {
+      var visible = group.dataset.iface === mode;
+      group.hidden = !visible;
+      if (!visible && group.querySelector('option[selected], option:checked')) selectedHidden = true;
+    });
+    if (select.selectedOptions && select.selectedOptions[0]) {
+      var opt = select.selectedOptions[0];
+      var group = opt.parentElement;
+      if (group && group.tagName === 'OPTGROUP' && group.dataset.iface && group.dataset.iface !== mode) {
+        selectedHidden = true;
+      }
+    }
+    if (selectedHidden) select.value = '';
+  }
 
   /* ══ Scan handler ════════════════════════════════════════════════════════ */
   function onScan(data) {
@@ -1554,10 +1589,37 @@
   };
 
   /* ══ Reader controls ═════════════════════════════════════════════════════ */
+  /* ปุ่มที่ mutate reader state ร่วมกัน (save config / restart / stop) — ระหว่างปุ่มใดปุ่มหนึ่ง
+     กำลัง in-flight ต้อง disable ปุ่มอื่นๆ ทั้งหมดไปด้วย กัน race (เช่น กด Restart ค้างอยู่แล้วไปกด
+     Stop ซ้อน) และให้ผู้ใช้เห็น loading state ชัดเจนว่าระบบกำลังทำงานอยู่ ไม่ใช่ค้าง/ไม่ตอบสนอง */
+  var QR_STATE_BTN_SELECTOR = '#btn-save-config, .qr-restart-btn, #btn-stop-reader';
+
+  function setBtnLoading(btn, loading, loadingText) {
+    if (!btn) return;
+    if (loading) {
+      if (btn.dataset.origHtml === undefined) btn.dataset.origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span><span>' + escHtml(loadingText) + '</span>';
+    } else {
+      btn.disabled = false;
+      if (btn.dataset.origHtml !== undefined) {
+        btn.innerHTML = btn.dataset.origHtml;
+        delete btn.dataset.origHtml;
+      }
+    }
+  }
+
+  function setOtherBtnsDisabled(exceptBtn, disabled) {
+    document.querySelectorAll(QR_STATE_BTN_SELECTOR).forEach(function (btn) {
+      if (btn !== exceptBtn) btn.disabled = disabled;
+    });
+  }
+
   window.qrSaveConfig = function () {
     var device = (document.getElementById('device-select') || {}).value || null;
     var btn = document.getElementById('btn-save-config');
-    if (btn) btn.disabled = true;
+    setBtnLoading(btn, true, 'กำลังบันทึก...');
+    setOtherBtnsDisabled(btn, true);
     fetch('/api/qr/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1576,11 +1638,19 @@
         setTimeout(function () { if (el) el.textContent = ''; }, 3000);
       })
       .catch(function (e) { showToast('Error: ' + e, 'error'); })
-      .finally(function () { if (btn) btn.disabled = false; });
+      .finally(function () {
+        setBtnLoading(btn, false);
+        setOtherBtnsDisabled(btn, false);
+      });
   };
 
   window.qrRestart = function () {
     var device = (document.getElementById('device-select') || {}).value || null;
+    var restartBtns = document.querySelectorAll('.qr-restart-btn');
+    restartBtns.forEach(function (btn) { setBtnLoading(btn, true, 'กำลัง Restart...'); });
+    setOtherBtnsDisabled(null, true);
+    restartBtns.forEach(function (btn) { btn.disabled = true; });
+
     fetch('/api/qr/stop', { method: 'POST' })
       .then(function () {
         return fetch('/api/qr/start', {
@@ -1597,17 +1667,38 @@
           setPipelineDotState(true);
         } else {
           showToast('Error: ' + (data.errors || []).join(', '), 'error');
+          updateReaderBadge(false);
+          setPipelineDotState(false);
         }
       })
-      .catch(function (e) { showToast('Error: ' + e, 'error'); });
+      .catch(function (e) { showToast('Error: ' + e, 'error'); })
+      .finally(function () {
+        restartBtns.forEach(function (btn) { setBtnLoading(btn, false); });
+        setOtherBtnsDisabled(null, false);
+      });
   };
 
   window.qrStop = function () {
-    fetch('/api/qr/stop', { method: 'POST' }).then(function () {
-      updateReaderBadge(false);
-      setPipelineDotState(false);
-      showToast('Reader หยุดแล้ว', 'success');
-    });
+    var stopBtn = document.getElementById('btn-stop-reader');
+    setBtnLoading(stopBtn, true, 'กำลังหยุด...');
+    setOtherBtnsDisabled(stopBtn, true);
+
+    fetch('/api/qr/stop', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        updateReaderBadge(false);
+        setPipelineDotState(false);
+        if (data && data.status === 'ok') {
+          showToast('Reader หยุดแล้ว', 'success');
+        } else {
+          showToast('หยุด Reader ไม่สำเร็จ: ' + ((data && data.errors) || []).join(', '), 'error');
+        }
+      })
+      .catch(function (e) { showToast('Error: ' + e, 'error'); })
+      .finally(function () {
+        setBtnLoading(stopBtn, false);
+        setOtherBtnsDisabled(stopBtn, false);
+      });
   };
 
   /* ══ Helpers ═════════════════════════════════════════════════════════════ */
@@ -1638,6 +1729,7 @@
   }
 
   /* ══ Init ════════════════════════════════════════════════════════════════ */
+  filterDeviceOptionsByInterface(selectedInterface);  // sync device-select กับ interface ที่ config ไว้ตั้งแต่โหลดหน้าแรก
   initFlowPipeline();
   connectSSE();
   loadTodayStats();
