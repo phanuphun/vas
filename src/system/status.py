@@ -1009,6 +1009,10 @@ class QrReaderStatus:
     active_device: str | None           # device ที่ thread กำลังอ่านอยู่
     reader_running: bool
     last_scan: str | None               # in-memory ค่าล่าสุด
+    interface: str = "usb"                       # "usb" | "serial" -- จาก QrConfig.interface
+    detected_serial_devices: tuple[str, ...] = () # ttyUSB paths ของ RS485 adapter ที่พบ
+    symlink_hidraw_exists: bool = False           # /dev/zkteco-qr500 (สร้างจาก install-udev)
+    symlink_serial_exists: bool = False           # /dev/zkteco-qr500-serial (สร้างจาก install-udev)
 
 
 def collect_qr_reader_status() -> QrReaderStatus:
@@ -1033,14 +1037,29 @@ def collect_qr_reader_status() -> QrReaderStatus:
     cfg_exists = _path_exists(cfg_path)
 
     try:
-        from features.qr.reader import find_zkteco_hidraw_devices, get_reader
+        from features.qr.reader import (
+            SYMLINK_HIDRAW_PATH,
+            SYMLINK_SERIAL_PATH,
+            find_zkteco_hidraw_devices,
+            find_zkteco_serial_devices,
+            get_reader,
+            load_qr_config,
+        )
         detected = tuple(find_zkteco_hidraw_devices())
+        detected_serial = tuple(find_zkteco_serial_devices())
+        symlink_hidraw_exists = _path_exists(Path(SYMLINK_HIDRAW_PATH))
+        symlink_serial_exists = _path_exists(Path(SYMLINK_SERIAL_PATH))
+        interface = load_qr_config().interface
         reader = get_reader()
         reader_running = reader is not None and reader.is_alive()
         active_device = reader.device_path if reader_running else None
         last_scan = reader.last_scan if reader_running else None
     except Exception:
         detected = ()
+        detected_serial = ()
+        symlink_hidraw_exists = False
+        symlink_serial_exists = False
+        interface = "usb"
         reader_running = False
         active_device = None
         last_scan = None
@@ -1055,6 +1074,10 @@ def collect_qr_reader_status() -> QrReaderStatus:
         active_device=active_device,
         reader_running=reader_running,
         last_scan=last_scan,
+        interface=interface,
+        detected_serial_devices=detected_serial,
+        symlink_hidraw_exists=symlink_hidraw_exists,
+        symlink_serial_exists=symlink_serial_exists,
     )
 
 
@@ -1062,9 +1085,17 @@ def _print_qr_reader_status(status: QrReaderStatus) -> None:
     print("[QR Reader]")
     udev_marker = "OK" if status.udev_rule_has_signature else "WARN"
     print(f"{udev_marker:7} {'udev rule':12} {status.udev_rule_path.as_posix()}")
+    symlink_marker = "OK" if status.symlink_hidraw_exists else "WARN"
+    print(f"{symlink_marker:7} {'symlink usb':12} /dev/zkteco-qr500")
+    serial_symlink_marker = "OK" if status.symlink_serial_exists else "WARN"
+    print(f"{serial_symlink_marker:7} {'symlink serial':12} /dev/zkteco-qr500-serial")
+    print(f"{'':7} {'interface':12} {status.interface}")
     dev_marker = "OK" if status.detected_devices else "WARN"
     devices_str = ", ".join(status.detected_devices) if status.detected_devices else "none detected"
-    print(f"{dev_marker:7} {'devices':12} {devices_str}")
+    print(f"{dev_marker:7} {'devices (usb)':12} {devices_str}")
+    serial_dev_marker = "OK" if status.detected_serial_devices else "WARN"
+    serial_devices_str = ", ".join(status.detected_serial_devices) if status.detected_serial_devices else "none detected"
+    print(f"{serial_dev_marker:7} {'devices (serial)':16} {serial_devices_str}")
     reader_marker = "OK" if status.reader_running else "WARN"
     active = "running on " + (status.active_device or "") if status.reader_running else "stopped"
     print(f"{reader_marker:7} {'reader':12} {active}")

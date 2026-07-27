@@ -2118,17 +2118,23 @@ def create_app() -> Flask:
     @app.post("/api/qr/config")
     def qr_config_save_api() -> tuple[dict[str, object], int] | dict[str, object]:
         """
-        Payload: {"device_path": "/dev/hidraw0"}  -- null clears to auto-detect
+        Payload: {"device_path": "/dev/hidraw0", "interface": "usb"|"serial"}
+                 device_path=null clears to auto-detect; interface omitted = คงค่าเดิม
         200: {"status":"ok","config":{...}}
         500: {"status":"error","errors":[...]}
         """
-        from features.qr.reader import QrConfig, save_qr_config, load_qr_config
+        from features.qr.reader import QrConfig, QR_INTERFACES, save_qr_config, load_qr_config
         payload = request.get_json(silent=True) or {}
         device_path = payload.get("device_path") or None
         if device_path is not None:
             device_path = str(device_path).strip() or None
         old_config = load_qr_config()
-        config = QrConfig(device_path=device_path)
+        interface = payload.get("interface")
+        if interface is not None and interface in QR_INTERFACES:
+            interface = str(interface)
+        else:
+            interface = old_config.interface
+        config = QrConfig(device_path=device_path, interface=interface)
         try:
             save_qr_config(config)
         except OSError as error:
@@ -2245,11 +2251,17 @@ def create_app() -> Flask:
 
     @app.get("/qr/device/zkteco/qr500")
     def qr_device_zkteco_qr500_page() -> str:
-        from features.qr.reader import find_zkteco_evdev_devices, find_zkteco_hidraw_devices, load_qr_config
+        from features.qr.reader import (
+            find_zkteco_evdev_devices,
+            find_zkteco_hidraw_devices,
+            find_zkteco_serial_devices,
+            load_qr_config,
+        )
         from features.qr.registry import load_integrations
         from core.database import list_mqtt_brokers
         evdev_devices = find_zkteco_evdev_devices()
         hidraw_devices = find_zkteco_hidraw_devices()
+        serial_devices = find_zkteco_serial_devices()
         integrations_raw = load_integrations("zkteco-qr500")
         integration_count = sum(1 for v in integrations_raw.values() if v.get("enabled"))
         return render_template(
@@ -2257,6 +2269,7 @@ def create_app() -> Flask:
             qr_reader=collect_qr_reader_status(),
             evdev_devices=evdev_devices,
             hidraw_devices=hidraw_devices,
+            serial_devices=serial_devices,
             config=load_qr_config(),
             integrations=_IntegProxy(integrations_raw),
             integration_count=integration_count,

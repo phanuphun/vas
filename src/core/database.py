@@ -177,10 +177,19 @@ ALTER TABLE qr_scans ADD COLUMN raw_report  TEXT;
 ALTER TABLE qr_scans ADD COLUMN read_mode   TEXT;
 """
 
+_MIGRATION_4 = """
+ALTER TABLE qr_scans ADD COLUMN scan_source TEXT;
+ALTER TABLE qr_scans ADD COLUMN rfid_uid    TEXT;
+"""
+# scan_source: "QR_CODE" | "RFID" | NULL (NULL สำหรับ read_mode เก่าที่แยกไม่ได้ เช่น hidraw/evdev)
+# rfid_uid: JSON-encoded list[str] ของ UID (hex) -- มีค่าเฉพาะตอน scan_source="RFID"
+# มีเฉพาะ read_mode="serial" เท่านั้นที่แยก RFID/QR ได้ -- ดู features/qr/reader.py classify_scan_source()
+
 _MIGRATIONS: list[tuple[int, str]] = [
     (1, _MIGRATION_1),
     (2, _MIGRATION_2),
     (3, _MIGRATION_3),
+    (4, _MIGRATION_4),
 ]
 
 # ---------------------------------------------------------------------------
@@ -509,19 +518,25 @@ def log_qr_scan(
     raw_keycode: list[int] | None = None,
     raw_report: list[str] | None = None,
     read_mode: str | None = None,
+    scan_source: str | None = None,
+    rfid_uid: list[str] | None = None,
 ) -> None:
     """
     บันทึก QR scan ลง qr_scans
     raw_keycode/raw_report เก็บเป็น JSON-encoded string ถ้าไม่ None (column เพิ่มจาก migration v3)
-    read_mode: 'hidraw' | 'evdev' | None (เก็บตรงๆ ไม่ encode)
+    read_mode: 'hidraw' | 'evdev' | 'serial' | None (เก็บตรงๆ ไม่ encode)
+    scan_source: 'QR_CODE' | 'RFID' | None (มีค่าเฉพาะ read_mode='serial' -- column เพิ่มจาก migration v4)
+    rfid_uid: list ของ UID (hex) -- JSON-encoded, มีค่าเฉพาะ scan_source='RFID'
     """
     try:
         raw_keycode_json = json.dumps(raw_keycode, ensure_ascii=False) if raw_keycode is not None else None
         raw_report_json = json.dumps(raw_report, ensure_ascii=False) if raw_report is not None else None
+        rfid_uid_json = json.dumps(rfid_uid, ensure_ascii=False) if rfid_uid is not None else None
         with _cursor() as cur:
             cur.execute(
-                "INSERT INTO qr_scans (ts, value, device, raw_keycode, raw_report, read_mode) VALUES (?, ?, ?, ?, ?, ?)",
-                (ts or _now_utc(), value, device, raw_keycode_json, raw_report_json, read_mode),
+                "INSERT INTO qr_scans (ts, value, device, raw_keycode, raw_report, read_mode, scan_source, rfid_uid) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (ts or _now_utc(), value, device, raw_keycode_json, raw_report_json, read_mode, scan_source, rfid_uid_json),
             )
     except Exception:
         pass
@@ -640,7 +655,7 @@ def list_qr_scans(limit: int = 100, offset: int = 0) -> dict[str, object]:
         total_row = conn.execute("SELECT COUNT(*) FROM qr_scans").fetchone()
         total = total_row[0] if total_row else 0
         rows = conn.execute(
-            """SELECT id, ts, value, device, raw_keycode, raw_report, read_mode
+            """SELECT id, ts, value, device, raw_keycode, raw_report, read_mode, scan_source, rfid_uid
                FROM qr_scans ORDER BY id DESC LIMIT ? OFFSET ?""",
             (limit, offset),
         ).fetchall()
@@ -657,6 +672,10 @@ def list_qr_scans(limit: int = 100, offset: int = 0) -> dict[str, object]:
             raw_report = json.loads(r["raw_report"]) if r["raw_report"] else None
         except (TypeError, ValueError):
             raw_report = None
+        try:
+            rfid_uid = json.loads(r["rfid_uid"]) if r["rfid_uid"] else None
+        except (TypeError, ValueError):
+            rfid_uid = None
         result_rows.append({
             "id": r["id"],
             "ts": r["ts"],
@@ -665,6 +684,8 @@ def list_qr_scans(limit: int = 100, offset: int = 0) -> dict[str, object]:
             "raw_keycode": raw_keycode,
             "raw_report": raw_report,
             "read_mode": r["read_mode"],
+            "scan_source": r["scan_source"],
+            "rfid_uid": rfid_uid,
         })
     return {"rows": result_rows, "total": total, "limit": limit, "offset": offset}
 

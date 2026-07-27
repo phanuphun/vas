@@ -189,7 +189,10 @@
         </svg>
       </div>
       <div>
-        <h2 class="text-[0.9rem] font-semibold text-ink">ค่าล่าสุด</h2>
+        <div class="flex items-center gap-1.5">
+          <h2 class="text-[0.9rem] font-semibold text-ink">ค่าล่าสุด</h2>
+          <span id="scan-source-badge" class="zone zone-neutral" style="font-size:0.62rem;display:none;"></span>
+        </div>
         <p class="text-[0.7rem] text-faint mt-px" id="sse-status-text">กำลังเชื่อมต่อ...</p>
       </div>
     </div>
@@ -362,8 +365,20 @@
         <span class="text-[0.71rem] text-faint">รัน <code class="font-display bg-surface px-1.5 py-0.5 rounded text-[0.68rem]">sudo vas qr install-udev</code></span>
         {% endif %}
       </div>
+      <div class="flex items-center gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-24 min-w-[6rem] flex-shrink-0">Symlink</span>
+        <span class="zone {{ 'zone-safe' if qr_reader.symlink_hidraw_exists else 'zone-caution' }}" style="font-size:0.68rem;">
+          USB {{ 'OK' if qr_reader.symlink_hidraw_exists else 'WARN' }}
+        </span>
+        <span class="zone {{ 'zone-safe' if qr_reader.symlink_serial_exists else 'zone-caution' }}" style="font-size:0.68rem;">
+          Serial {{ 'OK' if qr_reader.symlink_serial_exists else 'WARN' }}
+        </span>
+        {% if not (qr_reader.symlink_hidraw_exists and qr_reader.symlink_serial_exists) %}
+        <span class="text-[0.71rem] text-faint">symlink คงที่ (/dev/zkteco-qr500, /dev/zkteco-qr500-serial) สร้างพร้อมกับ udev rule ด้านบน</span>
+        {% endif %}
+      </div>
       <div class="flex items-start gap-3 px-5 py-2.5">
-        <span class="text-[0.75rem] font-semibold text-muted w-24 min-w-[6rem] flex-shrink-0 pt-0.5">พบอุปกรณ์</span>
+        <span class="text-[0.75rem] font-semibold text-muted w-24 min-w-[6rem] flex-shrink-0 pt-0.5">พบอุปกรณ์ USB</span>
         <span class="flex flex-wrap items-center gap-1.5">
           {% if qr_reader.detected_devices %}
             {% for dev in qr_reader.detected_devices %}
@@ -371,6 +386,18 @@
             {% endfor %}
           {% else %}
             <span class="zone zone-caution">ไม่พบ — ตรวจสอบ USB</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="flex items-start gap-3 px-5 py-2.5">
+        <span class="text-[0.75rem] font-semibold text-muted w-24 min-w-[6rem] flex-shrink-0 pt-0.5">พบอุปกรณ์ Serial</span>
+        <span class="flex flex-wrap items-center gap-1.5">
+          {% if qr_reader.detected_serial_devices %}
+            {% for dev in qr_reader.detected_serial_devices %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-semibold font-display border bg-safe/8 border-safe/20 text-[#0f766e]">{{ dev }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="zone zone-caution">ไม่พบ — ตรวจสอบ RS485 adapter</span>
           {% endif %}
         </span>
       </div>
@@ -385,26 +412,43 @@
     </div>
     <div class="p-4 flex flex-col gap-3">
       <div class="flex flex-col gap-1.5">
+        <label class="text-[0.75rem] font-semibold text-muted">Interface (ใช้ตอน Auto-detect)</label>
+        <div class="flex items-center gap-1.5">
+          <button type="button" id="interface-usb-btn" class="scan-mode-btn {{ 'is-active' if config.interface != 'serial' else '' }}"
+                  data-interface="usb" onclick="window.setInterfaceMode('usb')">USB (hidraw / evdev)</button>
+          <button type="button" id="interface-serial-btn" class="scan-mode-btn {{ 'is-active' if config.interface == 'serial' else '' }}"
+                  data-interface="serial" onclick="window.setInterfaceMode('serial')">Serial (RS485)</button>
+        </div>
+        <p class="text-[0.71rem] text-faint">เลือก interface ที่ใช้เมื่อตั้ง Device Path เป็น Auto-detect — ถ้าเลือก device path เจาะจงด้านล่างจะใช้ device นั้นเสมอไม่ว่าจะตั้ง interface เป็นอะไร</p>
+      </div>
+      <div class="flex flex-col gap-1.5">
         <label class="text-[0.75rem] font-semibold text-muted" for="device-select">Device Path</label>
         <select id="device-select"
                 class="w-full px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-display outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
-          <option value="">Auto-detect (ใช้อุปกรณ์แรกที่พบ)</option>
+          <option value="">Auto-detect (ใช้อุปกรณ์แรกที่พบใน interface ที่เลือกด้านบน)</option>
           {% if evdev_devices %}
-          <optgroup label="evdev — HID keyboard mode (แนะนำ)">
+          <optgroup label="USB — evdev (HID keyboard mode, แนะนำ)">
             {% for dev in evdev_devices %}
             <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
             {% endfor %}
           </optgroup>
           {% endif %}
           {% if hidraw_devices %}
-          <optgroup label="hidraw — raw HID mode">
+          <optgroup label="USB — hidraw (raw HID mode)">
             {% for dev in hidraw_devices %}
             <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
             {% endfor %}
           </optgroup>
           {% endif %}
+          {% if serial_devices %}
+          <optgroup label="Serial — RS485 (ttyUSB adapter)">
+            {% for dev in serial_devices %}
+            <option value="{{ dev }}" {{ 'selected' if config.device_path == dev else '' }}>{{ dev }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
         </select>
-        <p class="text-[0.71rem] text-faint">evdev = HID keyboard mode · hidraw = raw HID mode</p>
+        <p class="text-[0.71rem] text-faint">evdev = HID keyboard mode · hidraw = raw HID mode · serial = RS485 (แยก RFID/QR ได้)</p>
       </div>
       <div class="flex gap-2 flex-wrap">
         <button id="btn-save-config" onclick="qrSaveConfig()"
@@ -708,7 +752,10 @@
   var lastScanRawKeycode = null;
   var lastScanRawReport = null;
   var lastScanReadMode = null;
+  var lastScanSource = null;    // 'QR_CODE' | 'RFID' | null — มีค่าเฉพาะ read_mode="serial"
+  var lastScanRfidUid = null;
   var scanDisplayMode = 'decoded';  // 'decoded' | 'raw_keycode' | 'raw_report' — default = decoded
+  var selectedInterface = {{ (config.interface | tojson) if config.interface else '"usb"' }};  // "usb" | "serial" — ใช้ตอน Auto-detect
   var agoInterval = null;
   var lastScanDate = null;
 
@@ -822,6 +869,16 @@
     renderScanDisplay();
   };
 
+  /* ══ Interface toggle (USB / Serial) — เก็บไว้ใน state เฉยๆ ส่งไป /api/qr/config ตอน
+     กด "บันทึก Config" (qrSaveConfig) จริง ไม่ได้ save ทันทีที่กด เพื่อให้กดปุ่มลองสลับดู
+     device path ที่เกี่ยวข้องก่อนตัดสินใจ save ได้ ═══════════════════════════════════ */
+  window.setInterfaceMode = function (mode) {
+    selectedInterface = mode;
+    document.querySelectorAll('[data-interface]').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.dataset.interface === mode);
+    });
+  };
+
   /* ══ Scan handler ════════════════════════════════════════════════════════ */
   function onScan(data) {
     var value  = data.scan;
@@ -831,7 +888,27 @@
     lastScanRawKeycode  = (data.raw_keycode !== undefined) ? data.raw_keycode : null;
     lastScanRawReport   = (data.raw_report  !== undefined) ? data.raw_report  : null;
     lastScanReadMode    = (data.read_mode   !== undefined) ? data.read_mode   : null;
+    lastScanSource      = (data.scan_source !== undefined) ? data.scan_source : null;
+    lastScanRfidUid     = (data.rfid_uid    !== undefined) ? data.rfid_uid    : null;
     lastScanDate = new Date();
+
+    /* scan source badge — มีค่าเฉพาะ read_mode="serial" (แยก RFID/QR ได้เฉพาะโหมดนี้) */
+    var srcBadge = document.getElementById('scan-source-badge');
+    if (srcBadge) {
+      if (lastScanSource === 'RFID') {
+        srcBadge.style.display = '';
+        srcBadge.className = 'zone zone-caution';
+        srcBadge.style.fontSize = '0.62rem';
+        srcBadge.textContent = 'RFID' + (lastScanRfidUid && lastScanRfidUid.length ? ' · ' + lastScanRfidUid.join(', ') : '');
+      } else if (lastScanSource === 'QR_CODE') {
+        srcBadge.style.display = '';
+        srcBadge.className = 'zone zone-safe';
+        srcBadge.style.fontSize = '0.62rem';
+        srcBadge.textContent = 'QR';
+      } else {
+        srcBadge.style.display = 'none';
+      }
+    }
 
     /* stat row — นับจาก DB (สแกนวันนี้ทั้งหมด) ไม่ใช่ session ของ browser
        อัปเดตแบบ optimistic ทันที (ค่าจริงจะ sync กับ DB รอบถัดไปที่ fetch stats) */
@@ -1061,6 +1138,12 @@
       var readModeChip = item.read_mode
         ? '<span class="zone zone-neutral" style="font-size:.62rem;padding:.05rem .4rem;">' + escHtml(item.read_mode) + '</span>'
         : '';
+      /* scan_source มีค่าเฉพาะ read_mode="serial" -- ดู classify_scan_source() ใน reader.py */
+      var scanSourceChip = item.scan_source === 'RFID'
+        ? '<span class="zone zone-caution" style="font-size:.62rem;padding:.05rem .4rem;">RFID' + (item.rfid_uid && item.rfid_uid.length ? ' · ' + escHtml(item.rfid_uid.join(', ')) : '') + '</span>'
+        : (item.scan_source === 'QR_CODE'
+          ? '<span class="zone zone-safe" style="font-size:.62rem;padding:.05rem .4rem;">QR</span>'
+          : '');
       var deviceStr = item.device ? '<span>·</span><code class="font-display">' + escHtml(item.device) + '</code>' : '';
 
       var hasRawKeycode = !!(item.raw_keycode && item.raw_keycode.length);
@@ -1081,6 +1164,7 @@
             + '<div class="flex items-center gap-2 flex-wrap">'
             + '<span class="font-display font-semibold text-[0.82rem] text-ink break-all">' + escHtml(item.value) + '</span>'
             + readModeChip
+            + scanSourceChip
             + '</div>'
             + '<div class="flex items-center gap-1.5 mt-0.5 text-[0.68rem] text-faint flex-wrap">'
             + '<iconify-icon icon="lucide:clock" width="9" height="9"></iconify-icon>'
@@ -1477,7 +1561,7 @@
     fetch('/api/qr/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_path: device }),
+      body: JSON.stringify({ device_path: device, interface: selectedInterface }),
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {

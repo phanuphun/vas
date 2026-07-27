@@ -152,9 +152,17 @@ class LifecycleManager:
         self._remove_display_session_block(_effective_home_config_path())
 
     def reset_qr_config(self) -> None:
-        """ลบ udev rule (ถ้ามี signature) และ config file แล้ว reload udev"""
-        from core.config import QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE, qr_config_path
+        """ลบ udev rule ทั้ง 3 ไฟล์ (access + symlink USB + symlink Serial — ถ้ามี signature) และ config file แล้ว reload udev"""
+        from core.config import (
+            QR_UDEV_RULE_PATH,
+            QR_UDEV_SERIAL_SYMLINK_PATH,
+            QR_UDEV_SIGNATURE,
+            QR_UDEV_SYMLINK_PATH,
+            qr_config_path,
+        )
         self._remove_file_if_has_signature(QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE)
+        self._remove_file_if_has_signature(QR_UDEV_SYMLINK_PATH, QR_UDEV_SIGNATURE)
+        self._remove_file_if_has_signature(QR_UDEV_SERIAL_SYMLINK_PATH, QR_UDEV_SIGNATURE)
         self._remove_file(qr_config_path())
         self.runner.run(["udevadm", "control", "--reload-rules"], check=False)
         self.runner.run(["udevadm", "trigger"], check=False)

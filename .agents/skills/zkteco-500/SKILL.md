@@ -1,337 +1,119 @@
 ---
 name: zkteco-qr500
 description: >
-  Expert skill for working with the ZKTeco QR500-BM USB HID QR code reader on Linux (Ubuntu).
-  Use this skill whenever the user asks about: reading QR codes programmatically from /dev/hidraw0
-  or /dev/input/event*, configuring the QR500 device via USB-HID DEMO software, troubleshooting
-  USB HID permissions (udev rules, plugdev group), implementing QR scan listeners in Python or
-  Node.js without keyboard focus, or any ZKTeco QR reader integration in vending machine /
-  access control systems. Also triggers on keywords: QR500, hidraw, HID keyboard mode,
-  evdev, node-hid, ZKTeco scan, udev QR reader.
+  Expert skill for reading the ZKTeco QR500-BM QR/RFID reader on Linux, covering both of its
+  wire-level reading modes: USB HID (/dev/hidraw*) and RS485 Serial (/dev/ttyUSB*), plus how to
+  tell an RFID card tap apart from a QR code scan when reading over RS485. Use this skill
+  whenever the user asks about: reading from /dev/hidraw*, HID keyboard mode, decoding HID
+  keyboard reports, reading from /dev/ttyUSB* or a USB-to-RS485/RS232 adapter, idle-timeout
+  framing for a serial stream with no terminator, distinguishing RFID vs QR (scan_source),
+  Mifare UID extraction from a binary frame, or ZKTeco QR500-BM device discovery/permissions
+  (udev rules, plugdev/dialout groups). Also triggers on keywords: QR500, hidraw, ttyUSB,
+  RS485, Mifare, RFID frame, STX frame, ZKTeco DEMO software.
 ---
 
-# ZKTeco QR500-BM — Linux Integration Skill
+# ZKTeco QR500-BM — Reading QR Codes and RFID Cards on Linux
 
-## Device Overview
+This skill covers **reading raw scan data from the device only** — device discovery, opening
+the device, and turning raw bytes into a scan string (plus, for RS485, telling RFID apart from
+QR). It does not cover what you do with the scan afterwards (HTTP webhook, MQTT, etc.) — that's
+a separate, downstream concern.
 
-| Property | Value |
-|---|---|
-| Model | QR500-B (black) / QR500-W (white) |
-| Barcode support | QR Code, Data Matrix, PDF417, GS1 Databar, Code128/EAN128, UPC/EAN, Codabar, Code39/93 |
-| RFID support | Mifare Ultralight, S50/S70, DESFire EV1, NTag (13.56MHz) |
-| Communication | Wiegand (W26/W34/W66), RS485, **USB HID**, TCP/IP |
-| Power | DC 12V (±5%) or USB 5V |
-| Reading distance | QR ≥ 5cm, RFID Card ≥ 4cm |
+The device exposes **two independent wire-level reading modes** picked via a setting on the
+device itself (ZKTeco DEMO software, Windows-only, connect over USB-HID first to configure).
+Each mode needs a completely different Linux-side implementation:
 
-**Key insight:** When connected via USB on Linux, the device presents as a USB HID device.
-By default it may be in "HID Keyboard" mode (emulates keystrokes) — you must **turn this OFF**
-via DEMO software if you want to read raw HID reports from `/dev/hidraw0` instead.
-
----
-
-## Step 1 — Configure Device via DEMO Software (Windows required)
-
-Before Linux integration, configure the device on a Windows machine first.
-
-### Critical settings to verify:
-
-1. Connect reader via USB → open ZKTeco DEMO software → select **USB-HID** port → click OK
-2. Go to **Basic Settings-1** → click **Read configuration**
-3. Set these parameters then click **Write configuration**:
-
-| Parameter | Recommended value | Why |
+| | USB HID | RS485 Serial |
 |---|---|---|
-| HID keyboard | **Close** | ปิดเพื่อให้อ่าน raw HID report ได้ ไม่ต้องพึ่ง keyboard focus |
-| Work mode | Reader mode | สำหรับ connected reader (ไม่ใช่ standalone) |
-| RS485 function switch | Close (ถ้าใช้ USB) | ไม่ต้องการ RS485 |
-
-> ⚠️ **ถ้า HID keyboard = Open**: ข้อมูล QR จะถูกส่งออกเป็น keystrokes ไปยัง focused window เท่านั้น — ไม่เหมาะกับ vending machine ที่ไม่มี UI focus
-
-4. Go to **Basic Settings-2** → verify:
-   - QR code mode: `Not encrypted` (หรือ Custom encryption ถ้าใช้ checksum/SALT)
-   - QR code effective time: 30s (default)
+| Linux device path | `/dev/hidraw*` | `/dev/ttyUSB*` (via USB-to-RS485/RS232 adapter) |
+| Device setting required | `HID keyboard` = **Close** | `RS485 function switch` = **Open**, `RS485 automatic upload` = **Open** |
+| End-of-scan marker | Enter keycode (`0x28`) in the report | **None at all** — must use idle-timeout framing |
+| Can separate RFID vs QR? | **No, never** | **Yes** — see "Scan source detection" below |
+| Full detail | `references/hid-mode.md` | `references/serial-mode.md` |
 
 ---
 
-## Step 2 — Linux Setup (Ubuntu 22.04)
+## Mode 1 — USB HID (`/dev/hidraw*`)
 
-### 2.1 Identify the device
+The device presents as a USB HID device. With `HID keyboard = Close` it sends raw HID keyboard
+reports instead of emulating a real keyboard — read them directly with `os.read()`, no root/
+native library needed.
 
-```bash
-# หลังจากเสียบ USB
-lsusb | grep -i ZK
-# หรือ
-dmesg | tail -20
+Quick facts (see `references/hid-mode.md` for the full byte layout, keycode map, and device
+discovery code):
 
-# ดู hidraw nodes
-ls /dev/hidraw*
+- Confirmed VendorID:ProductID for this device family: `0416:5020` (verify with
+  `cat /sys/class/hidraw/hidrawN/device/uevent`, look for `HID_ID=0003:00000416:00005020` —
+  other firmware batches/resellers have been reported with different IDs, e.g. `1b55:0c45`,
+  so always verify against the actual unit rather than assuming)
+- Read 64-byte reports with blocking `os.read(fd, 64)` in a background thread
+- `report[0]` = shift modifier bitmask, `report[2:8]` = up to 6 simultaneous keycodes, keycode
+  `40` = Enter = end of one scan
+- ⚠️ **Byte offsets vary by firmware revision.** A conflicting convention (`report[2]`=modifier,
+  `report[4:10]`=keycodes) has also been seen on nominally-identical hardware. Never assume —
+  capture with `sudo hexdump -C /dev/hidrawN` while scanning before trusting either layout.
+- `hidrawN` numbering is **not stable** across reboot/replug — resolve the path via a persistent
+  udev symlink or by matching VendorID/ProductID at startup, never hardcode a number
 
-# ดู vendor/product ID
-cat /sys/class/hidraw/hidraw0/device/uevent
-```
+### Hard limitation: RFID and QR are indistinguishable in this mode
 
-### 2.2 Create udev rule (avoid permission issues)
-
-```bash
-# สร้างไฟล์ rule
-sudo nano /etc/udev/rules.d/99-zkteco-qr500.rules
-```
-
-เพิ่ม content (แทน `XXXX:YYYY` ด้วย vendor:product ID จริง เช่น `1b55:0c45`):
-
-```
-# ZKTeco QR500 QR Code Reader
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b55", ATTRS{idProduct}=="0c45", MODE="0666", GROUP="plugdev"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1b55", ATTRS{idProduct}=="0c45", MODE="0664", GROUP="plugdev"
-```
-
-```bash
-# Reload rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-
-# เพิ่ม user เข้า plugdev group
-sudo usermod -aG plugdev $USER
-# logout แล้ว login ใหม่
-```
+A card tap and a QR scan produce the **exact same kind of keycode report stream** — there is no
+field, flag, or byte anywhere in a HID report that says which one it was. If a caller needs to
+know the scan source, **this mode cannot provide it, period** — the RS485 Serial mode must be
+used instead (see below), or an external signal (e.g. a second physical RFID-only reader) is
+needed.
 
 ---
 
-## Step 3A — Python Implementation
+## Mode 2 — RS485 Serial (`/dev/ttyUSB*`)
 
-### Dependencies
+The device speaks over RS485 (A/B lines) through a USB-to-RS485/RS232 adapter — the Linux device
+node that appears is the **adapter's**, not the QR500-BM's own. Requires the device's `RS485
+function switch` and `RS485 automatic upload` both set to `Open` via DEMO software first.
 
-```bash
-pip install hidapi evdev
-# หรือสำหรับ raw read approach
-pip install pyusb
-```
+Quick facts (see `references/serial-mode.md` for the full idle-timeout framing implementation
+and adapter discovery code):
 
-### Option A: evdev (อ่าน input event — ดีกว่าถ้า HID keyboard mode = Open)
+- Confirmed adapter chip in this project: FTDI FT232R, `VendorID:ProductID = 0403:6001` — this
+  identifies the **adapter**, not the QR500-BM; a different adapter brand/chip needs different
+  IDs matched against `idVendor`/`idProduct` two directory levels up from `/sys/class/tty/ttyUSBn`
+- Default baud: `115200`, `8N1`, no parity, no flow control — configure via `termios` directly
+  (no `pyserial` needed)
+- ⚠️ **There is no terminator character anywhere in the stream** — not for QR text, not for RFID
+  frames. Confirmed by capturing 155+ raw bytes and checking every byte for CR/LF/NUL/STX/ETX:
+  none present. The only reliable way to know one scan has ended is **idle-timeout framing**:
+  if no new byte arrives within a configurable window (default `150ms`) and the buffer has data,
+  treat it as one complete scan and flush.
+- `ttyUSBn` numbering is **not stable** either — same caveat as `hidrawN` above, resolve via
+  symlink or adapter VendorID/ProductID match
 
-```python
-import evdev
-import asyncio
+### Scan source detection (RFID vs QR) — RS485 mode only
 
-def find_qr_device():
-    """หา device ที่เป็น QR reader"""
-    devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
-    for device in devices:
-        if 'ZK' in device.name or 'HID' in device.name.upper():
-            return device
-    raise RuntimeError("ไม่พบ ZKTeco QR reader")
+Confirmed from a real hardware capture (2026-07-27, via a serial terminal tool connected directly
+to the RS485 line): the two scan types are **byte-level distinguishable**, not just by
+length/character-set guessing:
 
-async def read_qr_evdev(callback):
-    """อ่าน QR code ผ่าน evdev (ไม่ต้องการ keyboard focus)"""
-    device = find_qr_device()
-    print(f"Connected to: {device.name} at {device.path}")
-    
-    # grab device เพื่อป้องกัน event ไปถึง OS keyboard input
-    device.grab()
-    
-    buffer = []
-    KEYMAP = {
-        # evdev key codes → characters
-        2:'1', 3:'2', 4:'3', 5:'4', 6:'5', 7:'6', 8:'7', 9:'8', 10:'9', 11:'0',
-        16:'q', 17:'w', 18:'e', 19:'r', 20:'t', 21:'y', 22:'u', 23:'i', 24:'o', 25:'p',
-        30:'a', 31:'s', 32:'d', 33:'f', 34:'g', 35:'h', 36:'j', 37:'k', 38:'l',
-        44:'z', 45:'x', 46:'c', 47:'v', 48:'b', 49:'n', 50:'m',
-        12:'-', 13:'=', 26:'[', 27:']', 39:';', 40:"'", 41:'`', 43:'\\',
-        51:',', 52:'.', 53:'/',
-    }
-    
-    try:
-        async for event in device.async_read_loop():
-            if event.type == evdev.ecodes.EV_KEY:
-                key_event = evdev.categorize(event)
-                if key_event.keystate == evdev.KeyEvent.key_down:
-                    if key_event.scancode == 28:  # ENTER = end of scan
-                        if buffer:
-                            qr_data = ''.join(buffer)
-                            await callback(qr_data)
-                            buffer.clear()
-                    elif key_event.scancode in KEYMAP:
-                        buffer.append(KEYMAP[key_event.scancode])
-    finally:
-        device.ungrab()
+- **QR scans** arrive as plain printable ASCII/UTF-8 text (e.g. a UUID string, a ticket number,
+  a URL — whatever the QR content is)
+- **RFID card taps** arrive as a **fixed 16-byte binary frame per tap**, always starting with
+  **STX (`0x02`)**, containing a 4-byte card UID at a fixed offset. Bytes in this frame (e.g.
+  `0x83`, `0xF6`, `0xB3`) are not valid UTF-8, so the two are trivially distinguishable at the
+  byte level — check "does this buffer look like N×16 bytes, each chunk starting with STX?"
+  rather than trying to interpret decoded text.
 
-# Usage
-async def on_scan(data):
-    print(f"QR Scanned: {data}")
+Full frame layout, the classifier function, and confirmed test data → `references/scan-source-detection.md`
 
-asyncio.run(read_qr_evdev(on_scan))
-```
-
-### Option B: hidraw direct read (ดีกว่าถ้า HID keyboard mode = Close)
-
-```python
-import hid
-import threading
-
-# ZKTeco Vendor/Product ID (ตรวจสอบด้วย lsusb)
-VENDOR_ID  = 0x1b55
-PRODUCT_ID = 0x0c45
-
-def read_qr_hidraw(callback):
-    """อ่าน raw HID report จาก hidraw node"""
-    device = hid.device()
-    device.open(VENDOR_ID, PRODUCT_ID)
-    device.set_nonblocking(False)
-    
-    print(f"Opened: {device.get_manufacturer_string()} {device.get_product_string()}")
-    
-    buffer = []
-    HID_KEYMAP = {
-        # HID usage codes → ASCII (Keyboard usage page 0x07)
-        0x1E:'1', 0x1F:'2', 0x20:'3', 0x21:'4', 0x22:'5',
-        0x23:'6', 0x24:'7', 0x25:'8', 0x26:'9', 0x27:'0',
-        0x04:'a', 0x05:'b', 0x06:'c', 0x07:'d', 0x08:'e',
-        0x09:'f', 0x0A:'g', 0x0B:'h', 0x0C:'i', 0x0D:'j',
-        0x0E:'k', 0x0F:'l', 0x10:'m', 0x11:'n', 0x12:'o',
-        0x13:'p', 0x14:'q', 0x15:'r', 0x16:'s', 0x17:'t',
-        0x18:'u', 0x19:'v', 0x1A:'w', 0x1B:'x', 0x1C:'y', 0x1D:'z',
-        0x2D:'-', 0x2E:'=',
-    }
-    
-    try:
-        while True:
-            # HID report: [report_id, modifier, reserved, key1, key2, key3, key4, key5, key6]
-            data = device.read(64)
-            if data:
-                # byte index 2 = modifier, index 4+ = key codes
-                for key_code in data[4:10]:
-                    if key_code == 0x28:  # ENTER
-                        if buffer:
-                            qr_data = ''.join(buffer)
-                            callback(qr_data)
-                            buffer.clear()
-                    elif key_code != 0x00 and key_code in HID_KEYMAP:
-                        buffer.append(HID_KEYMAP[key_code])
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        device.close()
-
-def on_scan(data):
-    print(f"QR Scanned: {data}")
-
-# รัน background thread
-t = threading.Thread(target=read_qr_hidraw, args=(on_scan,), daemon=True)
-t.start()
-```
-
----
-
-## Step 3B — Node.js Implementation
-
-### Dependencies
-
-```bash
-npm install node-hid
-```
-
-### Implementation
-
-```typescript
-import HID from 'node-hid';
-
-const VENDOR_ID  = 0x1b55;
-const PRODUCT_ID = 0x0c45;
-
-// HID Usage → Character map
-const HID_KEYMAP: Record<number, string> = {
-  0x1E:'1', 0x1F:'2', 0x20:'3', 0x21:'4', 0x22:'5',
-  0x23:'6', 0x24:'7', 0x25:'8', 0x26:'9', 0x27:'0',
-  0x04:'a', 0x05:'b', 0x06:'c', 0x07:'d', 0x08:'e',
-  0x09:'f', 0x0A:'g', 0x0B:'h', 0x0C:'i', 0x0D:'j',
-  0x0E:'k', 0x0F:'l', 0x10:'m', 0x11:'n', 0x12:'o',
-  0x13:'p', 0x14:'q', 0x15:'r', 0x16:'s', 0x17:'t',
-  0x18:'u', 0x19:'v', 0x1A:'w', 0x1B:'x', 0x1C:'y', 0x1D:'z',
-  0x2D:'-', 0x2E:'=',
-};
-
-export function startQRReader(onScan: (data: string) => void): () => void {
-  const device = new HID.HID(VENDOR_ID, PRODUCT_ID);
-  let buffer: string[] = [];
-
-  device.on('data', (data: Buffer) => {
-    // HID boot protocol: [report_id?, modifier, 0x00, key1..key6]
-    for (let i = 4; i < 10; i++) {
-      const keyCode = data[i];
-      if (keyCode === 0x28) { // ENTER
-        if (buffer.length > 0) {
-          onScan(buffer.join(''));
-          buffer = [];
-        }
-      } else if (keyCode !== 0x00 && HID_KEYMAP[keyCode]) {
-        buffer.push(HID_KEYMAP[keyCode]);
-      }
-    }
-  });
-
-  device.on('error', (err: Error) => {
-    console.error('QR Reader error:', err);
-  });
-
-  console.log('QR Reader listening...');
-  
-  // คืน cleanup function
-  return () => device.close();
-}
-
-// Usage
-const stop = startQRReader((data) => {
-  console.log('Scanned:', data);
-});
-
-// process.on('SIGINT', stop);
-```
-
----
-
-## Step 4 — Debug Checklist
-
-### ปัญหา: Permission denied on /dev/hidraw0
-
-```bash
-# ตรวจสอบ permission
-ls -la /dev/hidraw*
-# ควรได้: crw-rw-rw- หรือ crw-rw----
-
-# ถ้า permission ยังไม่ถูก ให้ reload udev
-sudo udevadm control --reload-rules && sudo udevadm trigger
-
-# ตรวจสอบว่า user อยู่ใน plugdev group
-groups $USER
-```
-
-### ปัญหา: ข้อมูลได้มาไม่ครบ / มี garbage characters
-
-- ตรวจสอบว่า `HID keyboard` ใน DEMO software ตรงกับ implementation:
-  - HID keyboard = **Open** → ใช้ `evdev` approach
-  - HID keyboard = **Close** → ใช้ `hidraw` direct approach
-- ตรวจสอบ KEYMAP: บาง firmware version อาจ shift byte index
-
-### ปัญหา: device.read() timeout / no data
-
-```bash
-# ตรวจว่า device detected
-dmesg | grep -i "hid\|usb" | tail -10
-
-# ดู hidraw info
-sudo udevadm info --query=all /dev/hidraw0
-
-# ลอง cat raw bytes (CTRL+C หลัง scan)
-sudo cat /dev/hidraw0 | xxd | head
-```
-
-### ปัญหา: QR500-BM มี suffix -BM หมายถึงอะไร
-
-`-BM` = Bluetooth + Mifare variant (บาง market) แต่ logic HID USB เหมือนกัน
+⚠️ **Verified against only 4 physical Mifare cards and 1 QR sample (a UUID string) so far.**
+Before relying on this in production, test more QR content types — especially QR payloads that
+are pure digits or pure hex, since a coincidental match starting with byte `0x02` is the one
+scenario that could fool the classifier. Also not yet verified: whether the idle-timeout window
+correctly separates two RFID taps done in very rapid succession (faster than the timeout).
 
 ---
 
 ## Reference
 
-- อ่าน `references/demo-software-params.md` สำหรับ parameter ทุกตัวใน DEMO software
-- อ่าน `references/hid-report-format.md` สำหรับ byte layout ของ HID report
+- `references/hid-mode.md` — HID device discovery, exact byte layout, full keycode map
+- `references/serial-mode.md` — RS485 adapter discovery, idle-timeout framing, termios raw config
+- `references/scan-source-detection.md` — RFID frame byte layout, classifier logic, confirmed test data, caveats
+- `references/demo-software-params.md` — ZKTeco DEMO software (Windows) parameter reference for configuring the device before any Linux integration

@@ -4,6 +4,7 @@ import base64
 import glob
 import json
 import os
+import select
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,6 +98,109 @@ EVDEV_SHIFT_KEYMAP: dict[int, str] = {
 EVDEV_SHIFT_SCANCODES = {42, 54}
 
 EVDEV_DEVICE_NAMES = ["ZKRFID", "ZK", "QR500"]
+
+
+# ---------------------------------------------------------------------------
+# RS485 Serial mode (HID keyboard ปิด, ต่อผ่าน USB-to-RS485 adapter) — ดู
+# .agents/skills/zkteco-500/references/serial-mode.md และ scan-source-detection.md
+# ---------------------------------------------------------------------------
+
+# VendorID:ProductID ของ "adapter" USB-to-RS485 (FTDI FT232R ที่ยืนยันแล้วในโปรเจกต์นี้) —
+# คนละตัวกับ QR500-BM เอง (ตัวอุปกรณ์ไม่ได้ enumerate เป็น USB device ของตัวเองในโหมดนี้)
+SERIAL_ADAPTER_VENDOR_ID = "0403"
+SERIAL_ADAPTER_PRODUCT_ID = "6001"
+
+SERIAL_IDLE_TIMEOUT_SEC = 0.15       # idle-timeout framing default (150ms) -- ไม่มี terminator character ในสตรีมเลย
+
+RFID_FRAME_SIZE = 16
+RFID_STX = 0x02
+RFID_UID_OFFSET = 5
+RFID_UID_LENGTH = 4
+
+# Persistent udev symlink -- สร้างโดย `sudo vas qr install-udev` (ดู core/config.py) --
+# เสถียรกว่า hidrawN/ttyUSBn ที่เลขเปลี่ยนได้ทุกครั้งที่ reboot/ถอดเสียบใหม่
+SYMLINK_HIDRAW_PATH = "/dev/zkteco-qr500"
+SYMLINK_SERIAL_PATH = "/dev/zkteco-qr500-serial"
+
+
+def find_zkteco_serial_devices() -> list[str]:
+    """
+    ค้นหา /dev/ttyUSB* ของ USB-to-RS485 adapter ที่ต่อกับ ZKTeco QR500-BM (RS485 mode)
+
+    หมายเหตุ: vendor/product id ที่เช็คเป็นของ "adapter" ไม่ใช่ตัว QR500-BM เอง เพราะโหมดนี้
+    อุปกรณ์สื่อสารผ่าน RS485 (A/B) ผ่าน adapter — Linux เห็นแค่ adapter เป็น USB device
+    ไฟล์ id อยู่ 2 ระดับเหนือ /sys/class/tty/ttyUSBn (parent ตัวแรกคือ USB *interface*
+    ไม่ใช่ USB *device*) ดู references/serial-mode.md ใน skill zkteco-500
+
+    Returns:
+        list[str]: paths เรียงตามชื่อ เช่น ["/dev/ttyUSB0"]
+        คืน list ว่างถ้าไม่พบ adapter ที่ vendor/product id ตรงกัน
+    """
+    try:
+        tty_paths = sorted(glob.glob("/sys/class/tty/ttyUSB*"))
+    except OSError:
+        return []
+
+    results: list[str] = []
+    for tty_path in tty_paths:
+        vendor_file = Path(tty_path) / "device" / ".." / ".." / "idVendor"
+        product_file = Path(tty_path) / "device" / ".." / ".." / "idProduct"
+        try:
+            vendor_id = vendor_file.read_text(encoding="utf-8").strip().lower()
+            product_id = product_file.read_text(encoding="utf-8").strip().lower()
+        except OSError:
+            continue
+        if vendor_id == SERIAL_ADAPTER_VENDOR_ID.lower() and product_id == SERIAL_ADAPTER_PRODUCT_ID.lower():
+            results.append(f"/dev/{Path(tty_path).name}")
+    return results
+
+
+def classify_scan_source(buffer: bytes) -> tuple[str, list[str] | None]:
+    """
+    แยกว่า raw byte buffer จาก RS485 serial mode เป็น RFID card tap หรือ QR code text
+    (เฉพาะโหมด serial เท่านั้น -- โหมด USB HID แยกไม่ได้เลย ไม่มี field บอกที่มา)
+
+    RFID: buffer เป็นจำนวนเต็มเท่าของ 16-byte frame และทุก frame ขึ้นต้นด้วย STX (0x02)
+        frame layout: 02 <addr> 01 09 00 [UID 4 bytes] <addr> 1A 88 39 05 [suffix 2 bytes]
+    QR: กรณีอื่นทั้งหมด (fallback ปลอดภัยเสมอ -- ไม่เดาว่าเป็น RFID ถ้าไม่ match pattern เป๊ะ)
+
+    ดู .agents/skills/zkteco-500/references/scan-source-detection.md สำหรับที่มาของ pattern นี้
+    (ยืนยันจาก hardware capture จริง 4 บัตร Mifare + 1 QR sample)
+
+    Returns:
+        ("RFID", [uid_hex, ...]) หรือ ("QR_CODE", None)
+    """
+    if not buffer or len(buffer) % RFID_FRAME_SIZE != 0 or buffer[0] != RFID_STX:
+        return "QR_CODE", None
+
+    uids: list[str] = []
+    for i in range(0, len(buffer), RFID_FRAME_SIZE):
+        frame = buffer[i : i + RFID_FRAME_SIZE]
+        if frame[0] != RFID_STX:
+            return "QR_CODE", None  # sub-frame หนึ่งไม่ match -- ทั้ง buffer ไม่ใช่ RFID
+        uid = frame[RFID_UID_OFFSET : RFID_UID_OFFSET + RFID_UID_LENGTH]
+        uids.append(uid.hex().upper())
+    return "RFID", uids
+
+
+def _resolve_hidraw_path() -> str | None:
+    """
+    Resolve hidraw device path ตามลำดับ: persistent udev symlink ก่อน (เสถียรข้าม
+    reboot/replug) แล้ว fallback ไป auto-detect scan สด (เผื่อยังไม่ได้รัน
+    `sudo vas qr install-udev`)
+    """
+    if os.path.exists(SYMLINK_HIDRAW_PATH):
+        return SYMLINK_HIDRAW_PATH
+    devices = find_zkteco_hidraw_devices()
+    return devices[0] if devices else None
+
+
+def _resolve_serial_path() -> str | None:
+    """Resolve RS485 serial adapter path -- symlink ก่อน, fallback auto-detect scan /dev/ttyUSB*"""
+    if os.path.exists(SYMLINK_SERIAL_PATH):
+        return SYMLINK_SERIAL_PATH
+    devices = find_zkteco_serial_devices()
+    return devices[0] if devices else None
 
 
 # ---------------------------------------------------------------------------
@@ -291,19 +395,27 @@ def decode_qr_content(raw: str) -> object:
 # Config
 # ---------------------------------------------------------------------------
 
+QR_INTERFACES = ("usb", "serial")
+
+
 @dataclass
 class QrConfig:
     device_path: str | None = None  # None = auto-detect
     mode: str = "auto"              # "auto" | "evdev" | "hidraw"
+    interface: str = "usb"          # "usb" (evdev/hidraw) | "serial" (RS485) -- ใช้เมื่อ device_path=None
 
     def to_dict(self) -> dict[str, object]:
-        return {"device_path": self.device_path, "mode": self.mode}
+        return {"device_path": self.device_path, "mode": self.mode, "interface": self.interface}
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "QrConfig":
+        interface = str(data.get("interface") or "usb")
+        if interface not in QR_INTERFACES:
+            interface = "usb"
         return cls(
             device_path=data.get("device_path") or None,
             mode=str(data.get("mode") or "auto"),
+            interface=interface,
         )
 
 
@@ -565,10 +677,161 @@ class EvdevQrReaderThread(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
+# SerialQrReaderThread  (RS485 Serial mode -- /dev/ttyUSB* ผ่าน USB-to-RS485 adapter)
+# ---------------------------------------------------------------------------
+
+class SerialQrReaderThread(threading.Thread):
+    """
+    Background thread อ่าน QR/RFID ผ่าน RS485 Serial adapter (/dev/ttyUSB*)
+
+    ไม่มี terminator character ในสตรีมเลย (ยืนยันจาก hardware capture จริง -- ดู
+    .agents/skills/zkteco-500/references/serial-mode.md) จึงใช้ **idle-timeout framing**
+    แทน: buffer ทุก byte ที่เข้ามา ถ้าไม่มี byte ใหม่ภายใน idle_timeout วินาที (default 150ms)
+    และ buffer มีข้อมูล -> ถือว่าจบ 1 scan แล้ว flush
+
+    แยก RFID card tap ออกจาก QR code text ด้วย classify_scan_source() -- RFID เป็น 16-byte
+    binary frame ขึ้นต้นด้วย STX เสมอ, QR เป็น UTF-8 text ธรรมดา ทั้งสองแบบ publish เป็น
+    "scan" event เหมือนกัน (RFID แสดงเป็น UID คั่นด้วย comma) -- ดู last_scan_source/
+    last_scan_rfid_uid ถ้า caller ต้องการแยกแยะ
+
+    ใช้ termios/select/os เท่านั้น (ไม่พึ่ง pyserial) -- baud 115200, 8N1, no parity, no flow
+    control -- ตาม skill zkteco-500 (ยืนยันบน hardware จริงของโปรเจกต์นี้)
+
+    Interface เหมือน QrReaderThread/EvdevQrReaderThread:
+        thread.last_scan             -> str | None        ข้อความที่ decode แล้ว
+                                         (QR: text ตรงๆ, RFID: UID คั่นด้วย ", ")
+        thread.last_scan_raw         -> None เสมอ (serial ไม่มี keycode concept แบบ HID)
+        thread.last_scan_raw_report  -> list[str] | None   hex ของ raw byte buffer ดิบก่อน decode
+        thread.last_scan_source      -> "QR_CODE" | "RFID" | None
+        thread.last_scan_rfid_uid    -> list[str] | None   เฉพาะตอน source="RFID"
+        thread.read_mode             -> "serial" (คงที่)
+        thread.device_path           -> str
+        thread.stop()
+        thread.join(timeout=2.0)
+    """
+
+    read_mode: str = "serial"
+
+    def __init__(self, device_path: str, idle_timeout: float = SERIAL_IDLE_TIMEOUT_SEC) -> None:
+        super().__init__(daemon=True, name="qr-reader-serial")
+        self.device_path = device_path
+        self.read_mode = "serial"
+        self.idle_timeout = idle_timeout
+        self._stop_event = threading.Event()
+        self._last_scan: str | None = None
+        self._last_scan_source: str | None = None
+        self._last_scan_rfid_uid: list[str] | None = None
+        self._last_scan_raw_report: list[str] | None = None
+        self._scan_seq: int = 0
+        self._lock = threading.Lock()
+
+    @property
+    def last_scan(self) -> str | None:
+        with self._lock:
+            return self._last_scan
+
+    @property
+    def last_scan_raw(self) -> None:
+        """Serial mode ไม่มี keycode concept (ต่างจาก HID) -- return None เสมอเพื่อให้ caller ใช้ interface เดียวกันได้"""
+        return None
+
+    @property
+    def last_scan_raw_report(self) -> list[str] | None:
+        """Hex string ของ raw byte buffer ดิบทั้งก้อนก่อน decode/classify (1 element ต่อ 1 scan)"""
+        with self._lock:
+            return self._last_scan_raw_report
+
+    @property
+    def last_scan_source(self) -> str | None:
+        """"QR_CODE" | "RFID" | None (ยังไม่เคย scan) -- ดู classify_scan_source()"""
+        with self._lock:
+            return self._last_scan_source
+
+    @property
+    def last_scan_rfid_uid(self) -> list[str] | None:
+        """UID (hex, uppercase) ของบัตรที่ tap -- มีค่าเฉพาะตอน last_scan_source == "RFID" """
+        with self._lock:
+            return self._last_scan_rfid_uid
+
+    @property
+    def last_scan_seq(self) -> int:
+        with self._lock:
+            return self._scan_seq
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def _configure_raw_serial(self, fd: int) -> None:
+        """ตั้งค่า termios แบบ raw mode: 115200 8N1, no parity, no flow control, non-canonical read"""
+        import termios
+        iflag, oflag, cflag, lflag, ispeed, ospeed, cc = termios.tcgetattr(fd)
+        cflag = (cflag & ~termios.CSIZE) | termios.CS8
+        cflag &= ~termios.PARENB
+        cflag &= ~termios.CSTOPB
+        cflag |= termios.CLOCAL | termios.CREAD
+        iflag = oflag = lflag = 0
+        ispeed = ospeed = termios.B115200
+        cc[termios.VMIN] = 0
+        cc[termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSANOW, [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
+
+    def run(self) -> None:
+        """
+        Idle-timeout framing loop: select() รอ byte ใหม่ภายใน idle_timeout วินาที
+        ถ้า timeout (ไม่มี byte ใหม่) และ buffer มีข้อมูล -> flush เป็น 1 scan ที่สมบูรณ์
+        """
+        buffer = bytearray()
+        fd: int | None = None
+        try:
+            fd = os.open(self.device_path, os.O_RDONLY | os.O_NOCTTY)
+            self._configure_raw_serial(fd)
+            while not self._stop_event.is_set():
+                try:
+                    readable, _, _ = select.select([fd], [], [], self.idle_timeout)
+                except OSError:
+                    break
+                if readable:
+                    try:
+                        chunk = os.read(fd, 4096)
+                    except (OSError, IOError):
+                        break
+                    if chunk:
+                        buffer.extend(chunk)
+                    continue
+                # select() timeout -- ไม่มี byte ใหม่เข้ามาภายใน idle window
+                if buffer:
+                    self._flush_scan(bytes(buffer))
+                    buffer = bytearray()
+        except (OSError, IOError):
+            pass
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def _flush_scan(self, raw: bytes) -> None:
+        source, uids = classify_scan_source(raw)
+        if source == "RFID" and uids:
+            text = ", ".join(uids)
+        else:
+            text = raw.decode("utf-8", errors="replace").strip()
+        if not text:
+            return
+        with self._lock:
+            self._last_scan = text
+            self._last_scan_source = source
+            self._last_scan_rfid_uid = uids
+            self._last_scan_raw_report = [raw.hex()]
+            self._scan_seq += 1
+
+
+# ---------------------------------------------------------------------------
 # Module-level singleton management
 # ---------------------------------------------------------------------------
 
-_reader_thread: QrReaderThread | None = None
+_reader_thread: QrReaderThread | EvdevQrReaderThread | SerialQrReaderThread | None = None
 _reader_lock = threading.Lock()
 
 
@@ -578,17 +841,23 @@ def get_reader() -> QrReaderThread | None:
         return _reader_thread
 
 
-def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrReaderThread":
+def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrReaderThread | SerialQrReaderThread":
     """
     เริ่ม QR reader global singleton
 
-    Auto-detect mode:
-      1. ลอง evdev ก่อน (HID keyboard = Open) — ค้นหา /dev/input/event*
-      2. Fallback hidraw (HID keyboard = Close) — ค้นหา /dev/hidraw*
+    Auto-detect mode (device_path=None) เลือกตาม interface ที่ตั้งค่าไว้ใน QrConfig
+    (load_qr_config().interface — default "usb"):
+
+      interface="usb"    1. ลอง evdev ก่อน (HID keyboard = Open) — ค้นหา /dev/input/event*
+                          2. Fallback hidraw (HID keyboard = Close) — symlink /dev/zkteco-qr500
+                             ก่อน แล้วค่อย auto-detect scan /dev/hidraw*
+      interface="serial" ใช้ RS485 serial adapter — symlink /dev/zkteco-qr500-serial ก่อน
+                          แล้วค่อย auto-detect scan /dev/ttyUSB*
 
     Args:
-        device_path: ถ้า None -> auto-detect
+        device_path: ถ้า None -> auto-detect ตาม interface ใน config
                      ถ้าขึ้นต้น /dev/input/ -> ใช้ evdev
+                     ถ้าขึ้นต้น /dev/ttyUSB หรือเป็น symlink serial -> ใช้ serial (RS485)
                      อื่นๆ -> ใช้ hidraw
 
     Raises:
@@ -603,22 +872,33 @@ def start_reader(device_path: str | None = None) -> "QrReaderThread | EvdevQrRea
             return _reader_thread
 
         if device_path is None:
-            # ลอง evdev ก่อน (HID keyboard = Open)
-            evdev_devices = find_zkteco_evdev_devices()
-            if evdev_devices:
-                thread: QrReaderThread | EvdevQrReaderThread = EvdevQrReaderThread(device_path=evdev_devices[0])
-                thread.start()
-                _reader_thread = thread
-                return thread
-            # Fallback: hidraw (HID keyboard = Close)
-            hidraw_devices = find_zkteco_hidraw_devices()
-            if not hidraw_devices:
-                raise RuntimeError("No ZKTeco QR500-BM device found (tried evdev and hidraw)")
-            device_path = hidraw_devices[0]
+            config = load_qr_config()
+            if config.interface == "serial":
+                device_path = _resolve_serial_path()
+                if device_path is None:
+                    raise RuntimeError(
+                        "No ZKTeco QR500-BM RS485 serial adapter found (tried symlink and ttyUSB scan)"
+                    )
+            else:
+                # usb: ลอง evdev ก่อน (HID keyboard = Open)
+                evdev_devices = find_zkteco_evdev_devices()
+                if evdev_devices:
+                    thread: QrReaderThread | EvdevQrReaderThread | SerialQrReaderThread = EvdevQrReaderThread(
+                        device_path=evdev_devices[0]
+                    )
+                    thread.start()
+                    _reader_thread = thread
+                    return thread
+                # Fallback: hidraw (HID keyboard = Close) -- symlink ก่อน, แล้วค่อย auto-detect
+                device_path = _resolve_hidraw_path()
+                if device_path is None:
+                    raise RuntimeError("No ZKTeco QR500-BM device found (tried evdev and hidraw)")
 
-        # explicit device_path
+        # explicit หรือ resolved device_path -- เลือก reader class จาก path
         if device_path.startswith("/dev/input/"):
             thread = EvdevQrReaderThread(device_path=device_path)
+        elif device_path == SYMLINK_SERIAL_PATH or device_path.startswith("/dev/ttyUSB"):
+            thread = SerialQrReaderThread(device_path=device_path)
         else:
             thread = QrReaderThread(device_path=device_path)
         thread.start()

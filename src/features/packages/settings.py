@@ -22,6 +22,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from system.utils import dev_fake_installed
+from core.config import (
+    QR_UDEV_RULE_PATH,
+    QR_UDEV_RULE_CONTENT,
+    QR_UDEV_SYMLINK_PATH,
+    QR_UDEV_SYMLINK_CONTENT,
+    QR_UDEV_SERIAL_SYMLINK_PATH,
+    QR_UDEV_SERIAL_SYMLINK_CONTENT,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -390,28 +398,30 @@ PACKAGES: list[dict[str, Any]] = [
         "uninstall_warning": "การถอนจะเปิดทางให้ปัดขวา/ปัดขึ้นหลุดออกจาก kiosk ได้อีกครั้ง — ต้อง Apply/reboot ที่หน้า Kiosk ใหม่ถ้าติดตั้งซ้ำภายหลัง",
     },
     # ── Hardware ──────────────────────────────────────────────────
+    #
+    # เนื้อหา rule มาจาก core.config (single source of truth เดียวกับ cli.py
+    # `vas qr install-udev` และ installers.py install_qr_udev_rule()) — แก้ไข vendor id ที่ผิด
+    # เดิม (1584:7000 ไม่ตรงกับอุปกรณ์จริง 0416:5020) และเพิ่ม symlink rule ทั้ง USB/Serial
     {
         "id":          "qr-udev",
         "name":        "99-qr500-bm.rules",
-        "description": "udev rule — อนุญาต non-root user เข้าถึง /dev/hidraw* และ /dev/input/* สำหรับ QR reader",
+        "description": "udev rule — อนุญาต non-root user เข้าถึง /dev/hidraw*, /dev/input/*, /dev/ttyUSB* และสร้าง symlink คงที่ /dev/zkteco-qr500 (USB) / /dev/zkteco-qr500-serial (RS485) สำหรับ QR reader",
         "logo":        None,
         "category":    "hardware",
         "depends":     [],
         "children":    [],
-        "check":       _file_check("/etc/udev/rules.d/99-qr500-bm.rules"),
+        "check":       _file_check(str(QR_UDEV_RULE_PATH)),
         "install_cmds": [
-            [
-                "bash", "-lc",
-                "echo '# managed by vas\n"
-                "SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"1584\", ATTRS{idProduct}==\"7000\", MODE=\"0666\"\n"
-                "SUBSYSTEM==\"input\", ATTRS{idVendor}==\"1584\", MODE=\"0666\"' "
-                "> /etc/udev/rules.d/99-qr500-bm.rules",
-            ],
+            ["bash", "-lc", f"echo '{QR_UDEV_RULE_CONTENT}' > {QR_UDEV_RULE_PATH}"],
+            ["bash", "-lc", f"echo '{QR_UDEV_SYMLINK_CONTENT}' > {QR_UDEV_SYMLINK_PATH}"],
+            ["bash", "-lc", f"echo '{QR_UDEV_SERIAL_SYMLINK_CONTENT}' > {QR_UDEV_SERIAL_SYMLINK_PATH}"],
             ["udevadm", "control", "--reload-rules"],
             ["udevadm", "trigger"],
         ],
         "uninstall_cmds": [
-            ["rm", "-f", "/etc/udev/rules.d/99-qr500-bm.rules"],
+            ["rm", "-f", str(QR_UDEV_RULE_PATH)],
+            ["rm", "-f", str(QR_UDEV_SYMLINK_PATH)],
+            ["rm", "-f", str(QR_UDEV_SERIAL_SYMLINK_PATH)],
             ["udevadm", "control", "--reload-rules"],
             ["udevadm", "trigger"],
         ],

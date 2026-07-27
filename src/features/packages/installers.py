@@ -149,9 +149,25 @@ class PhaseOneInstaller:
             self.runner.run(["ssh", "-V"], check=False)
 
     def install_qr_udev_rule(self) -> None:
-        """เขียน udev rule สำหรับ ZKTeco QR500-BM แล้ว reload udev"""
-        from core.config import QR_UDEV_RULE_PATH
+        """
+        เขียน udev rule สำหรับ ZKTeco QR500-BM แล้ว reload udev
+
+        เขียน 3 ไฟล์: access rule (hidraw/event/tty) + symlink USB (/dev/zkteco-qr500) +
+        symlink Serial (/dev/zkteco-qr500-serial) — เนื้อหามาจาก core.config single source
+        of truth เดียวกับที่ `vas qr install-udev` (cli.py) และ qr-udev component
+        (features/packages/settings.py) ใช้ ป้องกัน rule 3 จุดไม่ตรงกันเหมือนเดิม
+        """
+        from core.config import (
+            QR_UDEV_RULE_CONTENT,
+            QR_UDEV_RULE_PATH,
+            QR_UDEV_SERIAL_SYMLINK_CONTENT,
+            QR_UDEV_SERIAL_SYMLINK_PATH,
+            QR_UDEV_SYMLINK_CONTENT,
+            QR_UDEV_SYMLINK_PATH,
+        )
         self._write_file(str(QR_UDEV_RULE_PATH), QR_UDEV_RULE_CONTENT)
+        self._write_file(str(QR_UDEV_SYMLINK_PATH), QR_UDEV_SYMLINK_CONTENT)
+        self._write_file(str(QR_UDEV_SERIAL_SYMLINK_PATH), QR_UDEV_SERIAL_SYMLINK_CONTENT)
         self.runner.run(["udevadm", "control", "--reload-rules"])
         self.runner.run(["udevadm", "trigger"])
 
@@ -195,7 +211,7 @@ def count_install_operations(components: tuple[str, ...]) -> int:
         elif component == "openssh":
             total += 2
         elif component == "qr-udev":
-            total += 3  # write file + reload + trigger
+            total += 5  # write 3 files (access + symlink usb + symlink serial) + reload + trigger
 
     if "node" in components:
         total += 3  # node --version, npm --version, and pm2 --version
@@ -208,10 +224,3 @@ def count_install_operations(components: tuple[str, ...]) -> int:
     if "openssh" in components:
         total += 1
     return total
-
-
-QR_UDEV_RULE_CONTENT = (
-    "# managed by vas\n"
-    'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020",'
-    ' MODE="0666", TAG+="uaccess"\n'
-)

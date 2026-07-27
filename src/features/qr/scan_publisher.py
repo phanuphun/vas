@@ -90,6 +90,10 @@ class ScanPublisherThread(threading.Thread):
             scan_raw_keycode = getattr(reader, "last_scan_raw", None)
             scan_raw_report = getattr(reader, "last_scan_raw_report", None)
             read_mode = getattr(reader, "read_mode", None)
+            # scan_source/rfid_uid มีเฉพาะ SerialQrReaderThread (read_mode="serial") -- getattr
+            # กันพังกับ QrReaderThread/EvdevQrReaderThread ที่ไม่มี property นี้ (แยก RFID/QR ไม่ได้)
+            scan_source = getattr(reader, "last_scan_source", None)
+            scan_rfid_uid = getattr(reader, "last_scan_rfid_uid", None)
 
             # Log ลง DB ก่อน publish เสมอ (ไม่ให้ log หายถ้า publish error)
             try:
@@ -99,6 +103,8 @@ class ScanPublisherThread(threading.Thread):
                     raw_keycode=scan_raw_keycode,
                     raw_report=scan_raw_report,
                     read_mode=read_mode,
+                    scan_source=scan_source,
+                    rfid_uid=scan_rfid_uid,
                 )
             except Exception:
                 pass
@@ -134,6 +140,8 @@ class ScanPublisherThread(threading.Thread):
                 "raw_keycode": scan_raw_keycode,
                 "raw_report": scan_raw_report,
                 "read_mode": read_mode,
+                "scan_source": scan_source,
+                "rfid_uid": scan_rfid_uid,
                 "mqtt": mqtt_status,
                 "pipe": pipe_status,
             }

@@ -257,11 +257,15 @@ def build_parser() -> argparse.ArgumentParser:
     qr_test.add_argument("--device", help="Device path (/dev/input/eventX). Defaults to auto-detect.")
     qr_test.add_argument("--no-grab", action="store_true", help="Do not grab device (keystrokes reach OS — debug only).")
 
-    qr_subcommands.add_parser("install-udev", help="Install udev rule so non-root users can access /dev/hidraw*.")
+    qr_subcommands.add_parser(
+        "install-udev",
+        help="Install udev rules: non-root access + persistent symlinks (/dev/zkteco-qr500, /dev/zkteco-qr500-serial).",
+    )
 
     qr_config_cmd = qr_subcommands.add_parser("config", help="Set QR reader config.")
-    qr_config_cmd.add_argument("--device", help="Device path to pin (/dev/input/eventX or /dev/hidrawX).")
+    qr_config_cmd.add_argument("--device", help="Device path to pin (/dev/input/eventX, /dev/hidrawX, or /dev/ttyUSBX).")
     qr_config_cmd.add_argument("--clear-device", action="store_true", help="Clear pinned device (use auto-detect).")
+    qr_config_cmd.add_argument("--interface", choices=("usb", "serial"), help="Wire-level interface to auto-detect: usb (hidraw/evdev) or serial (RS485).")
 
     # ── mqtt subcommand ─────────────────────────────────────────────
     mqtt = subcommands.add_parser("mqtt", help="Manage MQTT publish settings.")
@@ -787,10 +791,13 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
 
         if args.qr_command == "config":
             config = load_qr_config()
+            interface = getattr(args, "interface", None) or config.interface
             if args.clear_device:
-                config = QrConfig(device_path=None)
+                config = QrConfig(device_path=None, interface=interface)
             elif getattr(args, "device", None):
-                config = QrConfig(device_path=args.device)
+                config = QrConfig(device_path=args.device, interface=interface)
+            elif getattr(args, "interface", None):
+                config = QrConfig(device_path=config.device_path, interface=interface)
             save_qr_config(config)
             print(f"Config saved: {config}")
             return 0
@@ -865,20 +872,29 @@ def _run_parsed_command(args: argparse.Namespace, runner: CommandRunner, parser:
         if args.qr_command == "install-udev":
             require_linux()
             require_root()
-            from core.config import QR_UDEV_RULE_PATH, QR_UDEV_SIGNATURE
-            rule_content = (
-                f"{QR_UDEV_SIGNATURE}\n"
-                "# ZKTeco QR500-BM / ZKRFID R400 — allow plugdev group access\n"
-                'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020", MODE="0666", GROUP="plugdev"\n'
-                'SUBSYSTEM=="usb", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020", MODE="0664", GROUP="plugdev"\n'
-                'KERNEL=="event*", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020", MODE="0664", GROUP="plugdev"\n'
+            # เนื้อหา rule มาจาก core.config (single source of truth เดียวกับ
+            # installers.py install_qr_udev_rule() และ features/packages/settings.py
+            # component "qr-udev") — เขียน 3 ไฟล์: access rule + symlink USB + symlink Serial
+            from core.config import (
+                QR_UDEV_RULE_PATH,
+                QR_UDEV_RULE_CONTENT,
+                QR_UDEV_SYMLINK_PATH,
+                QR_UDEV_SYMLINK_CONTENT,
+                QR_UDEV_SERIAL_SYMLINK_PATH,
+                QR_UDEV_SERIAL_SYMLINK_CONTENT,
             )
-            QR_UDEV_RULE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            QR_UDEV_RULE_PATH.write_text(rule_content, encoding="utf-8")
-            print(f"udev rule written: {QR_UDEV_RULE_PATH}")
+            for path, content in (
+                (QR_UDEV_RULE_PATH, QR_UDEV_RULE_CONTENT),
+                (QR_UDEV_SYMLINK_PATH, QR_UDEV_SYMLINK_CONTENT),
+                (QR_UDEV_SERIAL_SYMLINK_PATH, QR_UDEV_SERIAL_SYMLINK_CONTENT),
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                print(f"udev rule written: {path}")
             runner.run(["udevadm", "control", "--reload-rules"])
             runner.run(["udevadm", "trigger"])
-            print("udev reloaded — ถอดแล้วเสียบ USB ใหม่เพื่อให้ rule มีผล")
+            print("udev reloaded — ถอดแล้วเสียบ USB ใหม่ (หรือปลั๊ก serial adapter ใหม่) เพื่อให้ rule มีผล")
+            print("จะได้ symlink คงที่: /dev/zkteco-qr500 (USB) และ /dev/zkteco-qr500-serial (RS485)")
             return 0
 
     if args.command == "mqtt":
