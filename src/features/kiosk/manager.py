@@ -628,6 +628,7 @@ class KioskManager:
             self._write_executable(script_path, _insert_after_shebang(script_content, preamble))
             _chown_to_user(script_path, username)
             _chown_to_user(script_path.parent, username)
+            _ensure_config_dir_owned(home, username)
             return
 
         # GNOME session เท่านั้นที่มี GNOME Shell ให้ gsettings lockdown ทำงาน — แทรก preamble
@@ -645,6 +646,7 @@ class KioskManager:
         self._write_file(desktop_path, desktop_content)
         _chown_to_user(desktop_path, username)
         _chown_to_user(desktop_path.parent, username)
+        _ensure_config_dir_owned(home, username)
 
     def _write_executable(self, path: Path, content: str) -> None:
         print(f"write {path.as_posix()}")
@@ -676,6 +678,7 @@ class KioskManager:
         _chown_to_user(ext_dir, username)
         _chown_to_user(ext_dir / HIDE_CURSOR_MANIFEST_NAME, username)
         _chown_to_user(ext_dir / HIDE_CURSOR_CSS_NAME, username)
+        _ensure_config_dir_owned(home, username)
 
     def set_translate_policy(
         self, disabled: bool, paths: "tuple[Path, ...]" = CHROMIUM_POLICY_PATHS,
@@ -746,6 +749,7 @@ class KioskManager:
         user_rc.write_text(updated, encoding="utf-8")
         _chown_to_user(user_rc, username)
         _chown_to_user(user_rc.parent, username)
+        _ensure_config_dir_owned(home, username)
         return True
 
     def remove_autostart(self, home: Path) -> None:
@@ -893,6 +897,28 @@ def _chown_to_user(path: Path, username: str) -> None:
         pass
 
 
+def _ensure_config_dir_owned(home: Path, username: str) -> None:
+    """chown ~/.config เอง ไม่ใช่แค่โฟลเดอร์ย่อยที่ VAS เขียนตรงๆ (openbox/, kiosk-extensions/)
+
+    บั๊กจริงที่พบบนเครื่อง VBoxFirst (2026-07-30): ตอนสร้าง user ใหม่ VAS เรียก
+    path.parent.mkdir(parents=True, exist_ok=True) ตอนเขียนไฟล์ extension/autostart ครั้งแรก
+    ซึ่งสร้างทั้งสาย directory (รวม ~/.config เองถ้ายังไม่มี) เป็น root (VAS server รันเป็น root)
+    แล้วโค้ดเดิม chown กลับให้ user แค่โฟลเดอร์ปลายทางที่ตัวเองดูแล (เช่น .config/openbox,
+    .config/kiosk-extensions) ไม่เคย chown ~/.config เองกลับให้ user เจ้าของบ้านจริง — ผลคือ
+    ~/.config ค้างเป็น root:root mode 755 (u=rwx, g/o=r-x ไม่มี write) ทำให้ kiosk-user (เจ้าของ
+    home จริง) สร้างโฟลเดอร์ใหม่ใต้ ~/.config เองไม่ได้อีกเลย (เช่น .config/vending-auto-setup ที่
+    kiosk-launch.log ต้องใช้) — ผลที่ตามมาร้ายแรงกว่าที่คิด: บรรทัด
+    `chromium ... >> "$LOG_FILE" 2>&1` ใน autostart script เปิด LOG_FILE ไม่ได้เพราะ parent dir
+    เขียนไม่ได้ ทำให้ shell (dash) ไม่รันคำสั่ง chromium บรรทัดนั้นเลยทั้งบรรทัด (ไม่ error ที่ไหน
+    ให้เห็นเพราะไม่มี TTY/terminal ให้แสดง stderr) — จอเลยดำค้างตลอดไปจาก xsetroot เฉยๆ ไม่มี
+    chromium ถูกเปิดเลยแม้แต่ครั้งเดียว ยืนยันจริงด้วย process tree (sh อยู่ที่ sleep 2 ท้าย loop
+    ตลอด ไม่เคยมี child เป็น chromium) เรียกฟังก์ชันนี้ทุกจุดที่เขียนไฟล์ใต้ ~/.config เป็นครั้งแรก
+    ได้ (idempotent — ข้ามเงียบถ้า ~/.config ยังไม่มีอยู่จริงหรือไม่ใช่ root ที่เรียก)"""
+    config_dir = home / ".config"
+    if config_dir.exists():
+        _chown_to_user(config_dir, username)
+
+
 def _resolve_home_for_new_user(username: str) -> Path:
     """หา home directory ของ user ที่เพิ่งสร้างผ่าน useradd -m — ใช้ pwd lookup จริงถ้าทำได้
     (กรณี useradd รันจริงบนเครื่อง home จะมีอยู่แล้วทันทีเพราะ useradd -m เป็น synchronous)
@@ -1032,26 +1058,38 @@ def build_openbox_autostart_preamble(
     display_wait_seconds: int = DEFAULT_DISPLAY_WAIT_SECONDS,
 ) -> str:
     """Preamble ที่ใส่ไว้ก่อนเปิด chromium เฉพาะ session แบบ Openbox เท่านั้น (GNOME ไม่ต้อง
-    เพราะ gnome-session/mutter จัดการเรื่องพวกนี้ให้อยู่แล้ว) แก้ 3 อาการที่พบกับ Openbox:
+    เพราะ gnome-session/mutter จัดการเรื่องพวกนี้ให้อยู่แล้ว) — เขียนให้ตรงกับ
+    docs/manual-kiosk-openbox-chromium-xorg-guide.md ข้อ 9/9.2/4 ครบทุกข้อ แก้ 5 อาการที่พบกับ
+    Openbox:
 
     1. `xsetroot -solid` — Openbox ไม่ paint พื้นหลังของตัวเองเลย ถ้าไม่ตั้งไว้จะเห็นสีเทาดิบ
        ของ X root window ตอน chromium ยังไม่ขึ้นจอ/กำลังรอ restart
-    2. รอไฟล์ marker ที่ display-session.sh (features/display/display.py) touch ไว้หลังหมุน
+    2. ปิด screensaver/DPMS/screen blank (`xset s off/noblank/-dpms`, docs ข้อ 9.2) — Openbox
+       ไม่มี gnome-settings-daemon คอยปิดให้เหมือน GNOME เอง
+    3. `unclutter-xfixes --timeout 0 --root &` (docs ข้อ 4) — fallback ซ่อน mouse cursor แบบ
+       idle-based ชั้นที่สอง คุมช่วงก่อน hide-cursor extension (--load-extension) จะ inject ได้
+       (chrome-error:// หรือก่อนหน้าเว็บโหลดเสร็จ) — no-op เงียบๆ ถ้ายังไม่ได้ติดตั้ง package นี้
+    4. รอไฟล์ marker ที่ display-session.sh (features/display/display.py) touch ไว้หลังหมุน
        จอ+ปรับ touch สำเร็จ — กัน chromium เปิด fullscreen ไปก่อนจอจะหมุนเสร็จ (ไม่มี
        session manager คอยรอเหมือน GNOME) มี timeout กันค้างถ้า marker ไม่มาเลย
-    3. รอ DNS/เครือข่ายพร้อมก่อน (เช็คว่า resolve hostname ของ URL ที่จะเปิดได้ไหม) — กัน
-       เว็บแอปฝั่ง client เจอ error เพราะ chromium โหลดเร็วกว่าที่เน็ตจะพร้อมตอน boot
+    5. รอ DNS + HTTP(S) พร้อมจริงก่อน (docs ข้อ 1.4/ข้อ 9 — เช็คทั้ง resolve hostname และ
+       curl ตอบจริง ไม่เช็คแค่ DNS อย่างเดียว) กันเว็บแอปฝั่ง client เจอ error เพราะ chromium
+       โหลดเร็วกว่าที่เน็ต/backend จะพร้อมตอน boot
     """
     marker_path = (home / ".config" / "vending-auto-setup" / DISPLAY_READY_MARKER_NAME).as_posix()
     hostname = urlparse(url).hostname or ""
 
     network_wait_block = ""
     if hostname:
+        # เช็ค 2 ชั้นตาม docs ข้อ 1.4/ข้อ 9: DNS resolve ได้ ไม่ได้แปลว่า backend/server
+        # ปลายทางพร้อมตอบจริง (เช่นเครื่องปลายทางยัง boot ไม่เสร็จ/firewall บล็อก) — ต้องเช็ค
+        # HTTP(S) ตอบจริงด้วย curl เพิ่มอีกชั้นเสมอ ไม่เช็คแค่ getent hosts เฉยๆ เหมือนเดิม
         network_wait_block = (
-            f"# รอ DNS/เครือข่ายพร้อมก่อนเปิดเบราว์เซอร์ (โฮสต์: {hostname}) สูงสุด "
+            f"# รอ DNS + HTTP(S) พร้อมจริงก่อนเปิดเบราว์เซอร์ (โฮสต์: {hostname}) สูงสุด "
             f"{network_wait_seconds} วิ\n"
             f"for _i in $(seq 1 {network_wait_seconds}); do\n"
-            f"  getent hosts {shlex.quote(hostname)} >/dev/null 2>&1 && break\n"
+            f"  getent hosts {shlex.quote(hostname)} >/dev/null 2>&1 && "
+            f"curl -Is --max-time 3 {shlex.quote(url)} >/dev/null 2>&1 && break\n"
             "  sleep 1\n"
             "done\n"
         )
@@ -1060,6 +1098,16 @@ def build_openbox_autostart_preamble(
         f"{KIOSK_OPENBOX_PREAMBLE_SIGNATURE}\n"
         "# Managed by VAS. Manual edits may be overwritten.\n"
         'xsetroot -solid "#000000" 2>/dev/null || true\n'
+        "\n"
+        "# ปิด screensaver / DPMS / screen blank (docs ข้อ 9.2) — ตู้ kiosk ต้องไม่ดับจอเอง\n"
+        "xset s off 2>/dev/null || true\n"
+        "xset s noblank 2>/dev/null || true\n"
+        "xset -dpms 2>/dev/null || true\n"
+        "\n"
+        "# ซ่อน mouse cursor แบบ idle-based — fallback ชั้นที่สอง คุมช่วงก่อนหน้าเว็บโหลดเสร็จ/\n"
+        "# หน้า chrome-error:// ที่ hide-cursor extension (--load-extension ด้านล่าง) เข้าไม่ถึง\n"
+        "# (docs ข้อ 4, ข้อ 8.1) ตัวหลักในการซ่อน cursor ตลอด touch-drag คือ extension ไม่ใช่ตัวนี้\n"
+        "command -v unclutter-xfixes >/dev/null 2>&1 && unclutter-xfixes --timeout 0 --root &\n"
         "\n"
         f"# รอไฟล์ marker ที่ display-session.sh เขียนตอนหมุนจอเสร็จ (ถ้ามี) สูงสุด "
         f"{display_wait_seconds} วิ\n"
@@ -1131,11 +1179,24 @@ def build_kiosk_launch_script(
 ) -> str:
     flags = normalize_chrome_flags(chrome_flags)
     enabled_defs = [item for item in CHROME_KIOSK_FLAG_DEFS if flags.get(cast(str, item["key"]), False)]
-    flag_tokens = ["--kiosk"] + [cast(str, item["flag"]) for item in enabled_defs]
+    # --password-store=basic / --disable-gpu-sandbox: บังคับใช้เสมอไม่ใช่ toggle (docs ข้อ 9,
+    # ข้อ 12) — --password-store=basic กัน dialog "Choose password for new keyring" ของ GNOME
+    # Keyring ที่บล็อกจอตอน chromium เข้าถึง keyring ครั้งแรก (auto-login ไม่มีรหัสผ่านมา
+    # unlock login keyring ให้) --disable-gpu-sandbox กัน GPU process แครชตอน init บนจอ/การ์ดจอ
+    # แบบ virtual หรือ embedded (VirtualBox/VMware virtual display adapter เป็นเคสที่เจอบ่อยสุด)
+    flag_tokens = ["--kiosk", "--password-store=basic", "--disable-gpu-sandbox"] + [
+        cast(str, item["flag"]) for item in enabled_defs
+    ]
     # รวม "features" ของทุก item ที่เปิดอยู่เป็น --disable-features=A,B,C ตัวเดียวตอนท้าย —
     # ห้ามให้แต่ละ item ยิง --disable-features ของตัวเองแยกกันหลายครั้ง เพราะ Chromium ใช้แค่
     # occurrence สุดท้ายของ switch ซ้ำบน command line เดียวกัน (ดูคอมเมนต์ที่ CHROME_KIOSK_FLAG_DEFS)
-    feature_names = [name for item in enabled_defs for name in cast("Sequence[str]", item["features"])]
+    # NetworkServiceInProcess2: บังคับปิดเสมอไม่ใช่ toggle (docs ข้อ 12 Troubleshooting) — ปิด
+    # feature flag ที่แยก network service เป็น process ต่างหาก ซึ่งไม่เสถียรบนบางเครื่อง
+    # (log จะโชว์ "Network service crashed or was terminated, restarting service")
+    feature_names = [
+        *[name for item in enabled_defs for name in cast("Sequence[str]", item["features"])],
+        "NetworkServiceInProcess2",
+    ]
     if feature_names:
         flag_tokens.append("--disable-features=" + ",".join(feature_names))
     # --load-extension/--disable-extensions-except: โหลด hide-cursor extension (docs ข้อ 8.1) —

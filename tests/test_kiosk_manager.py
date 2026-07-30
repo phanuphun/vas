@@ -13,12 +13,14 @@ from features.kiosk.manager import (
     GNOME_LOCKDOWN_SIGNATURE,
     OPENBOX_KEYBIND_BLOCKLIST,
     KioskManager,
+    _ensure_config_dir_owned,
     _parse_gnome_lockdown_flags,
     _parse_kiosk_flags,
     build_gnome_lockdown_preamble,
     build_hide_cursor_css,
     build_hide_cursor_manifest,
     build_kiosk_launch_script,
+    build_openbox_autostart_preamble,
     build_translate_policy_content,
     collect_hide_cursor_extension_status,
     collect_translate_policy_status,
@@ -370,3 +372,80 @@ def test_remove_chromium_snap_dry_run_returns_true_without_calling_snap(monkeypa
 
     assert removed is True
     assert calls == []  # dry_run ต้องไม่เรียก runner.run() จริง
+
+
+# ── บั๊กจริง (2026-07-30, เครื่อง VBoxFirst): ~/.config ค้างเป็น root:root ทำให้ kiosk-user ──
+# เขียนโฟลเดอร์ใหม่ใต้ .config เองไม่ได้ (เช่น .config/vending-auto-setup ที่ kiosk-launch.log
+# ต้องใช้) — ผลคือบรรทัด "chromium ... >> $LOG_FILE" เปิดไฟล์ log ไม่ได้ ทำให้ dash ไม่รัน
+# คำสั่ง chromium บรรทัดนั้นเลยทั้งบรรทัด (ไม่มี error โผล่ที่ไหนเลยเพราะไม่มี TTY) จอเลยดำค้าง
+# ตลอดไปจาก xsetroot เฉยๆ — แก้โดยเพิ่ม _ensure_config_dir_owned() ให้ chown ~/.config เอง
+# ทุกจุดที่เขียนไฟล์ใต้ ~/.config เป็นครั้งแรก ไม่ใช่แค่โฟลเดอร์ย่อยที่ตัวเองดูแลตรงๆ
+
+def test_ensure_config_dir_owned_skips_silently_when_config_dir_missing(tmp_path: Path) -> None:
+    """idempotent — ต้องไม่ raise แม้ ~/.config ยังไม่มีอยู่จริง (เช่น user ยังไม่เคย login เลย)"""
+    _ensure_config_dir_owned(tmp_path, "irrelevant-test-user")  # ไม่ raise = ผ่าน
+
+
+def test_ensure_config_dir_owned_does_not_raise_when_config_dir_exists(tmp_path: Path) -> None:
+    (tmp_path / ".config").mkdir()
+    _ensure_config_dir_owned(tmp_path, "irrelevant-test-user")  # ไม่ raise = ผ่าน (chown เงียบถ้าไม่ใช่ root)
+
+
+def test_write_hide_cursor_extension_owns_config_dir_itself(tmp_path: Path) -> None:
+    """กันบั๊กเดิมกลับมา — write_hide_cursor_extension() ต้องเรียก _ensure_config_dir_owned()
+    ไม่ใช่แค่ chown โฟลเดอร์ปลายทาง (kiosk-extensions/) เท่านั้น"""
+    import inspect
+
+    source = inspect.getsource(KioskManager.write_hide_cursor_extension)
+    assert "_ensure_config_dir_owned(home, username)" in source
+
+
+def test_write_autostart_owns_config_dir_itself_both_branches() -> None:
+    """ทั้ง 2 branch (openbox และ gnome) ของ write_autostart() ต้องเรียก
+    _ensure_config_dir_owned() ก่อน return — กันบั๊กเดิมกลับมาถ้ามีใครเพิ่ม branch ใหม่แล้วลืม"""
+    import inspect
+
+    source = inspect.getsource(KioskManager.write_autostart)
+    assert source.count("_ensure_config_dir_owned(home, username)") == 2
+
+
+def test_disable_openbox_escape_keybinds_owns_config_dir_itself() -> None:
+    import inspect
+
+    source = inspect.getsource(KioskManager.disable_openbox_escape_keybinds)
+    assert "_ensure_config_dir_owned(home, username)" in source
+
+
+# ── สคริปต์ที่ VAS สร้างต้องตรงกับ docs/manual-kiosk-openbox-chromium-xorg-guide.md ──────
+
+def test_build_kiosk_launch_script_includes_docs_mandatory_flags() -> None:
+    """3 flag นี้ไม่ใช่ toggle ใน CHROME_KIOSK_FLAG_DEFS แต่ docs (ข้อ 9, ข้อ 12) ระบุว่าต้อง
+    บังคับใช้เสมอ: --password-store=basic (กัน keyring dialog บล็อกจอ), --disable-gpu-sandbox +
+    NetworkServiceInProcess2 (กัน GPU/network-service แครชบนจอ/การ์ดจอ virtual เช่น VirtualBox)"""
+    script = build_kiosk_launch_script(URL, True, 2)
+    command_line = next(line for line in script.splitlines() if "--kiosk" in line)
+
+    assert "--password-store=basic" in command_line
+    assert "--disable-gpu-sandbox" in command_line
+    assert "NetworkServiceInProcess2" in command_line
+    assert command_line.count("--disable-features=") == 1  # ยังต้องรวมเป็นตัวเดียวเสมอ
+
+
+def test_build_openbox_autostart_preamble_matches_docs_section_9_2_and_4(tmp_path: Path) -> None:
+    """docs ข้อ 9.2 (ปิด screensaver/DPMS) และข้อ 4/8.1 (unclutter-xfixes fallback) ต้องอยู่ใน
+    preamble จริง — เดิม VAS ไม่เคยเขียน 2 ส่วนนี้เข้าสคริปต์เลยทั้งที่ลง package ไว้แล้ว"""
+    preamble = build_openbox_autostart_preamble(URL, tmp_path)
+
+    assert "xset s off" in preamble
+    assert "xset s noblank" in preamble
+    assert "xset -dpms" in preamble
+    assert "unclutter-xfixes --timeout 0 --root" in preamble
+
+
+def test_build_openbox_autostart_preamble_network_wait_checks_http_not_just_dns(tmp_path: Path) -> None:
+    """docs ข้อ 1.4/ข้อ 9 เช็ค 2 ชั้น (DNS resolve + HTTP ตอบจริง) — DNS resolve ได้ไม่ได้แปลว่า
+    backend ปลายทางพร้อมตอบจริง เดิม VAS เช็คแค่ getent hosts อย่างเดียว"""
+    preamble = build_openbox_autostart_preamble(URL, tmp_path)
+
+    assert "getent hosts" in preamble
+    assert "curl -Is --max-time 3" in preamble
