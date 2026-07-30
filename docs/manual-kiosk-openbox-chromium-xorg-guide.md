@@ -6,16 +6,16 @@
 
 ---
 
-## 0. ภาพรวมลำดับขั้นตอน
+## 0. ภาพรวมลำดับขั้นตอน 
 
 1. ตรวจสอบ/ตั้งค่า Network ของ OS ให้ใช้งานได้ก่อน (ต้องผ่านก่อนไปข้อถัดไปเสมอ)
 2. อัปเดตระบบ + ติดตั้ง Xorg + GDM3
 3. ปิด Wayland บังคับใช้ X11
-4. ติดตั้ง Openbox + เครื่องมือเสริม (unclutter, x11-xserver-utils)
+4. ติดตั้ง Openbox + เครื่องมือเสริม (unclutter-xfixes, x11-xserver-utils)
 5. ติดตั้ง Chromium (แบบ .deb ไม่ใช่ snap — เหตุผลอธิบายในข้อ 5)
 6. สร้าง Linux user แยกสำหรับ kiosk
 7. ตั้ง Auto-login ให้ user นั้นผ่าน GDM3
-8. ตั้ง Session Type ของ user นั้นเป็น Openbox
+8. ตั้ง Session Type ของ user นั้นเป็น Openbox + สร้าง Chromium extension ซ่อน mouse cursor แบบสมบูรณ์ (ครอบคลุม touch-drag)
 9. เขียนสคริปต์ `~/.config/openbox/autostart` — รอ network พร้อมจริงก่อนค่อยเปิด Chromium แบบ kiosk
 10. ล็อกดาวน์เพิ่มเติม (ปิด screensaver, ซ่อนเมาส์, กัน crash)
 11. Reboot ทดสอบ + Checklist ตรวจสอบ
@@ -182,13 +182,13 @@ echo $XDG_SESSION_TYPE   # ต้องขึ้น "x11" ไม่ใช่ "wa
 sudo apt install -y \
   openbox \
   obconf \
-  unclutter \
+  unclutter-xfixes \
   xterm
 ```
 
 - `openbox` — window manager แบบเบา ไม่มี desktop shell/dock/notification ให้หลุดออกจาก kiosk ได้เหมือน GNOME
 - `obconf` — GUI ปรับ config ของ Openbox (ใช้ตอนตั้งค่าครั้งแรกเท่านั้น ไม่จำเป็นสำหรับ kiosk ที่ตั้งเสร็จแล้ว)
-- `unclutter` — ซ่อน mouse cursor อัตโนมัติเมื่อไม่ได้ขยับ (ตู้ vending ไม่ควรเห็นลูกศรเมาส์ค้างจอ)
+- `unclutter-xfixes` — ซ่อน mouse cursor โดยใช้ X11-Xfixes extension (`XFixesHideCursor`) เป็นตัวสืบทอด `unclutter` ตัวเดิมที่ deprecated แล้ว — ใช้ตัวนี้แทนเพราะ **แพ็กเกจ `xcursor-transparent-theme` ไม่มีอยู่ใน Ubuntu repo จริง** (มีแค่บน Arch AUR/distro อื่น ตรวจสอบแล้วผ่าน packages.ubuntu.com — ถ้า `apt install` แล้วขึ้น `Unable to locate package` คือสาเหตุนี้) ตั้ง `--timeout 0` ให้ซ่อนแทบจะทันทีที่หยุดขยับ — **ข้อจำกัดที่พบจริง:** เป็นกลไก idle-based ล้วนๆ ตอนกดค้างแล้วลาก (touch-drag) มี motion event ไหลต่อเนื่องตลอด ไม่มีช่วง idle เกิดขึ้นเลย cursor เลยไม่ถูกซ่อนตลอดทั้ง gesture จึงใช้เป็นแค่ fallback ชั้นที่สอง ตัวหลักที่แก้ปัญหานี้ตรงจุดกว่าคือ Chromium extension ในข้อ 8.1
 - `xterm` — เผื่อ debug เข้า terminal ผ่าน Openbox เวลามีปัญหา (ลบทิ้งได้ทีหลังถ้าไม่ต้องการ)
 
 ---
@@ -277,6 +277,63 @@ ls /usr/share/xsessions/
 # ต้องเห็นไฟล์ openbox.desktop
 ```
 
+### 8.1 สร้าง Chromium Extension ซ่อน Mouse Cursor แบบสมบูรณ์ (ครอบคลุม touch-drag)
+
+`unclutter-xfixes` ในข้อ 4 เป็นกลไก idle-based — ซ่อน cursor ได้ก็ต่อเมื่อไม่มี pointer event เท่านั้น พอกดค้างแล้วลาก (touch-drag) จะมี motion event ไหลต่อเนื่องตลอด ไม่มีช่วง idle เกิดขึ้นเลย ทำให้ cursor **ไม่ถูกซ่อนตลอดทั้ง gesture** — นี่คือข้อจำกัดของกลไกนี้เอง ไม่ใช่ตั้งค่าผิด
+
+วิธีแก้ที่ตรงจุดกว่า (ทดสอบแล้วใช้งานได้จริงบนตู้จริง แม้ตอน drag) คือ inject CSS `cursor: none` เข้าไปในทุกหน้าที่ Chromium โหลด ผ่าน unpacked extension ที่โหลดตอน launch — ไม่ต้องแก้ source ของเว็บแอพเลย
+
+สร้างไฟล์ extension:
+
+```bash
+sudo -u kiosk-user mkdir -p /home/kiosk-user/.config/kiosk-extensions/hide-cursor
+
+sudo -u kiosk-user tee /home/kiosk-user/.config/kiosk-extensions/hide-cursor/manifest.json > /dev/null << 'EOF'
+{
+  "manifest_version": 3,
+  "name": "Kiosk Hide Cursor",
+  "version": "1.0",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "css": ["hide-cursor.css"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}
+EOF
+
+sudo -u kiosk-user tee /home/kiosk-user/.config/kiosk-extensions/hide-cursor/hide-cursor.css > /dev/null << 'EOF'
+*, *::before, *::after {
+  cursor: none !important;
+}
+EOF
+```
+
+Extension นี้ถูกอ้างอิงผ่าน `--load-extension` / `--disable-extensions-except` ใน `CHROME_FLAGS` ของสคริปต์ autostart ข้อ 9 — ไม่ต้อง publish ขึ้น Chrome Web Store ใดๆ โหลดจาก path บนเครื่องตรงๆ ทุกครั้งที่ Chromium เปิด
+
+**ทดสอบก่อน bake เข้า production** ด้วย instance แยก (ใช้ `--user-data-dir` คนละอันจาก production กันชนกับ instance หลักที่ autostart loop รันอยู่ ไม่ต้อง stop ตัวจริง):
+
+```bash
+sudo -u kiosk-user env DISPLAY=:0 XAUTHORITY=/home/kiosk-user/.Xauthority \
+  chromium \
+  --user-data-dir=/tmp/kiosk-cursor-test \
+  --load-extension=/home/kiosk-user/.config/kiosk-extensions/hide-cursor \
+  --disable-extensions-except=/home/kiosk-user/.config/kiosk-extensions/hide-cursor \
+  --kiosk --no-first-run --password-store=basic \
+  "$KIOSK_URL"
+```
+
+ลองจิ้ม กดค้าง แล้วลากบนหน้าจอ — ถ้า cursor หายไปตลอด (รวมช่วง drag) แปลว่าใช้ได้ ปิด instance ทดสอบด้วย:
+
+```bash
+sudo pkill -f "user-data-dir=/tmp/kiosk-cursor-test"
+sudo -u kiosk-user rm -rf /tmp/kiosk-cursor-test
+```
+
+ข้อจำกัดที่เหลืออยู่: หน้า error ภายในของ Chromium เอง (`chrome-error://`) จะไม่ถูก inject เพราะ extension เข้าไม่ถึงหน้าประเภทนี้ — ในทางปฏิบัติเจอน้อยมากเพราะ autostart script รอ network พร้อมก่อนเปิด chromium อยู่แล้ว (ข้อ 9) ส่วนนี้ `unclutter-xfixes` จากข้อ 4 ยังมีประโยชน์อยู่ในฐานะ fallback ชั้นที่สอง คุมช่วงก่อนหน้าเว็บโหลดเสร็จ/หน้า error ที่ extension เข้าไม่ถึง
+
 ---
 
 ## 9. เขียนสคริปต์ Autostart ของ Openbox
@@ -294,6 +351,7 @@ sudo -u kiosk-user nano /home/kiosk-user/.config/openbox/autostart
 #!/usr/bin/env bash
 
 KIOSK_URL="https://your-app-url.example.com"
+EXT_DIR="$HOME/.config/kiosk-extensions/hide-cursor"
 LOG_FILE="$HOME/.config/openbox/kiosk-launch.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -315,8 +373,14 @@ xset s off
 xset s noblank
 xset -dpms
 
-# 3) ซ่อน mouse cursor เมื่อไม่ขยับ (ต้องติดตั้ง unclutter จากข้อ 4 แล้ว)
-unclutter -idle 1 -root &
+# 3) ซ่อน mouse cursor — สองชั้น: (a) Chromium extension จากข้อ 8.1 เป็นตัวหลัก ผูกกับ
+# CHROME_FLAGS ด้านล่าง (--load-extension/--disable-extensions-except) ใช้ CSS cursor:none
+# inject ทุกหน้า ครอบคลุมแม้ตอน touch-drag ที่ unclutter-xfixes เอาไม่อยู่ (b) unclutter-xfixes
+# เป็น fallback ชั้นที่สอง คุมช่วงก่อนหน้าเว็บโหลดเสร็จ/หน้า error ที่ extension เข้าไม่ถึง
+# (ต้องติดตั้งจากข้อ 4 แล้ว) ไบนารีชื่อ "unclutter-xfixes" ไม่ใช่ "unclutter" เฉยๆ — เดิมเอกสารนี้
+# เคยแนะนำแพ็กเกจ xcursor-transparent-theme แต่แพ็กเกจนั้นไม่มีอยู่จริงใน Ubuntu repo (ตรวจสอบ
+# แล้วผ่าน packages.ubuntu.com มีแค่บน Arch AUR เท่านั้น) จึงใช้ unclutter-xfixes แทน
+unclutter-xfixes --timeout 0 --root &
 
 # 4) รอ network พร้อมจริงก่อนเปิดเบราว์เซอร์ — เช็ค 2 ชั้น: DNS resolve ได้ + HTTP ตอบจริง
 HOSTNAME=$(echo "$KIOSK_URL" | sed -E 's#^[a-zA-Z]+://##; s#/.*##; s#:.*##')
@@ -361,7 +425,22 @@ fi
 # ค้างเป็น dialog บล็อกอยู่แบบนั้น — สั่งให้ Chromium ใช้ที่เก็บรหัสผ่านแบบ plain local file
 # แทน (ไม่เข้ารหัสผ่าน keyring) จึงไม่ต้องพึ่ง gnome-keyring เลย เหมาะกับ kiosk ที่ไม่มีใคร
 # login ด้วยรหัสผ่านจริงอยู่แล้ว
-CHROME_FLAGS="--kiosk --no-first-run --password-store=basic --disable-translate --disable-infobars --noerrdialogs --disable-suggestions-service --disable-save-password-bubble --overscroll-history-navigation=0 --disable-pinch --disable-features=Translate,OverscrollHistoryNavigation,TouchpadOverscrollHistoryNavigation"
+#
+# --disable-gpu-sandbox: ปลดล็อกให้ GPU process เข้าถึงสิ่งที่ driver ต้องใช้ตรงๆ ไม่ต้องผ่าน
+# sandbox — แก้ปัญหาที่พบจริงบนจอ/การ์ดจอแบบ virtual หรือ embedded GPU (สังเกตชื่อ output แบบ
+# Virtual1 ด้านบน) ที่ sandbox บล็อกการเข้าถึง GPU driver ตอน init จน GPU process แครช แล้วลาก
+# process อื่นล้มตาม ทำให้จอขึ้น error/ไม่มีเน็ตแวบเดียวแล้วกลับมาปกติเอง (ดูรายละเอียดในข้อ 12)
+#
+# NetworkServiceInProcess2 ใน --disable-features: ปิด feature flag ที่ทำให้ network service ของ
+# Chromium แยกเป็น process ต่างหาก ซึ่งพบว่าไม่เสถียรบนเครื่องบางรุ่น (log จะโชว์ "Network
+# service crashed or was terminated, restarting service") ปิดแล้วกลับไปทำงานร่วม process หลัก
+# แทน ลดโอกาสแครชกลางคัน — ห้ามใส่ --disable-features= ซ้ำเป็นอีก flag เด็ดขาด เพราะ Chromium
+# จะใช้แค่ค่าตัวหลังสุดเท่านั้น ต้องรวมเข้า list เดิมแบบนี้
+#
+# --load-extension / --disable-extensions-except: โหลด extension จากข้อ 8.1 ที่ inject CSS
+# cursor:none เข้าทุกหน้า เป็นตัวหลักในการซ่อน mouse cursor แบบครอบคลุม touch-drag (ทดสอบแล้ว
+# บนตู้จริง) EXT_DIR ถูก expand ตรงนี้เพราะ CHROME_FLAGS เป็น double-quoted string ธรรมดา
+CHROME_FLAGS="--kiosk --no-first-run --password-store=basic --disable-translate --disable-infobars --noerrdialogs --disable-suggestions-service --disable-save-password-bubble --overscroll-history-navigation=0 --disable-pinch --disable-gpu-sandbox --disable-features=Translate,OverscrollHistoryNavigation,TouchpadOverscrollHistoryNavigation,NetworkServiceInProcess2 --load-extension=$EXT_DIR --disable-extensions-except=$EXT_DIR"
 
 # 7) Restart loop — ถ้า Chromium ปิดตัว/crash ให้เปิดใหม่อัตโนมัติ (ไม่ปล่อยให้จอค้างดำ)
 while true; do
@@ -471,6 +550,19 @@ sudo reboot
 
 **Chromium ขึ้น `ERR_INTERNET_DISCONNECTED` ทั้งที่เน็ตต่อจริง**
 แปลว่า loop รอ network ในข้อ 9 timeout ก่อนเน็ตจะพร้อม — เพิ่มค่า `MAX_WAIT` ในสคริปต์ หรือเช็คว่า `systemd-networkd-wait-online`/`NetworkManager-wait-online` (ข้อ 1.5) enable อยู่จริงไหม (`systemctl is-enabled NetworkManager-wait-online.service`)
+
+**Chromium ขึ้น "ไม่มีอินเทอร์เน็ต" แวบเดียวตอนเปิดเครื่อง แล้วกลับมาปกติเอง (ทั้งที่เน็ตของ OS ปกติดีทุกอย่าง)**
+เช็ค `kiosk-launch.log` ก่อนว่า network ready เร็วปกติไหม (`network ready after Ns` ควรเป็นเลขหลักเดียว) ถ้าเร็วปกติแต่ยังเจอ error แวบเดียว ให้ดูบรรทัดที่ chromium print ต่อจาก `starting chromium` — ถ้าเจอ `Network service crashed or was terminated, restarting service` แปลว่า**ไม่ใช่ปัญหาเน็ตของ OS** แต่เป็น Chromium process (GPU process / network service) แครชแล้ว auto-restart ตัวเอง มักเกิดบนจอ/การ์ดจอแบบ virtual หรือ embedded GPU (สังเกตชื่อ output แบบ `Virtual1` ในข้อ 9) ที่ sandbox ของ Chromium บล็อกการเข้าถึง GPU driver ตอน init
+
+วิธีแก้ — เพิ่ม flag ใน `CHROME_FLAGS` ของข้อ 9 (ใส่ไว้ในโค้ดด้านบนแล้ว):
+
+- `--disable-gpu-sandbox` — ปลดล็อกให้ GPU process เข้าถึงสิ่งที่ driver ต้องใช้ตรงๆ ไม่ต้องผ่าน sandbox ที่บล็อกจนแครช
+- เติม `NetworkServiceInProcess2` เข้าไปใน list ของ `--disable-features=` เดิม (ห้ามใส่ `--disable-features=` ซ้ำเป็นอีก flag เพราะ Chromium จะใช้แค่ค่าตัวหลังสุด ตัวเดิมจะหายไปด้วย) — ปิด feature flag ที่ทำให้ network service แยกเป็น process ต่างหากซึ่งไม่เสถียรบนบางเครื่อง กลับไปทำงานแบบง่ายกว่าเดิมแทน
+
+ถ้าใส่ 2 flag นี้แล้วยังเจอซ้ำ ลองปิด GPU acceleration ไปเลยด้วย `--use-gl=swiftshader`
+
+**เห็น mouse cursor ค้างจอ โดยเฉพาะตอนกดค้างแล้วลาก (touch-drag) ทั้งที่ตั้ง unclutter-xfixes แล้ว**
+ไม่ใช่ config ผิด — `unclutter-xfixes` เป็นกลไก idle-based ล้วนๆ ตอนลากมี motion event ไหลต่อเนื่องตลอด ไม่มีช่วง idle ให้ซ่อน cursor เลยตลอดทั้ง gesture ดูวิธีแก้ที่ตรงจุดกว่า (Chromium extension inject CSS `cursor:none`) ในข้อ 8.1 — เช็คก่อนว่า extension โหลดจริงหรือไม่ด้วย `ls /home/kiosk-user/.config/kiosk-extensions/hide-cursor/` (ต้องเห็น `manifest.json` และ `hide-cursor.css`) และ `CHROME_FLAGS` ในข้อ 9 มี `--load-extension`/`--disable-extensions-except` ชี้ path ถูกต้อง
 
 **Login วนกลับไปหน้า GDM greeter ไม่เข้า desktop เลย**
 มักเกิดจาก session `openbox` หาไม่เจอ — เช็ค `ls /usr/share/xsessions/openbox.desktop` มีจริงไหม (ถ้าไม่มี แปลว่าแพ็กเกจ `openbox` ยังไม่ถูกติดตั้งสมบูรณ์ ให้รัน `sudo apt install --reinstall openbox`)
