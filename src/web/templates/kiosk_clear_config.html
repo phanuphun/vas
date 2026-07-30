@@ -102,6 +102,25 @@
     </div>
   </div>
 
+  <!-- ── ลบ Chromium แบบ Snap ที่ค้างอยู่ ─────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="px-4 py-4 border-b border-line/8">
+      <div class="flex items-center gap-2 flex-wrap">
+        <h3 class="text-[0.88rem] font-semibold text-ink">Chromium (snap) ค้างอยู่</h3>
+        <span id="chromium-snap-badge" class="zone {{ 'zone-danger' if chromium_snap_installed else 'zone-safe' }}">{{ 'พบ snap ค้างอยู่' if chromium_snap_installed else 'ไม่พบ snap' }}</span>
+      </div>
+      <p class="text-[0.72rem] text-faint mt-0.5">สำหรับลบ Chromium เวอร์ชัน snap ที่อาจค้างจากการติดตั้งแบบเดิม โดยไม่กระทบ Chromium แบบ .deb (PPA xtradeb/apps) ที่ใช้งานอยู่จริง</p>
+    </div>
+    <div class="px-4 py-4 flex flex-col gap-3">
+      <button type="button" onclick="confirmRemoveChromiumSnap()"
+              class="inline-flex items-center gap-1.5 px-3.5 py-2 border border-danger/20 rounded-lg bg-danger text-white text-[0.82rem] font-semibold hover:bg-red-600 transition-colors self-start">
+        <iconify-icon icon="lucide:trash-2" width="13" height="13"></iconify-icon>
+        ลบ Chromium (snap)
+      </button>
+      <p class="text-[0.72rem] text-faint">คำสั่งที่จะรัน: <code class="text-[0.7rem]">snap remove --purge chromium</code> — idempotent ถ้าไม่มี snap chromium ติดตั้งอยู่จะขึ้น "ไม่พบ snap" เฉยๆ ไม่ error</p>
+    </div>
+  </div>
+
 </div>
 
 <!-- ── Confirm Modal ──────────────────────────────────────── -->
@@ -185,6 +204,32 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && window._confirmModal) window._confirmModal.cancel();
   });
+
+  // ── ลบ Chromium (snap) ที่ค้างอยู่ — สิทธิ์เดียวกับเคลียร์ config (root/admin) ───────
+  window.confirmRemoveChromiumSnap = function () {
+    window.showConfirm({
+      title:   "ลบ Chromium (snap) ที่ค้างอยู่?",
+      body:    "จะรัน 'snap remove --purge chromium' — ไม่กระทบ Chromium แบบ .deb ที่ใช้งานอยู่จริง",
+      okLabel: "ลบ snap",
+      onOk: function () { window.doRemoveChromiumSnap(); }
+    });
+  };
+
+  window.doRemoveChromiumSnap = function () {
+    apiRequest("POST", "/api/kiosk/clear-config/chromium-snap").then(function (result) {
+      if (result.ok) {
+        var badge = document.getElementById("chromium-snap-badge");
+        if (badge) {
+          badge.classList.remove("zone-danger");
+          badge.classList.add("zone-safe");
+          badge.textContent = "ไม่พบ snap";
+        }
+        showToast(result.data.removed ? "ลบ Chromium (snap) แล้ว" : "ไม่พบ snap chromium ติดตั้งอยู่", "success");
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
 
   // ── Checkbox → enable ปุ่มเคลียร์ ─────────────────────────────
   window.toggleClearBtn = function () {

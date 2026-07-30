@@ -16,11 +16,13 @@ VAS — Kiosk Mode management
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
 import socket
 import stat
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +49,8 @@ PWD_MODULE = cast("Any | None", pwd_module)
 __all__ = [
     "ACCOUNTS_SERVICE_DIR",
     "CHROME_KIOSK_FLAG_DEFS",
+    "CHROMIUM_HOLD_PACKAGE_NAMES",
+    "CHROMIUM_POLICY_PATHS",
     "DEFAULT_AUTO_RELOAD_MINUTES",
     "DEFAULT_CHROME_FLAGS",
     "DEFAULT_DISPLAY_WAIT_SECONDS",
@@ -57,42 +61,61 @@ __all__ = [
     "DEFAULT_RESTART_DELAY",
     "GNOME_LOCKDOWN_FLAG_DEFS",
     "GNOME_XSESSION_ID",
+    "HIDE_CURSOR_CSS_NAME",
+    "HIDE_CURSOR_MANIFEST_NAME",
+    "KIOSK_EXTENSIONS_DIR_NAME",
     "KIOSK_MANAGED_COMMENT",
+    "OPENBOX_KEYBIND_BLOCKLIST",
     "OPENBOX_XSESSION_ID",
+    "SLEEP_TARGETS",
     "AccountsServiceStatus",
     "GdmAutologinStatus",
     "GnomeLockdownResetResult",
+    "HideCursorExtensionStatus",
     "KioskAutostartStatus",
     "KioskConfigClearResult",
     "KioskLinuxUser",
     "KioskManager",
     "KioskReadiness",
     "KioskSoftwareStatus",
+    "LockdownExtrasResult",
+    "TranslatePolicyStatus",
     "accounts_service_path_for",
     "build_accounts_service_config",
     "build_gdm_autologin_config",
     "build_gnome_autostart_desktop",
     "build_gnome_lockdown_preamble",
+    "build_hide_cursor_css",
+    "build_hide_cursor_manifest",
     "build_kiosk_launch_script",
     "build_openbox_autostart_preamble",
+    "build_translate_policy_content",
     "check_url_reachable",
     "clear_kiosk_config",
     "collect_accounts_service_status",
+    "collect_chromium_hold_status",
     "collect_gdm_autologin_status",
+    "collect_hide_cursor_extension_status",
     "collect_kiosk_autostart_status",
     "collect_kiosk_heartbeat_payload",
     "collect_kiosk_readiness",
     "collect_kiosk_software_status",
+    "collect_sleep_mask_status",
+    "collect_translate_policy_status",
     "get_gdm_autologin_username",
     "kiosk_gnome_autostart_desktop_path",
+    "kiosk_hide_cursor_extension_dir",
     "kiosk_launch_script_path",
     "kiosk_openbox_autostart_path",
     "list_kiosk_linux_users",
     "normalize_chrome_flags",
     "normalize_gnome_lockdown_flags",
+    "openbox_rc_xml_path",
     "print_kiosk_status",
+    "remove_chromium_snap",
     "resolve_kiosk_target_user",
     "stop_kiosk_mode",
+    "strip_openbox_keybinds",
 ]
 
 
@@ -122,6 +145,38 @@ KIOSK_OPENBOX_PREAMBLE_SIGNATURE = "# vending-auto-config: kiosk-openbox-preambl
 DEFAULT_NETWORK_WAIT_SECONDS = 20
 DEFAULT_DISPLAY_WAIT_SECONDS = 10
 DEFAULT_AUTO_RELOAD_MINUTES = 0  # 0 = ปิด (ไม่รีโหลดเป็นระยะ)
+
+# ── Chromium hide-cursor extension (docs ข้อ 8.1) ───────────────────────────
+# Manifest V3 unpacked extension ที่ inject CSS `cursor:none` เข้าทุกหน้าที่ chromium โหลด —
+# ครอบคลุมช่วง touch-drag ที่ unclutter-xfixes (กลไก idle-based ล้วนๆ) เอาไม่อยู่ สร้างอัตโนมัติ
+# ตอนสร้าง kiosk user ใหม่ (ดู KioskManager.create_user) และ sync ซ้ำได้ทุกครั้งที่บันทึก autostart
+# (ดู KioskManager.write_autostart) — ไม่ publish ขึ้น Chrome Web Store ใดๆ โหลดจาก path บนเครื่องตรงๆ
+KIOSK_EXTENSIONS_DIR_NAME = "kiosk-extensions"
+HIDE_CURSOR_EXTENSION_ID = "hide-cursor"
+HIDE_CURSOR_MANIFEST_NAME = "manifest.json"
+HIDE_CURSOR_CSS_NAME = "hide-cursor.css"
+
+# ── Translate Enterprise Policy (docs ข้อ 10.4) ─────────────────────────────
+# --disable-translate/--disable-features=Translate ใน CHROME_KIOSK_FLAG_DEFS ด้านล่างอาจใช้ไม่ได้ผล
+# กับ Chromium เวอร์ชันใหม่ๆ ที่เลิกรองรับ command-line switch พวกนี้ — เขียน Enterprise Policy ซ้ำไว้
+# ทั้ง 2 path เพราะ Chromium แต่ละ build อาจมองหา policy คนละ path กัน (มีไฟล์เกินไม่มีผลเสีย)
+# ผูกกับ toggle "ปิดป๊อปอัพเสนอแปลภาษา" (disable_translate) — ดู KioskManager.set_translate_policy
+CHROMIUM_POLICY_PATHS: "tuple[Path, ...]" = (
+    Path("/etc/chromium/policies/managed/vending-kiosk-policy.json"),
+    Path("/etc/chromium-browser/policies/managed/vending-kiosk-policy.json"),
+)
+_TRANSLATE_POLICY_PATTERN = re.compile(r'"TranslateEnabled"\s*:\s*false', re.IGNORECASE)
+
+# ── ล็อกดาวน์เพิ่มเติมอัตโนมัติ (docs ข้อ 10.1-10.3) ──────────────────────────
+# Apply ทุกครั้งที่กด "บันทึกและสร้าง Automation" ที่หน้า Kiosk ไม่มี toggle ให้ปิด (ต่างจาก
+# CHROME_KIOSK_FLAG_DEFS/GNOME_LOCKDOWN_FLAG_DEFS ที่ผู้ใช้เลือกเปิด/ปิดได้ทีละอย่าง) — ดู
+# KioskManager.apply_lockdown_extras()
+SLEEP_TARGETS: "tuple[str, ...]" = ("sleep.target", "suspend.target", "hibernate.target", "hybrid-sleep.target")
+CHROMIUM_HOLD_PACKAGE_NAMES: "tuple[str, ...]" = ("chromium", "chromium-browser")
+# ปิดคีย์ลัดหลุดออกจาก Openbox — ลบ <keybind> ที่ผูกกับคีย์พวกนี้ออกจาก rc.xml ของ user
+# (ไม่มีผลถ้าไม่มีคีย์บอร์ดต่ออยู่บนตู้จริง ตามที่ docs ระบุไว้ — apply ไปก็ไม่เสียหายอะไร)
+OPENBOX_KEYBIND_BLOCKLIST: "tuple[str, ...]" = ("A-Tab", "W-e")
+_OPENBOX_SYSTEM_RC_XML = Path("/etc/xdg/openbox/rc.xml")
 
 _KIOSK_MIN_UID = 1000
 _KIOSK_MAX_UID = 60000  # ไม่รวม nobody (65534)
@@ -413,6 +468,15 @@ class KioskSoftwareStatus:
     # features/packages/settings.py) ถูกติดตั้งลง path ระบบแล้วหรือยัง — ถ้า False แปลว่า toggle
     # disable_touch_gestures ใน GNOME_LOCKDOWN_FLAG_DEFS จะไม่มีผลอะไรเลยแม้เปิดไว้ก็ตาม
     gesture_lockdown_installed: bool = False
+    # เพิ่มตาม docs/manual-kiosk-openbox-chromium-xorg-guide.md ข้อ 4-5 — เครื่องมือเสริม Openbox
+    # (package id ตรงกับ features/packages/settings.py: obconf, unclutter-xfixes, xterm)
+    obconf_installed: bool = False
+    unclutter_xfixes_installed: bool = False
+    xterm_installed: bool = False
+    # แยกว่า chromium ติดตั้งแบบ .deb (PPA xtradeb/apps) หรือมี snap ค้างอยู่ด้วย — docs ข้อ 5
+    # แนะนำ .deb (boot เร็วกว่า, ไม่มี snap sandbox บล็อกโฟลเดอร์/auto-refresh รีสตาร์ทเอง)
+    chromium_is_deb: bool = False
+    chromium_is_snap: bool = False
 
 
 @dataclass(frozen=True)
@@ -451,6 +515,40 @@ class KioskConfigClearResult:
     gnome_lockdown_skip_reason: "str | None"
 
 
+@dataclass(frozen=True)
+class HideCursorExtensionStatus:
+    """สถานะไฟล์ของ Chromium hide-cursor extension (docs ข้อ 8.1) ต่อ user หนึ่งคน —
+    ใช้ทั้งในหน้า Kiosk (Config Files) และหน้า Extension คีออส (/kiosk/extensions)"""
+    home: Path
+    manifest_exists: bool
+    css_exists: bool
+
+    @property
+    def complete(self) -> bool:
+        return self.manifest_exists and self.css_exists
+
+
+@dataclass(frozen=True)
+class TranslatePolicyStatus:
+    """สถานะ Translate Enterprise Policy (docs ข้อ 10.4) — system-wide ไม่ผูกกับ user
+    ตรวจทั้ง 2 path ใน CHROMIUM_POLICY_PATHS เพราะ Chromium แต่ละ build อ่านคนละที่กัน"""
+    paths: "tuple[Path, ...]"
+    present_paths: "tuple[str, ...]"
+
+    @property
+    def all_present(self) -> bool:
+        return len(self.present_paths) == len(self.paths)
+
+
+@dataclass(frozen=True)
+class LockdownExtrasResult:
+    """ผลลัพธ์ของ KioskManager.apply_lockdown_extras() — ล็อกดาวน์เพิ่มเติมที่ apply
+    อัตโนมัติทุกครั้งที่บันทึก autostart ไม่มี toggle ให้ปิด (ดูคอมเมนต์ที่ SLEEP_TARGETS ด้านบน)"""
+    sleep_masked: bool
+    chromium_held: bool
+    openbox_keybinds_removed: bool
+
+
 # ---------------------------------------------------------------------------
 # Manager — write actions (ต้องรันเป็น root บนเครื่องจริง)
 # ---------------------------------------------------------------------------
@@ -463,6 +561,11 @@ class KioskManager:
         self.runner.run(["useradd", "-m", "-c", KIOSK_MANAGED_COMMENT, "-s", "/bin/bash", username])
         if extra_groups:
             self.runner.run(["usermod", "-aG", ",".join(extra_groups), username])
+        # สร้าง Chromium hide-cursor extension (docs ข้อ 8.1) ให้อัตโนมัติทันทีที่สร้าง user —
+        # ผู้ใช้ไม่ต้องมากดสร้างเองที่หน้า Extension คีออส (best-effort: ถ้า useradd รันเป็น
+        # dry-run/dev-fake home จะ fallback เป็น /home/<username> ด้วย _resolve_home_for_new_user)
+        home = _resolve_home_for_new_user(username)
+        self.write_hide_cursor_extension(home, username)
 
     def delete_user(self, username: str) -> None:
         self.runner.run(["userdel", "-r", username])
@@ -506,8 +609,17 @@ class KioskManager:
         auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES,
         gnome_lockdown_flags: "dict[str, bool] | None" = None,
     ) -> None:
+        # Openbox เท่านั้นที่ผูก hide-cursor extension เข้า CHROME_FLAGS ผ่าน --load-extension —
+        # sync ไฟล์ extension ให้มีอยู่จริงก่อนเสมอ (เผื่อ user นี้ถูกสร้างมาก่อนฟีเจอร์นี้ หรือ
+        # ไฟล์หายไปเพราะเหตุใดก็ตาม) ไม่ต้องรอให้ผู้ใช้ไปกดสร้างเองที่หน้า Extension คีออสก่อน
+        extension_dir: "Path | None" = None
+        if session_type == "openbox":
+            self.write_hide_cursor_extension(home, username)
+            extension_dir = kiosk_hide_cursor_extension_dir(home)
+
         script_content = build_kiosk_launch_script(
             url, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes,
+            extension_dir=extension_dir,
         )
 
         if session_type == "openbox":
@@ -550,6 +662,91 @@ class KioskManager:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+    def write_hide_cursor_extension(self, home: Path, username: str) -> None:
+        """สร้าง/เขียนทับ Chromium hide-cursor extension (docs ข้อ 8.1) — inject CSS
+        `cursor:none` เข้าทุกหน้าที่ chromium โหลด ครอบคลุมกรณี touch-drag ที่ unclutter-xfixes
+        (กลไก idle-based ล้วนๆ) เอาไม่อยู่ เรียกอัตโนมัติทั้งตอนสร้าง kiosk user ใหม่
+        (create_user) และทุกครั้งที่บันทึก autostart แบบ openbox (write_autostart) —
+        idempotent เขียนทับค่าเดิมได้เสมอไม่มีผลเสีย"""
+        ext_dir = kiosk_hide_cursor_extension_dir(home)
+        self._write_file(ext_dir / HIDE_CURSOR_MANIFEST_NAME, build_hide_cursor_manifest())
+        self._write_file(ext_dir / HIDE_CURSOR_CSS_NAME, build_hide_cursor_css())
+        _chown_to_user(ext_dir.parent, username)
+        _chown_to_user(ext_dir, username)
+        _chown_to_user(ext_dir / HIDE_CURSOR_MANIFEST_NAME, username)
+        _chown_to_user(ext_dir / HIDE_CURSOR_CSS_NAME, username)
+
+    def set_translate_policy(
+        self, disabled: bool, paths: "tuple[Path, ...]" = CHROMIUM_POLICY_PATHS,
+    ) -> None:
+        """เขียน/ลบ Chromium Enterprise Policy ปิด Translate (docs ข้อ 10.4) — เขียนซ้ำทั้ง 2
+        path เผื่อ build ไหนอ่าน policy คนละที่กัน ผูกกับ toggle "ปิดป๊อปอัพเสนอแปลภาษา"
+        (disable_translate ใน CHROME_KIOSK_FLAG_DEFS) เรียกจาก /api/kiosk/autostart ทุกครั้งที่
+        บันทึก — ถ้า toggle ปิดอยู่จะลบไฟล์ policy ทั้งคู่ (ไฟล์นี้ VAS เขียนเองล้วนๆ ไม่ได้แชร์
+        กับ policy อื่นของระบบ จึงลบทิ้งได้ตรงๆ ไม่ต้องเขียน TranslateEnabled=true ทับ)"""
+        content = build_translate_policy_content()
+        for path in paths:
+            if disabled:
+                self._write_file(path, content)
+            else:
+                self._remove_file(path)
+
+    def apply_lockdown_extras(self, home: Path, username: str) -> LockdownExtrasResult:
+        """ล็อกดาวน์เพิ่มเติมอัตโนมัติ (docs ข้อ 10.1-10.3) — apply ทุกครั้งที่บันทึก autostart
+        ไม่มี toggle ให้ปิด (ดูคอมเมนต์ที่ SLEEP_TARGETS ด้านบน)"""
+        return LockdownExtrasResult(
+            sleep_masked=self._mask_sleep_targets(),
+            chromium_held=self._hold_chromium_packages(),
+            openbox_keybinds_removed=self.disable_openbox_escape_keybinds(home, username),
+        )
+
+    def _mask_sleep_targets(self) -> bool:
+        """systemctl mask sleep/suspend/hibernate/hybrid-sleep — กันเครื่อง sleep เอง
+        (สำคัญมากสำหรับตู้ที่เปิด 24 ชม., docs ข้อ 10.1) check=False เพราะ target บางตัวอาจไม่มี
+        อยู่จริงบนบางเครื่อง ไม่ควรทำให้ทั้ง flow ล้มเพราะ target เดียว mask ไม่ได้"""
+        print(f"systemctl mask {' '.join(SLEEP_TARGETS)}")
+        if self.runner.dry_run:
+            return True
+        self.runner.run(["systemctl", "mask", *SLEEP_TARGETS], check=False)
+        return True
+
+    def _hold_chromium_packages(self) -> bool:
+        """apt-mark hold chromium — กัน chromium อัปเดตเองระหว่างใช้งาน (docs ข้อ 10.2) hold ทั้ง
+        2 ชื่อ package (chromium จาก PPA .deb / chromium-browser ถ้าเครื่องเก่ายังใช้ transitional
+        package) เผื่อไม่รู้ว่าเครื่องนี้ติดตั้งด้วยชื่อไหน — apt-mark ไม่ error ถ้า package
+        ไม่มีอยู่จริงบนเครื่อง (แค่ print แจ้งเฉยๆ) จึง hold รวมกันในคำสั่งเดียวได้อย่างปลอดภัย"""
+        print(f"apt-mark hold {' '.join(CHROMIUM_HOLD_PACKAGE_NAMES)}")
+        if self.runner.dry_run:
+            return True
+        self.runner.run(["apt-mark", "hold", *CHROMIUM_HOLD_PACKAGE_NAMES], check=False)
+        return True
+
+    def disable_openbox_escape_keybinds(self, home: Path, username: str) -> bool:
+        """ลบ <keybind> ที่ผูกกับ Alt+Tab/Super+E ออกจาก rc.xml ของ user (docs ข้อ 10.3) —
+        ไม่มีผลถ้าไม่มีคีย์บอร์ดต่ออยู่บนตู้จริงตามที่ docs ระบุ แต่ apply ไปก็ไม่เสียหายอะไร
+        ถ้า user ยังไม่เคยมี rc.xml ของตัวเอง จะ copy จาก system default
+        (/etc/xdg/openbox/rc.xml) มาก่อนแล้วค่อยลบ keybind — ถ้าไม่มีทั้งคู่ (Openbox ยังไม่ได้
+        ติดตั้ง) จะ skip เฉยๆ ไม่สร้างไฟล์ปลอมขึ้นมาเอง คืน True ถ้ามีการเขียนไฟล์จริง"""
+        user_rc = openbox_rc_xml_path(home)
+        if user_rc.exists():
+            existing = user_rc.read_text(encoding="utf-8")
+        elif _OPENBOX_SYSTEM_RC_XML.exists():
+            existing = _OPENBOX_SYSTEM_RC_XML.read_text(encoding="utf-8")
+        else:
+            return False
+        updated = strip_openbox_keybinds(existing)
+        if updated == existing and user_rc.exists():
+            return False
+        print(f"write {user_rc.as_posix()}")
+        if self.runner.dry_run:
+            print(updated.rstrip())
+            return True
+        user_rc.parent.mkdir(parents=True, exist_ok=True)
+        user_rc.write_text(updated, encoding="utf-8")
+        _chown_to_user(user_rc, username)
+        _chown_to_user(user_rc.parent, username)
+        return True
 
     def remove_autostart(self, home: Path) -> None:
         """ลบไฟล์ autostart ที่ VAS อาจเคยเขียนไว้ทั้งหมด — ทั้ง GNOME (.desktop+script)
@@ -696,6 +893,19 @@ def _chown_to_user(path: Path, username: str) -> None:
         pass
 
 
+def _resolve_home_for_new_user(username: str) -> Path:
+    """หา home directory ของ user ที่เพิ่งสร้างผ่าน useradd -m — ใช้ pwd lookup จริงถ้าทำได้
+    (กรณี useradd รันจริงบนเครื่อง home จะมีอยู่แล้วทันทีเพราะ useradd -m เป็น synchronous)
+    fallback เป็น /home/<username> ตอน dry-run/dev-fake ที่ยังไม่มี user จริงในระบบให้ pwd หาเจอ
+    (ตรงกับ default home directory ของ useradd บน Ubuntu)"""
+    if PWD_MODULE is not None:
+        try:
+            return Path(cast(str, PWD_MODULE.getpwnam(username).pw_dir))
+        except KeyError:
+            pass
+    return Path(f"/home/{username}")
+
+
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
@@ -714,6 +924,14 @@ def kiosk_gnome_autostart_desktop_path(home: Path) -> Path:
 
 def kiosk_launch_script_path(home: Path) -> Path:
     return home / ".config" / "vending-auto-setup" / "kiosk-launch.sh"
+
+
+def kiosk_hide_cursor_extension_dir(home: Path) -> Path:
+    return home / ".config" / KIOSK_EXTENSIONS_DIR_NAME / HIDE_CURSOR_EXTENSION_ID
+
+
+def openbox_rc_xml_path(home: Path) -> Path:
+    return home / ".config" / "openbox" / "rc.xml"
 
 
 # ---------------------------------------------------------------------------
@@ -854,12 +1072,62 @@ def build_openbox_autostart_preamble(
     )
 
 
+def build_hide_cursor_manifest() -> str:
+    """Manifest V3 ของ Chromium hide-cursor extension (docs ข้อ 8.1) — content script
+    inject hide-cursor.css เข้าทุกหน้า ทุก frame ตั้งแต่ document_start"""
+    manifest = {
+        "manifest_version": 3,
+        "name": "Kiosk Hide Cursor",
+        "version": "1.0",
+        "content_scripts": [
+            {
+                "matches": ["<all_urls>"],
+                "css": ["hide-cursor.css"],
+                "run_at": "document_start",
+                "all_frames": True,
+            }
+        ],
+    }
+    return json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+
+
+def build_hide_cursor_css() -> str:
+    """CSS ที่ซ่อน mouse cursor ทุก element รวม pseudo-element — ครอบคลุมช่วง touch-drag
+    ที่ unclutter-xfixes (idle-based ล้วนๆ) เอาไม่อยู่ (docs ข้อ 8.1)"""
+    return "*, *::before, *::after {\n  cursor: none !important;\n}\n"
+
+
+def build_translate_policy_content() -> str:
+    """Chromium Enterprise Policy ปิด Translate (docs ข้อ 10.4) — ใช้แทน
+    --disable-translate/--disable-features=Translate ที่ Chromium รุ่นใหม่ๆ อาจเลิกรองรับ"""
+    return json.dumps({"TranslateEnabled": False}, indent=2) + "\n"
+
+
+def strip_openbox_keybinds(
+    content: str, blocked_keys: "Sequence[str]" = OPENBOX_KEYBIND_BLOCKLIST,
+) -> str:
+    """ลบ <keybind key="..."> ...</keybind> ที่ผูกกับคีย์ใน blocked_keys ออกจากเนื้อหา rc.xml
+    (docs ข้อ 10.3) — ใช้ regex แบบ non-greedy + DOTALL แทนการ parse XML เต็มรูปแบบ เพราะ
+    Openbox rc.xml ใช้ default namespace (xmlns="http://openbox.org/3.4/rc") ที่
+    xml.etree.ElementTree มักเขียนกลับมาเป็น ns0: prefix ผิดเพี้ยนจากต้นฉบับถ้า serialize ใหม่
+    ทั้งไฟล์ — regex ตรงจุดกว่าและกันความเสี่ยงที่จะทำไฟล์ config ของ user อื่นเพี้ยนไปทั้งไฟล์"""
+    result = content
+    for key in blocked_keys:
+        pattern = re.compile(
+            r'<keybind\s+key="' + re.escape(key) + r'"\s*>.*?</keybind>\s*',
+            re.DOTALL,
+        )
+        result = pattern.sub("", result)
+    return result
+
+
 def build_kiosk_launch_script(
     url: str,
     restart_enabled: bool,
     restart_delay: int,
     chrome_flags: "dict[str, bool] | None" = None,
     auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES,
+    extension_dir: "Path | None" = None,
 ) -> str:
     flags = normalize_chrome_flags(chrome_flags)
     enabled_defs = [item for item in CHROME_KIOSK_FLAG_DEFS if flags.get(cast(str, item["key"]), False)]
@@ -870,6 +1138,13 @@ def build_kiosk_launch_script(
     feature_names = [name for item in enabled_defs for name in cast("Sequence[str]", item["features"])]
     if feature_names:
         flag_tokens.append("--disable-features=" + ",".join(feature_names))
+    # --load-extension/--disable-extensions-except: โหลด hide-cursor extension (docs ข้อ 8.1) —
+    # ไม่ใช่ toggle ใน CHROME_KIOSK_FLAG_DEFS เพราะบังคับใช้เสมอเมื่อมี extension_dir ส่งมา
+    # (เฉพาะ session แบบ openbox — ดู KioskManager.write_autostart)
+    if extension_dir is not None:
+        ext_path = extension_dir.as_posix()
+        flag_tokens.append(f"--load-extension={ext_path}")
+        flag_tokens.append(f"--disable-extensions-except={ext_path}")
     command = "chromium " + " ".join(flag_tokens) + " " + shlex.quote(url)
     # auto_reload_minutes: ปิด chromium เองเป็นระยะแม้ไม่ crash จริง ให้ restart loop ด้านล่าง
     # เปิดใหม่ให้ — เป็นตาข่ายรองสุดท้ายกันเคส client-side exception ที่ไม่ทำให้ chromium
@@ -1170,16 +1445,130 @@ _GESTURE_LOCKDOWN_METADATA_PATH = Path(
 )
 
 
+def _chromium_snap_installed() -> bool:
+    """เช็คว่ามี Chromium ติดตั้งแบบ snap ค้างอยู่บนเครื่องไหม (docs ข้อ 5 ขั้นตอนที่ 12
+    Troubleshooting) — ใช้ 'snap list chromium' ตรงๆ แทน parse output ของ which() เพราะ
+    /snap/bin อาจไม่อยู่ใน PATH ของ process ที่รัน VAS server เสมอไป"""
+    try:
+        result = subprocess.run(
+            ["snap", "list", "chromium"], check=False, text=True,
+            capture_output=True, timeout=5,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def _chromium_deb_installed() -> bool:
+    """เช็คว่า chromium ติดตั้งแบบ .deb จริง (ผ่าน PPA xtradeb/apps ตาม package id 'chromium'
+    ใน features/packages/settings.py) — ใช้ dpkg-query เช็ค Status field ตรงๆ"""
+    try:
+        result = subprocess.run(
+            ["dpkg-query", "-W", "-f=${Status}", "chromium"], check=False, text=True,
+            capture_output=True, timeout=5,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and "install ok installed" in result.stdout
+
+
+def remove_chromium_snap(runner: CommandRunner) -> bool:
+    """ลบ chromium snap ที่ค้างอยู่ — บั๊กจริงที่ผู้ใช้เจอ: เครื่องที่ clone OS มาจากเครื่องที่เคย
+    ติดตั้ง chromium แบบ snap มาก่อน (หรือกด uninstall ผ่านหน้า "โปรแกรมเพิ่มเติม" ตอน chromium
+    ยังเป็น snap) apt purge เฉยๆ ไม่เคยเรียก 'snap remove' ให้เอง (ดู
+    test_chromium_uninstall_removes_snap_not_just_apt_transitional_package ใน
+    tests/test_packages_settings.py) — ใช้กับเมนูเฉพาะกิจ "เคลียร์ค่า Kiosk" >
+    "Chromium (snap) ค้างอยู่" idempotent: เรียกซ้ำได้เสมอแม้ไม่มี snap ติดตั้งอยู่แล้ว
+    (เช็คก่อนด้วย _chromium_snap_installed() แล้วค่อยเรียก snap remove แบบ check=False)
+    คืน True เฉพาะตอนที่มี snap ติดตั้งอยู่จริงและสั่งลบไป (หรือ dry-run) — False ถ้าไม่มีอะไรให้ลบ"""
+    if not _chromium_snap_installed():
+        return False
+    print("snap remove --purge chromium")
+    if runner.dry_run:
+        return True
+    runner.run(["snap", "remove", "--purge", "chromium"], check=False)
+    return True
+
+
 def collect_kiosk_software_status() -> KioskSoftwareStatus:
     if dev_fake_installed():
-        return KioskSoftwareStatus(openbox_installed=True, chromium_installed=True, gesture_lockdown_installed=True)
+        return KioskSoftwareStatus(
+            openbox_installed=True, chromium_installed=True, gesture_lockdown_installed=True,
+            obconf_installed=True, unclutter_xfixes_installed=True, xterm_installed=True,
+            chromium_is_deb=True, chromium_is_snap=False,
+        )
 
     import shutil as _shutil
     return KioskSoftwareStatus(
         openbox_installed=_shutil.which("openbox") is not None,
         chromium_installed=_shutil.which("chromium-browser") is not None or _shutil.which("chromium") is not None,
         gesture_lockdown_installed=_path_exists(_GESTURE_LOCKDOWN_METADATA_PATH),
+        obconf_installed=_shutil.which("obconf") is not None,
+        unclutter_xfixes_installed=_shutil.which("unclutter-xfixes") is not None,
+        xterm_installed=_shutil.which("xterm") is not None,
+        chromium_is_deb=_chromium_deb_installed(),
+        chromium_is_snap=_chromium_snap_installed(),
     )
+
+
+def collect_hide_cursor_extension_status(home: Path) -> HideCursorExtensionStatus:
+    if dev_fake_installed():
+        return HideCursorExtensionStatus(home=home, manifest_exists=True, css_exists=True)
+    ext_dir = kiosk_hide_cursor_extension_dir(home)
+    return HideCursorExtensionStatus(
+        home=home,
+        manifest_exists=_path_exists(ext_dir / HIDE_CURSOR_MANIFEST_NAME),
+        css_exists=_path_exists(ext_dir / HIDE_CURSOR_CSS_NAME),
+    )
+
+
+def collect_translate_policy_status(
+    paths: "tuple[Path, ...]" = CHROMIUM_POLICY_PATHS,
+) -> TranslatePolicyStatus:
+    if dev_fake_installed():
+        return TranslatePolicyStatus(paths=paths, present_paths=tuple(p.as_posix() for p in paths))
+    present = tuple(p.as_posix() for p in paths if _translate_policy_applied(p))
+    return TranslatePolicyStatus(paths=paths, present_paths=present)
+
+
+def _translate_policy_applied(path: Path) -> bool:
+    content = _read_or_none(path)
+    if content is None:
+        return False
+    return _TRANSLATE_POLICY_PATTERN.search(content) is not None
+
+
+def collect_sleep_mask_status(targets: "tuple[str, ...]" = SLEEP_TARGETS) -> bool:
+    """เช็คว่า sleep/suspend/hibernate/hybrid-sleep ถูก mask ครบทุก target ไหม (docs ข้อ 10.1) —
+    'systemctl is-enabled' ของ target ที่ mask อยู่จะรายงานสถานะเป็น 'masked'"""
+    if dev_fake_installed():
+        return True
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-enabled", *targets], check=False, text=True,
+            capture_output=True, timeout=5,
+        )
+    except OSError:
+        return False
+    lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+    return len(lines) == len(targets) and all(ln == "masked" for ln in lines)
+
+
+def collect_chromium_hold_status(names: "tuple[str, ...]" = CHROMIUM_HOLD_PACKAGE_NAMES) -> bool:
+    """เช็คว่า chromium ถูก apt-mark hold อยู่แล้วไหม (docs ข้อ 10.2) — ถือว่า 'hold แล้ว' ถ้ามี
+    อย่างน้อย 1 ใน 2 ชื่อ package (chromium/chromium-browser) อยู่ใน apt-mark showhold เพราะเครื่อง
+    หนึ่งควรมีแค่ชื่อใดชื่อหนึ่งติดตั้งจริง"""
+    if dev_fake_installed():
+        return True
+    try:
+        result = subprocess.run(
+            ["apt-mark", "showhold"], check=False, text=True,
+            capture_output=True, timeout=5,
+        )
+    except OSError:
+        return False
+    held = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    return any(name in held for name in names)
 
 
 def collect_kiosk_readiness(

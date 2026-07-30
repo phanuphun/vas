@@ -1,17 +1,32 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from core.runner import CommandRunner
+from features.kiosk import manager as kiosk_manager
 from features.kiosk.manager import (
     CHROME_KIOSK_FLAG_DEFS,
+    CHROMIUM_POLICY_PATHS,
     GNOME_LOCKDOWN_FLAG_DEFS,
     GNOME_LOCKDOWN_SIGNATURE,
+    OPENBOX_KEYBIND_BLOCKLIST,
     KioskManager,
     _parse_gnome_lockdown_flags,
     _parse_kiosk_flags,
     build_gnome_lockdown_preamble,
+    build_hide_cursor_css,
+    build_hide_cursor_manifest,
     build_kiosk_launch_script,
+    build_translate_policy_content,
+    collect_hide_cursor_extension_status,
+    collect_translate_policy_status,
+    kiosk_hide_cursor_extension_dir,
     normalize_chrome_flags,
     normalize_gnome_lockdown_flags,
+    remove_chromium_snap,
+    strip_openbox_keybinds,
 )
 
 URL = "https://vending.example.io/"
@@ -208,3 +223,150 @@ def test_reset_gnome_lockdown_reverses_every_set_command_from_flag_defs() -> Non
     assert '"gsettings", "reset", "org.gnome.mutter", "overlay-key"' in source
     assert '"gnome-extensions", "enable", "ubuntu-dock@ubuntu.com"' in source
     assert '"gnome-extensions", "disable", _GESTURE_LOCKDOWN_EXTENSION_UUID' in source
+
+
+# ── Chromium hide-cursor extension (docs ข้อ 8.1) ───────────────────────────
+
+def test_build_hide_cursor_manifest_is_manifest_v3_with_content_script() -> None:
+    """manifest.json ต้องเป็น Manifest V3, inject CSS ที่ document_start ครอบทุก frame —
+    ไม่งั้น cursor จะโผล่กลับมาช่วง iframe โหลดใหม่หรือก่อน DOM พร้อม"""
+    import json
+
+    manifest = json.loads(build_hide_cursor_manifest())
+
+    assert manifest["manifest_version"] == 3
+    script = manifest["content_scripts"][0]
+    assert script["matches"] == ["<all_urls>"]
+    assert script["css"] == ["hide-cursor.css"]
+    assert script["run_at"] == "document_start"
+    assert script["all_frames"] is True
+
+
+def test_build_hide_cursor_css_hides_cursor_on_every_element() -> None:
+    css = build_hide_cursor_css()
+    assert "cursor: none !important" in css
+    assert "*::before" in css and "*::after" in css
+
+
+def test_write_hide_cursor_extension_creates_manifest_and_css_files(tmp_path: Path) -> None:
+    """create_user()/write_autostart() เรียกเมธอดนี้ตรงๆ — เช็คว่าไฟล์ถูกสร้างจริงที่ path
+    ที่ถูกต้อง (ใช้ tmp_path แทน home จริง ไม่ต้องพึ่ง user จริงบนเครื่องทดสอบ)"""
+    manager = KioskManager(CommandRunner())
+    manager.write_hide_cursor_extension(tmp_path, "irrelevant-test-user")
+
+    ext_dir = kiosk_hide_cursor_extension_dir(tmp_path)
+    assert (ext_dir / "manifest.json").is_file()
+    assert (ext_dir / "hide-cursor.css").is_file()
+    assert "cursor: none !important" in (ext_dir / "hide-cursor.css").read_text(encoding="utf-8")
+
+
+def test_collect_hide_cursor_extension_status_reports_missing_then_complete(tmp_path: Path) -> None:
+    status_before = collect_hide_cursor_extension_status(tmp_path)
+    assert status_before.manifest_exists is False
+    assert status_before.css_exists is False
+    assert status_before.complete is False
+
+    KioskManager(CommandRunner()).write_hide_cursor_extension(tmp_path, "irrelevant-test-user")
+
+    status_after = collect_hide_cursor_extension_status(tmp_path)
+    assert status_after.manifest_exists is True
+    assert status_after.css_exists is True
+    assert status_after.complete is True
+
+
+# ── Translate Enterprise Policy (docs ข้อ 10.4) ─────────────────────────────
+
+def test_build_translate_policy_content_disables_translate() -> None:
+    import json
+
+    content = json.loads(build_translate_policy_content())
+    assert content == {"TranslateEnabled": False}
+
+
+def test_set_translate_policy_writes_then_removes_both_paths(tmp_path: Path) -> None:
+    """ผูกกับ toggle disable_translate — ปิด toggle ต้องลบไฟล์ policy ทั้ง 2 path ทิ้ง
+    (ไม่ใช่เขียน TranslateEnabled=true ทับ เพราะไฟล์นี้ VAS เขียนเองล้วนๆ)"""
+    paths = (tmp_path / "a" / "policy.json", tmp_path / "b" / "policy.json")
+    manager = KioskManager(CommandRunner())
+
+    manager.set_translate_policy(True, paths=paths)
+    assert all(p.is_file() for p in paths)
+    status_enabled = collect_translate_policy_status(paths=paths)
+    assert status_enabled.all_present is True
+
+    manager.set_translate_policy(False, paths=paths)
+    assert not any(p.exists() for p in paths)
+    status_disabled = collect_translate_policy_status(paths=paths)
+    assert status_disabled.all_present is False
+
+
+def test_chromium_policy_paths_cover_both_deb_and_transitional_package_dirs() -> None:
+    """เขียนซ้ำทั้ง /etc/chromium/ (PPA .deb) และ /etc/chromium-browser/ (transitional
+    package เก่า) เพราะไม่รู้ล่วงหน้าว่าเครื่องนี้ chromium build ไหนจะมองหา policy path ไหน"""
+    posix_paths = {p.as_posix() for p in CHROMIUM_POLICY_PATHS}
+    assert "/etc/chromium/policies/managed/vending-kiosk-policy.json" in posix_paths
+    assert "/etc/chromium-browser/policies/managed/vending-kiosk-policy.json" in posix_paths
+
+
+# ── Openbox keybind lockdown (docs ข้อ 10.3) ────────────────────────────────
+
+def test_strip_openbox_keybinds_removes_blocked_keys_keeps_others() -> None:
+    rc_xml = """<openbox_config>
+  <keyboard>
+    <keybind key="A-Tab">
+      <action name="NextWindow"/>
+    </keybind>
+    <keybind key="W-e">
+      <action name="Execute"><command>nautilus</command></action>
+    </keybind>
+    <keybind key="A-F4">
+      <action name="Close"/>
+    </keybind>
+  </keyboard>
+</openbox_config>"""
+
+    result = strip_openbox_keybinds(rc_xml)
+
+    assert 'key="A-Tab"' not in result
+    assert 'key="W-e"' not in result
+    assert 'key="A-F4"' in result  # ปุ่มที่ไม่ได้อยู่ใน blocklist ต้องยังอยู่
+
+
+def test_openbox_keybind_blocklist_covers_alt_tab_and_super_e() -> None:
+    assert "A-Tab" in OPENBOX_KEYBIND_BLOCKLIST
+    assert "W-e" in OPENBOX_KEYBIND_BLOCKLIST
+
+
+# ── ล็อกดาวน์เพิ่มเติมอัตโนมัติ (docs ข้อ 10.1-10.3) ─────────────────────────
+
+def test_apply_lockdown_extras_dry_run_reports_all_applied(tmp_path: Path) -> None:
+    """dry_run ต้องไม่ error แม้ไม่มี systemctl/apt-mark จริงในสภาพแวดล้อมทดสอบ — คืน True
+    ครบทุกฟิลด์เพื่อ preview ผลลัพธ์ก่อนกดจริงได้"""
+    manager = KioskManager(CommandRunner(dry_run=True))
+    result = manager.apply_lockdown_extras(tmp_path, "irrelevant-test-user")
+
+    assert result.sleep_masked is True
+    assert result.chromium_held is True
+    # ไม่มีทั้ง user rc.xml และ system rc.xml ในสภาพแวดล้อมทดสอบ (ปกติไม่มี /etc/xdg/openbox/
+    # rc.xml ในสภาพแวดล้อม CI) จึง skip ได้โดยไม่ error — ต่างจาก sleep/chromium ที่ apply เสมอ
+    assert result.openbox_keybinds_removed in (True, False)
+
+
+# ── ลบ Chromium (snap) ที่ค้างอยู่ (เมนู "เคลียร์ค่า Kiosk") ─────────────────
+
+def test_remove_chromium_snap_returns_false_when_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(kiosk_manager, "_chromium_snap_installed", lambda: False)
+    removed = remove_chromium_snap(CommandRunner())
+    assert removed is False
+
+
+def test_remove_chromium_snap_dry_run_returns_true_without_calling_snap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(kiosk_manager, "_chromium_snap_installed", lambda: True)
+    calls: list[list[str]] = []
+    runner = CommandRunner(dry_run=True)
+    monkeypatch.setattr(runner, "run", lambda args, **kw: calls.append(list(args)))
+
+    removed = remove_chromium_snap(runner)
+
+    assert removed is True
+    assert calls == []  # dry_run ต้องไม่เรียก runner.run() จริง

@@ -48,6 +48,28 @@ def test_gesture_lockdown_install_script_picks_v9_for_shell_45_plus() -> None:
     assert _GESTURE_LOCKDOWN_SYSTEM_DIR in script
 
 
+def test_kiosk_accessory_packages_registered() -> None:
+    """obconf/unclutter-xfixes/xterm ต้องอยู่ใน PACKAGES หมวด kiosk ครบตาม
+    docs/manual-kiosk-openbox-chromium-xorg-guide.md ข้อ 4 (เครื่องมือเสริม Openbox)"""
+    for pkg_id in ("obconf", "unclutter-xfixes", "xterm"):
+        assert pkg_id in _PKG_MAP, f"missing package: {pkg_id}"
+        pkg = _PKG_MAP[pkg_id]
+        assert pkg["category"] == "kiosk"
+        assert callable(pkg["check"])
+        assert len(pkg["install_cmds"]) >= 1
+        assert len(pkg["uninstall_cmds"]) == 1
+        assert pkg["install_cmds"][-1][:3] == ["apt-get", "install", "-y"]
+        assert pkg["uninstall_cmds"][0][:3] == ["apt-get", "purge", "-y"]
+
+
+def test_kiosk_accessory_packages_check_false_when_not_installed() -> None:
+    """เครื่องทดสอบ/CI ไม่มี obconf/unclutter-xfixes/xterm ติดตั้งอยู่จริง — check() ต้องคืน
+    False ไม่ throw (ใช้ _which_check ทั่วไปเหมือน package อื่นๆ)"""
+    for pkg_id in ("obconf", "unclutter-xfixes", "xterm"):
+        installed, _version = _PKG_MAP[pkg_id]["check"]()
+        assert installed is False
+
+
 def test_vendored_extension_files_exist_for_both_shell_versions() -> None:
     """กันเผลอลบ/ลืม commit ไฟล์ vendor asset — ทั้ง v5 (Shell 3.36-44) และ v9 (Shell 45-47)
     ต้องมี extension.js + metadata.json ครบทั้งคู่ เพราะ install script (ข้อข้างบน) เลือกใช้

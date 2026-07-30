@@ -1,0 +1,196 @@
+{% extends base_template %}
+{% block page_title %}Extension คีออส — VAS{% endblock %}
+{% block header_title %}Extension คีออส{% endblock %}
+
+{% block content %}
+<style>
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+  .live-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+</style>
+
+<div class="flex flex-col gap-4">
+
+  <!-- ── 1. Page Header ─────────────────────────────────────────── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · หลัก</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">Extension คีออส</h1>
+    <p class="text-[0.82rem] text-muted mt-1">จัดการ Chromium Extension ที่ซ่อน mouse cursor (ครอบคลุมช่วง touch-drag ที่ unclutter-xfixes เอาไม่อยู่) ต่อ user แต่ละคน</p>
+  </div>
+
+  <!-- ── เลือก user ──────────────────────────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-center gap-3 flex-wrap">
+    <label class="text-[0.8rem] font-semibold text-ink" for="ext-user-select">เลือก User</label>
+    <select id="ext-user-select" onchange="onExtUserChange()"
+            class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition">
+      {% for u in kiosk_users %}
+      <option value="{{ u.username }}" data-home="{{ u.home }}" data-managed="{{ 'true' if u.managed_by_vas else 'false' }}" {{ 'selected' if u.username == default_kiosk_username else '' }}>
+        {{ u.username }}{{ ' (สร้างจาก VAS)' if u.managed_by_vas else '' }}
+      </option>
+      {% endfor %}
+      {% if not kiosk_users %}
+      <option value="" disabled selected>— ไม่พบ kiosk user บนเครื่องนี้ —</option>
+      {% endif %}
+    </select>
+    <div class="ml-auto flex items-center gap-1.5 text-[0.72rem] text-faint">
+      <span class="w-1.5 h-1.5 rounded-full bg-safe live-dot"></span> รีเฟรชสถานะอัตโนมัติทุก 2 วิ
+    </div>
+  </div>
+
+  <!-- ── สถานะไฟล์ ────────────────────────────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="px-4 py-4 border-b border-line/8 flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h2 class="text-[0.88rem] font-semibold text-ink">สถานะไฟล์ Extension — <span id="ext-status-username">{{ default_kiosk_username or '—' }}</span></h2>
+        <code id="ext-status-path" class="text-[0.72rem] text-faint block mt-0.5">{{ default_kiosk_home }}/.config/kiosk-extensions/hide-cursor/</code>
+      </div>
+      <button type="button" onclick="refreshExtStatus()" title="รีเฟรชตอนนี้"
+              class="w-8 h-8 rounded-lg border border-line/10 text-muted flex items-center justify-center hover:bg-surface transition-colors flex-shrink-0">
+        <iconify-icon icon="lucide:refresh-cw" width="14" height="14"></iconify-icon>
+      </button>
+    </div>
+    <div class="flex flex-col">
+      <div class="flex items-center gap-3 px-4 py-3.5 border-b border-line/8">
+        <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0">
+          <iconify-icon icon="lucide:file-json" width="15" height="15" class="text-muted"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-[0.82rem] font-semibold text-ink">manifest.json</p>
+          <p class="text-[0.7rem] text-faint">Manifest V3 — content_scripts, run_at document_start, all_frames</p>
+        </div>
+        <span id="ext-manifest-badge" class="zone {{ 'zone-safe' if extension_status.manifest_exists else 'zone-caution' }}">{{ 'มีไฟล์แล้ว' if extension_status.manifest_exists else 'ยังไม่มีไฟล์' }}</span>
+      </div>
+      <div class="flex items-center gap-3 px-4 py-3.5">
+        <div class="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0">
+          <iconify-icon icon="lucide:file-code" width="15" height="15" class="text-muted"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-[0.82rem] font-semibold text-ink">hide-cursor.css</p>
+          <p class="text-[0.7rem] text-faint">cursor: none !important; ทุก element</p>
+        </div>
+        <span id="ext-css-badge" class="zone {{ 'zone-safe' if extension_status.css_exists else 'zone-caution' }}">{{ 'มีไฟล์แล้ว' if extension_status.css_exists else 'ยังไม่มีไฟล์' }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-center justify-between flex-wrap gap-3">
+    <p class="text-[0.78rem] text-muted max-w-md">การกดปุ่มนี้จะสร้าง/เขียนทับไฟล์ extension ทั้งหมดใหม่ให้ user ที่เลือกไว้ด้านบน และตั้งค่าสิทธิ์ไฟล์ให้ user นั้นเป็นเจ้าของ</p>
+    <button type="button" id="ext-create-btn" onclick="createExtension()"
+            class="inline-flex items-center gap-1.5 px-4 py-2.5 border border-accent rounded-lg bg-accent text-white text-[0.85rem] font-semibold hover:bg-blue-700 transition-colors">
+      <iconify-icon icon="lucide:wand-2" width="14" height="14"></iconify-icon>
+      สร้าง / สร้างใหม่ Extension
+    </button>
+  </div>
+
+  <!-- ── ตัวอย่างเนื้อหาไฟล์ ─────────────────────────────────────── -->
+  <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    <div class="px-4 py-3 bg-surface/40">
+      <span class="text-[0.72rem] font-semibold text-muted">ตัวอย่างเนื้อหา hide-cursor.css ที่จะสร้าง</span>
+    </div>
+    <textarea readonly spellcheck="false"
+              class="w-full px-3 py-2.5 border-0 bg-surface text-ink text-[0.8rem] font-mono leading-relaxed min-h-[100px] outline-none resize-y cursor-default select-all">*, *::before, *::after {
+  cursor: none !important;
+}</textarea>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var POLL_INTERVAL_MS = 2000;
+  var pollTimer = null;
+
+  function apiRequest(method, url, body) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(url, opts).then(function (res) {
+      return res.json().then(function (data) {
+        return { ok: res.ok, data: data };
+      });
+    }).catch(function (err) {
+      return { ok: false, data: { errors: [String(err)] } };
+    });
+  }
+
+  function firstError(data) {
+    if (data && Array.isArray(data.errors) && data.errors.length) return data.errors[0];
+    if (data && data.error) return data.error;
+    return "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  }
+
+  function getSelectedUsername() {
+    var sel = document.getElementById("ext-user-select");
+    return sel && sel.value ? sel.value : "";
+  }
+
+  function setFileBadge(id, ok) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle("zone-safe", ok);
+    el.classList.toggle("zone-caution", !ok);
+    el.textContent = ok ? "มีไฟล์แล้ว" : "ยังไม่มีไฟล์";
+  }
+
+  // ── ดึงสถานะไฟล์จริงของ user ที่เลือกอยู่ตอนนี้ผ่าน GET /api/kiosk/extensions/status ──
+  window.refreshExtStatus = function () {
+    var username = getSelectedUsername();
+    if (!username) return;
+    apiRequest("GET", "/api/kiosk/extensions/status?username=" + encodeURIComponent(username)).then(function (result) {
+      if (!result.ok) return; // เงียบๆ ตอน poll พื้นหลัง ไม่ต้อง toast ทุกครั้งที่ error ชั่วคราว
+      var data = result.data;
+      setFileBadge("ext-manifest-badge", !!data.manifest_exists);
+      setFileBadge("ext-css-badge", !!data.css_exists);
+    });
+  };
+
+  window.onExtUserChange = function () {
+    var sel = document.getElementById("ext-user-select");
+    if (!sel || !sel.selectedOptions.length) return;
+    var opt = sel.selectedOptions[0];
+    var usernameEl = document.getElementById("ext-status-username");
+    var pathEl = document.getElementById("ext-status-path");
+    if (usernameEl) usernameEl.textContent = opt.value || "—";
+    if (pathEl) pathEl.textContent = (opt.getAttribute("data-home") || "") + "/.config/kiosk-extensions/hide-cursor/";
+    refreshExtStatus();
+  };
+
+  window.createExtension = function () {
+    var username = getSelectedUsername();
+    if (!username) {
+      showToast("ยังไม่มี user ที่เลือกไว้", "error");
+      return;
+    }
+    var btn = document.getElementById("ext-create-btn");
+    if (btn) btn.disabled = true;
+    apiRequest("POST", "/api/kiosk/extensions/create", { username: username }).then(function (result) {
+      if (btn) btn.disabled = false;
+      if (result.ok) {
+        showToast("สร้าง Extension ให้ " + username + " แล้ว", "success");
+        setFileBadge("ext-manifest-badge", !!result.data.manifest_exists);
+        setFileBadge("ext-css-badge", !!result.data.css_exists);
+      } else {
+        showToast(firstError(result.data), "error");
+      }
+    });
+  };
+
+  // Poll สถานะไฟล์ทุก 2 วิ (ตามที่ผู้ใช้ระบุว่าต้องการดูสถานะแบบ realtime) — หยุด poll ตอนแท็บ
+  // ไม่ active เพื่อลด request ที่ไม่จำเป็น
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () {
+      if (document.visibilityState === "visible") refreshExtStatus();
+    }, POLL_INTERVAL_MS);
+  }
+
+  document.addEventListener("DOMContentLoaded", startPolling);
+  if (document.readyState !== "loading") startPolling();
+})();
+</script>
+{% endblock %}

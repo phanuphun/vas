@@ -96,16 +96,21 @@ from features.kiosk.manager import (
     check_url_reachable,
     clear_kiosk_config,
     collect_accounts_service_status,
+    collect_chromium_hold_status,
     collect_gdm_autologin_status,
+    collect_hide_cursor_extension_status,
     collect_kiosk_autostart_status,
     collect_kiosk_readiness,
     collect_kiosk_software_status,
+    collect_sleep_mask_status,
+    collect_translate_policy_status,
     kiosk_gnome_autostart_desktop_path,
     kiosk_launch_script_path,
     kiosk_openbox_autostart_path,
     list_kiosk_linux_users,
     normalize_chrome_flags,
     normalize_gnome_lockdown_flags,
+    remove_chromium_snap,
     resolve_kiosk_target_user,
     stop_kiosk_mode,
 )
@@ -1586,8 +1591,59 @@ def create_app() -> Flask:
     def kiosk_page() -> str:
         return render_template("kiosk.html", **_kiosk_page_context())
 
-    # เมนูเฉพาะกิจ "เคลียร์ค่า Kiosk" — หน้าคีออสหลักถูกซ่อนจาก sidebar แล้ว (ดู base.html)
-    # หน้านี้แยกต่างหาก ไม่ผูกกับ /kiosk เพื่อให้ล้าง config เก่าได้แม้เมนูหลักถูกซ่อนไปแล้ว
+    # หน้าใหม่แยกต่างหาก — จัดการ Chromium extension ซ่อน mouse cursor ต่อ user
+    @app.get("/kiosk/extensions")
+    def kiosk_extensions_page() -> str:
+        return render_template("kiosk_extensions.html", **_kiosk_extensions_page_context())
+
+    @app.get("/api/kiosk/extensions/status")
+    def kiosk_extension_status_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        username = request.args.get("username", "").strip()
+        if not username:
+            return {"status": "error", "errors": ["ต้องระบุ username"]}, 400
+        match = next((u for u in list_kiosk_linux_users() if u.username == username), None)
+        if match is None:
+            return {"status": "error", "errors": [f"ไม่พบ user: {username}"]}, 404
+        ext_status = collect_hide_cursor_extension_status(match.home)
+        return {
+            "status": "ok",
+            "username": username,
+            "home": match.home.as_posix(),
+            "manifest_exists": ext_status.manifest_exists,
+            "css_exists": ext_status.css_exists,
+            "complete": ext_status.complete,
+        }
+
+    @app.post("/api/kiosk/extensions/create")
+    def kiosk_extension_create_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username", "")).strip()
+        if not username:
+            return {"status": "error", "errors": ["ต้องระบุ username"]}, 400
+        match = next((u for u in list_kiosk_linux_users() if u.username == username), None)
+        if match is None:
+            return {"status": "error", "errors": [f"ไม่พบ user: {username}"]}, 404
+
+        manager = KioskManager(CommandRunner())
+        try:
+            manager.write_hide_cursor_extension(match.home, username)
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        ext_status = collect_hide_cursor_extension_status(match.home)
+        from core.database import log_audit as _db_audit
+        _db_audit("kiosk_extension_created", {"username": username})
+        return {
+            "status": "ok",
+            "username": username,
+            "home": match.home.as_posix(),
+            "manifest_exists": ext_status.manifest_exists,
+            "css_exists": ext_status.css_exists,
+            "complete": ext_status.complete,
+        }
+
+    # เมนูเฉพาะกิจ "เคลียร์ค่า Kiosk" — หน้านี้แยกต่างหาก ไม่ผูกกับ /kiosk เพื่อให้ล้าง config
+    # เก่า (รวมเครื่องที่เคยตั้งเป็น GNOME session มาก่อน) ได้แม้หน้าคีออสหลักจะรองรับแค่ Openbox แล้ว
     # เฉพาะ root/admin เท่านั้น (เหมือน /users) — ไม่ใช่แค่ซ่อนเมนูฝั่ง frontend
     @app.get("/kiosk/clear-config")
     def kiosk_clear_config_page() -> str:
@@ -1640,9 +1696,23 @@ def create_app() -> Flask:
 
     @app.delete("/api/kiosk/users/<username>")
     def kiosk_delete_user_api(username: str) -> "tuple[dict[str, object], int] | dict[str, object]":
+        # ป้องกันลบ root โดยเด็ดขาด — ห้ามลบพลาดซ้ำ (เคยเกิดขึ้นจริงมาก่อน) เช็ค 2 ชั้น: ชั้นแรก
+        # list_kiosk_linux_users() กรอง uid ช่วง _KIOSK_MIN_UID..MAX_UID อยู่แล้วทำให้ root
+        # (uid 0) ไม่มีทางโผล่มาใน match แต่ชั้นนี้เป็น defensive guard เผื่อ logic กรองเปลี่ยนไป
+        # ในอนาคตแล้วลืมพิจารณาผลกระทบตรงนี้
+        if username == "root":
+            return {"status": "error", "errors": ["ห้ามลบ root user เด็ดขาด"]}, 403
+
         match = next((u for u in list_kiosk_linux_users() if u.username == username), None)
         if match is None:
             return {"status": "error", "errors": ["ไม่พบ user นี้"]}, 404
+        if match.uid == 0:
+            return {"status": "error", "errors": ["ห้ามลบ root user เด็ดขาด"]}, 403
+        if not match.managed_by_vas:
+            return {
+                "status": "error",
+                "errors": ["ลบได้เฉพาะ user ที่ VAS เป็นคนสร้างเท่านั้น — user นี้ไม่ได้ถูกสร้างผ่าน VAS"],
+            }, 403
         if match.is_autologin:
             return {"status": "error", "errors": ["ต้องปิด auto-login หรือเปลี่ยน user ก่อนถึงจะลบได้"]}, 400
 
@@ -1736,6 +1806,12 @@ def create_app() -> Flask:
 
         old_status = collect_kiosk_autostart_status(session_type, match.home)
         manager = KioskManager(CommandRunner())
+        # ปุ่ม "บันทึกและสร้าง Automation" ต้อง generate ทุกอย่างในการกดครั้งเดียว (ตามที่ผู้ใช้
+        # ระบุ) — เขียน autostart script ปกติ แล้วต่อด้วย Translate Enterprise Policy (ผูกกับ
+        # toggle disable_translate ใน chrome_flags) และ lockdown extras (sleep mask/apt-hold
+        # chromium/ตัด keybind Alt-Tab, Super-E ของ Openbox) ที่ apply อัตโนมัติเสมอไม่มี toggle
+        # แยก — ถ้าขั้นตอนไหนพังให้ทั้งก้อนถือว่า fail (500) เพื่อให้ผู้ใช้รู้ว่า automation
+        # ยังไม่ครบ ไม่ใช่แค่ autostart อย่างเดียวที่สำเร็จ
         try:
             manager.write_autostart(
                 session_type=session_type,
@@ -1748,10 +1824,13 @@ def create_app() -> Flask:
                 auto_reload_minutes=auto_reload_minutes,
                 gnome_lockdown_flags=gnome_lockdown_flags,
             )
+            manager.set_translate_policy(bool(chrome_flags.get("disable_translate", True)))
+            lockdown_result = manager.apply_lockdown_extras(match.home, username)
         except (CommandExecutionError, OSError) as error:
             return {"status": "error", "errors": [str(error)]}, 500
 
         status = collect_kiosk_autostart_status(session_type, match.home)
+        translate_status = collect_translate_policy_status()
         from core.database import log_audit as _db_audit, log_config_change as _db_config
         _db_audit("kiosk_autostart_saved", {
             "username": username, "url": url,
@@ -1759,6 +1838,10 @@ def create_app() -> Flask:
             "chrome_flags_enabled": sum(1 for v in chrome_flags.values() if v),
             "auto_reload_minutes": auto_reload_minutes,
             "gnome_lockdown_flags_enabled": sum(1 for v in gnome_lockdown_flags.values() if v),
+            "translate_policy_disabled": translate_status.all_present,
+            "sleep_masked": lockdown_result.sleep_masked,
+            "chromium_held": lockdown_result.chromium_held,
+            "openbox_keybinds_removed": lockdown_result.openbox_keybinds_removed,
         })
         _db_config(
             "kiosk", f"autostart:{username}",
@@ -1784,6 +1867,12 @@ def create_app() -> Flask:
             "chrome_flags": status.chrome_flags,
             "auto_reload_minutes": status.auto_reload_minutes,
             "gnome_lockdown_flags": status.gnome_lockdown_flags,
+            "translate_policy_disabled": translate_status.all_present,
+            "lockdown": {
+                "sleep_masked": lockdown_result.sleep_masked,
+                "chromium_held": lockdown_result.chromium_held,
+                "openbox_keybinds_removed": lockdown_result.openbox_keybinds_removed,
+            },
         }
 
     @app.get("/api/kiosk/config-content")
@@ -1883,6 +1972,23 @@ def create_app() -> Flask:
         }
         _db_audit("kiosk_config_cleared", result_payload)
         return {"status": "ok", **result_payload}
+
+    # เมนูเฉพาะกิจ "เคลียร์ค่า Kiosk" > "Chromium (snap) ค้างอยู่" — สิทธิ์เดียวกับ
+    # /api/kiosk/clear-config (root/admin เท่านั้น) เพราะเป็น destructive action เหมือนกัน
+    @app.post("/api/kiosk/clear-config/chromium-snap")
+    def kiosk_remove_chromium_snap_api() -> "tuple[dict[str, object], int] | dict[str, object]":
+        admin_user = _require_admin_user()
+        if admin_user is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+
+        try:
+            removed = remove_chromium_snap(CommandRunner())
+        except (CommandExecutionError, OSError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+
+        from core.database import log_audit as _db_audit
+        _db_audit("kiosk_chromium_snap_removed", {"removed": removed})
+        return {"status": "ok", "removed": removed}
 
     @app.get("/api/kiosk/audit")
     def kiosk_audit_api() -> dict[str, object]:
@@ -4021,6 +4127,13 @@ def _kiosk_page_context() -> dict[str, object]:
         autostart_status.auto_reload_minutes,
     )
 
+    # สถานะจริงของ automation ที่ปุ่ม "บันทึกและสร้าง Automation" จะไป apply — แสดงบนหน้าเว็บ
+    # แทน badge "Mockup" เดิม (Translate Policy/Extension/sleep mask/apt-hold)
+    extension_status = collect_hide_cursor_extension_status(home)
+    translate_status = collect_translate_policy_status()
+    sleep_masked = collect_sleep_mask_status()
+    chromium_held = collect_chromium_hold_status()
+
     from core.database import list_device_integrations, list_mqtt_brokers
     from features.kiosk.heartbeat import get_heartbeat_thread
     heartbeat_integ = list_device_integrations("kiosk").get("mqtt", {})
@@ -4059,6 +4172,25 @@ def _kiosk_page_context() -> dict[str, object]:
         },
         "session_type": session_type,
         "openbox_installed": software.openbox_installed,
+        "software": {
+            "openbox_installed": software.openbox_installed,
+            "chromium_installed": software.chromium_installed,
+            "obconf_installed": software.obconf_installed,
+            "unclutter_xfixes_installed": software.unclutter_xfixes_installed,
+            "xterm_installed": software.xterm_installed,
+            "chromium_is_deb": software.chromium_is_deb,
+            "chromium_is_snap": software.chromium_is_snap,
+        },
+        "extension_status": {
+            "manifest_exists": extension_status.manifest_exists,
+            "css_exists": extension_status.css_exists,
+            "complete": extension_status.complete,
+        },
+        "translate_policy_disabled": translate_status.all_present,
+        "lockdown_status": {
+            "sleep_masked": sleep_masked,
+            "chromium_held": chromium_held,
+        },
         "mqtt_brokers": list_mqtt_brokers(),
         "heartbeat": {
             "enabled": bool(heartbeat_integ.get("enabled")),
@@ -4069,6 +4201,36 @@ def _kiosk_page_context() -> dict[str, object]:
         },
         "os_notify_flag_defs": list(OS_NOTIFY_FLAG_DEFS),
         "os_notify_status": collect_os_notification_status().as_dict(),
+    }
+
+
+def _kiosk_extensions_page_context() -> dict[str, object]:
+    """Context สำหรับหน้า 'Extension คีออส' (/kiosk/extensions) — รายชื่อ user + สถานะไฟล์
+    extension ของ user เป้าหมาย (default_kiosk_username) เป็นข้อมูลจริงทั้งหมด (ดู
+    collect_hide_cursor_extension_status ใน features/kiosk/manager.py) หน้าเว็บ poll สถานะ
+    ของ user ที่เลือกซ้ำผ่าน GET /api/kiosk/extensions/status ทุกครั้งที่เปลี่ยน user"""
+    users = list_kiosk_linux_users()
+    target_user = resolve_kiosk_target_user(users)
+    home = target_user.home if target_user is not None else Path("/home/kiosk-user")
+    extension_status = collect_hide_cursor_extension_status(home)
+    return {
+        "kiosk_users": [
+            {
+                "username": u.username,
+                "uid": u.uid,
+                "home": u.home.as_posix(),
+                "is_autologin": u.is_autologin,
+                "managed_by_vas": u.managed_by_vas,
+            }
+            for u in users
+        ],
+        "default_kiosk_username": target_user.username if target_user is not None else None,
+        "default_kiosk_home": (target_user.home.as_posix() if target_user is not None else "/home/kiosk-user"),
+        "extension_status": {
+            "manifest_exists": extension_status.manifest_exists,
+            "css_exists": extension_status.css_exists,
+            "complete": extension_status.complete,
+        },
     }
 
 
@@ -4151,6 +4313,7 @@ def _kiosk_clear_config_page_context() -> dict[str, object]:
         "kiosk_home": home.as_posix(),
         "kiosk_user_found": target_user is not None,
         "entries": entries,
+        "chromium_snap_installed": collect_kiosk_software_status().chromium_is_snap,
     }
 
 

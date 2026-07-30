@@ -335,6 +335,61 @@ PACKAGES: list[dict[str, Any]] = [
         "uninstall_warning": "การถอน Openbox จะทำให้ session แบบ kiosk (ถ้าตั้งค่าไว้ให้ใช้ openbox) ใช้งานไม่ได้",
     },
     {
+        "id":          "obconf",
+        "name":        "obconf",
+        "description": "GUI ปรับ config ของ Openbox — ใช้ตอนตั้งค่าครั้งแรกเท่านั้น ไม่จำเป็นสำหรับ kiosk ที่ตั้งเสร็จแล้ว",
+        "logo":        None,
+        "category":    "kiosk",
+        "depends":     [],
+        "children":    [],
+        "check":       _which_check("obconf"),
+        "install_cmds": [
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "obconf"],
+        ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "obconf"],
+        ],
+    },
+    {
+        "id":          "unclutter-xfixes",
+        "name":        "unclutter-xfixes",
+        "description": (
+            "ซ่อน mouse cursor ตอน idle ผ่าน X11-Xfixes extension — สืบทอด unclutter ตัวเดิมที่ deprecated แล้ว "
+            "เป็น fallback ชั้นที่สองร่วมกับ Chromium hide-cursor extension (ตัวหลักคุมช่วง touch-drag ที่ตัวนี้เอาไม่อยู่ "
+            "เพราะเป็นกลไก idle-based ล้วนๆ)"
+        ),
+        "logo":        None,
+        "category":    "kiosk",
+        "depends":     [],
+        "children":    [],
+        "check":       _which_check("unclutter-xfixes"),
+        "install_cmds": [
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "unclutter-xfixes"],
+        ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "unclutter-xfixes"],
+        ],
+    },
+    {
+        "id":          "xterm",
+        "name":        "xterm",
+        "description": "Terminal สำหรับ debug ผ่าน Openbox เวลามีปัญหา (ลบทิ้งได้ทีหลังถ้าไม่ต้องการ)",
+        "logo":        None,
+        "category":    "kiosk",
+        "depends":     [],
+        "children":    [],
+        "check":       _which_check("xterm", ("xterm", "-version")),
+        "install_cmds": [
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "xterm"],
+        ],
+        "uninstall_cmds": [
+            ["apt-get", "purge", "-y", "xterm"],
+        ],
+    },
+    {
         "id":          "chromium",
         "name":        "Chromium",
         "description": "เว็บเบราว์เซอร์ — เปิดแบบ --kiosk เต็มจอเพื่อแสดง dashboard หรือหน้าเว็บที่กำหนด",
