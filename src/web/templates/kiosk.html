@@ -157,7 +157,11 @@
         </div>
 
         {% set os_notify_all_ok = os_notify_status.values() | select | list | length == os_notify_status | length %}
-        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-t border-line/6" data-readiness="os-notifications">
+        {# ซ่อนแถวนี้ตามที่ผู้ใช้ขอ (2026-07-31) — การ์ด toggle การแจ้งเตือนระบบที่แท็บ "ตั้งค่า
+           Kiosk" ถูกซ่อนไปแล้วเช่นกัน (ดู #os-notify-card ด้านล่าง) แถวนี้ชี้ผู้ใช้ไปที่การ์ดนั้น
+           โดยตรง (ข้อความ "ตั้งค่าที่แท็บ...") จึงต้องซ่อนคู่กันเสมอไม่งั้นจะชี้ไปหาการ์ดที่มองไม่เห็น
+           — เพิ่ม hidden กลับสองจุดนี้พร้อมกันเสมอถ้าจะเปิดฟีเจอร์นี้กลับมา #}
+        <div class="readiness-row flex items-center gap-4 px-4 py-3.5 border-t border-line/6 hidden" data-readiness="os-notifications">
           <div class="readiness-icon-box w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 {{ 'bg-safe/8' if os_notify_all_ok else 'bg-caution/10' }}">
             <iconify-icon icon="lucide:bell-off" width="15" height="15" class="readiness-icon {{ 'text-safe' if os_notify_all_ok else 'text-caution' }}"></iconify-icon>
           </div>
@@ -529,8 +533,10 @@
       </div>
 
       {# ปิด popup/แจ้งเตือนระดับ Ubuntu — system-wide (ไม่ผูกกับ user ที่เลือก), เขียนไฟล์จริง
-         ผ่าน /api/kiosk/os-notifications (ดู features/kiosk/os_notifications.py) #}
-      <div class="bg-card border border-line/10 rounded-xl overflow-hidden">
+         ผ่าน /api/kiosk/os-notifications (ดู features/kiosk/os_notifications.py) — ซ่อนตามที่
+         ผู้ใช้ขอ (2026-07-31) HTML/JS ทั้งหมดยังอยู่ครบ (ไม่ลบ) เผื่อเปิดกลับมาทีหลัง แค่เพิ่ม
+         hidden ให้การ์ดนี้ — คู่กับแถว readiness "os-notifications" ในแท็บภาพรวมที่ซ่อนไปด้วยกัน #}
+      <div id="os-notify-card" class="bg-card border border-line/10 rounded-xl overflow-hidden hidden">
         <div class="px-4 py-3 border-b border-line/8">
           <h3 class="text-[0.88rem] font-semibold text-ink">ปิดการแจ้งเตือนของระบบปฏิบัติการ</h3>
           <p class="text-[0.72rem] text-faint mt-0.5">ป้องกัน popup/แจ้งเตือนระดับ Ubuntu ที่ user อาจกดโต้ตอบได้ระหว่างใช้งาน kiosk — ตั้งค่าเดียวมีผลกับทุก user บนเครื่อง ไม่ต้องเลือก user</p>

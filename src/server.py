@@ -92,7 +92,7 @@ from features.kiosk.manager import (
     GNOME_LOCKDOWN_FLAG_DEFS,
     KioskManager,
     accounts_service_path_for,
-    build_kiosk_launch_script,
+    build_full_openbox_autostart_script,
     check_url_reachable,
     clear_kiosk_config,
     collect_accounts_service_status,
@@ -105,6 +105,7 @@ from features.kiosk.manager import (
     collect_sleep_mask_status,
     collect_translate_policy_status,
     kiosk_gnome_autostart_desktop_path,
+    kiosk_hide_cursor_extension_dir,
     kiosk_launch_script_path,
     kiosk_openbox_autostart_path,
     list_kiosk_linux_users,
@@ -4121,10 +4122,17 @@ def _kiosk_page_context() -> dict[str, object]:
 
     autostart_status = collect_kiosk_autostart_status(session_type, home)
     readiness = collect_kiosk_readiness(users, autologin, autostart_status, software)
-    autostart_script_preview = build_kiosk_launch_script(
-        autostart_status.url, autostart_status.restart_enabled,
+    # ปุ่ม "บันทึกและสร้าง Automation" เขียนเป็น Openbox เสมอ (ไม่มี UI ให้เลือก session type
+    # อื่นแล้ว) — preview ต้องสร้างจาก build_full_openbox_autostart_script() ตัวเดียวกับที่
+    # KioskManager.write_autostart() ใช้เขียนไฟล์จริงเป๊ะๆ (shebang + openbox preamble:
+    # xsetroot/xset/unclutter/รอ marker/รอ network + kiosk launch script) ไม่ใช่แค่ครึ่งเดียว
+    # ของสคริปต์เหมือนเดิม (เดิมเรียก build_kiosk_launch_script() ตรงๆ ซึ่งขาด openbox preamble
+    # ทั้งก้อนไป — พรีวิวจึงไม่ตรงกับไฟล์จริงที่เขียนลงดิสก์ ทำให้ผู้ใช้เข้าใจผิดว่าไม่ตรงกับ docs)
+    extension_dir = kiosk_hide_cursor_extension_dir(home)
+    autostart_script_preview = build_full_openbox_autostart_script(
+        autostart_status.url, home, autostart_status.restart_enabled,
         autostart_status.restart_delay, autostart_status.chrome_flags,
-        autostart_status.auto_reload_minutes,
+        autostart_status.auto_reload_minutes, extension_dir=extension_dir,
     )
 
     # สถานะจริงของ automation ที่ปุ่ม "บันทึกและสร้าง Automation" จะไป apply — แสดงบนหน้าเว็บ

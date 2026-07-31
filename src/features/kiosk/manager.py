@@ -82,6 +82,7 @@ __all__ = [
     "TranslatePolicyStatus",
     "accounts_service_path_for",
     "build_accounts_service_config",
+    "build_full_openbox_autostart_script",
     "build_gdm_autologin_config",
     "build_gnome_autostart_desktop",
     "build_gnome_lockdown_preamble",
@@ -612,20 +613,18 @@ class KioskManager:
         # Openbox เท่านั้นที่ผูก hide-cursor extension เข้า CHROME_FLAGS ผ่าน --load-extension —
         # sync ไฟล์ extension ให้มีอยู่จริงก่อนเสมอ (เผื่อ user นี้ถูกสร้างมาก่อนฟีเจอร์นี้ หรือ
         # ไฟล์หายไปเพราะเหตุใดก็ตาม) ไม่ต้องรอให้ผู้ใช้ไปกดสร้างเองที่หน้า Extension คีออสก่อน
-        extension_dir: "Path | None" = None
         if session_type == "openbox":
+            # Openbox เท่านั้นที่ผูก hide-cursor extension เข้า CHROME_FLAGS ผ่าน --load-extension
+            # — sync ไฟล์ extension ให้มีอยู่จริงก่อนเสมอ (เผื่อ user นี้ถูกสร้างมาก่อนฟีเจอร์นี้
+            # หรือไฟล์หายไปเพราะเหตุใดก็ตาม) ไม่ต้องรอให้ผู้ใช้ไปกดสร้างเองที่หน้า Extension คีออสก่อน
             self.write_hide_cursor_extension(home, username)
             extension_dir = kiosk_hide_cursor_extension_dir(home)
-
-        script_content = build_kiosk_launch_script(
-            url, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes,
-            extension_dir=extension_dir,
-        )
-
-        if session_type == "openbox":
-            preamble = build_openbox_autostart_preamble(url, home)
+            full_script = build_full_openbox_autostart_script(
+                url, home, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes,
+                extension_dir=extension_dir,
+            )
             script_path = kiosk_openbox_autostart_path(home)
-            self._write_executable(script_path, _insert_after_shebang(script_content, preamble))
+            self._write_executable(script_path, full_script)
             _chown_to_user(script_path, username)
             _chown_to_user(script_path.parent, username)
             _ensure_config_dir_owned(home, username)
@@ -635,6 +634,9 @@ class KioskManager:
         # เข้าไปหลัง shebang เหมือน Openbox preamble ด้านบน (รูปแบบเดียวกัน) เพื่อให้ gsettings
         # รันก่อนเปิด chromium ทุกครั้งที่ script นี้ถูกเรียก (ทั้งตอน login ครั้งแรก และตอน
         # restart loop วนกลับมา — เขียนซ้ำไม่มีผลเสียเพราะเป็นแค่ gsettings set ค่าเดิม)
+        script_content = build_kiosk_launch_script(
+            url, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes,
+        )
         gnome_preamble = build_gnome_lockdown_preamble(gnome_lockdown_flags)
         script_path = kiosk_launch_script_path(home)
         self._write_executable(script_path, _insert_after_shebang(script_content, gnome_preamble))
@@ -1118,6 +1120,30 @@ def build_openbox_autostart_preamble(
         "\n"
         f"{network_wait_block}"
     )
+
+
+def build_full_openbox_autostart_script(
+    url: str,
+    home: Path,
+    restart_enabled: bool,
+    restart_delay: int,
+    chrome_flags: "dict[str, bool] | None" = None,
+    auto_reload_minutes: int = DEFAULT_AUTO_RELOAD_MINUTES,
+    extension_dir: "Path | None" = None,
+) -> str:
+    """ประกอบไฟล์ ~/.config/openbox/autostart ตัวเต็ม (shebang + openbox preamble
+    จาก build_openbox_autostart_preamble() + kiosk launch script จาก
+    build_kiosk_launch_script()) — single source of truth ที่ทั้ง KioskManager.write_autostart()
+    (เขียนไฟล์จริง) และ server.py (สร้าง preview ให้หน้าเว็บ) เรียกใช้ร่วมกัน กันบั๊กเดิมที่
+    preview บนหน้าเว็บมีแค่ครึ่งเดียวของสคริปต์จริง (ขาด openbox preamble ทั้งก้อน — ไม่มี
+    xsetroot/xset/unclutter/รอ marker/รอ network เลย) ทำให้ผู้ใช้เข้าใจผิดว่าสคริปต์ไม่ตรงกับ
+    docs/manual-kiosk-openbox-chromium-xorg-guide.md ทั้งที่ไฟล์จริงที่เขียนลงดิสก์ถูกต้องอยู่แล้ว"""
+    script_content = build_kiosk_launch_script(
+        url, restart_enabled, restart_delay, chrome_flags, auto_reload_minutes,
+        extension_dir=extension_dir,
+    )
+    preamble = build_openbox_autostart_preamble(url, home)
+    return _insert_after_shebang(script_content, preamble)
 
 
 def build_hide_cursor_manifest() -> str:
