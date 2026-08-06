@@ -137,13 +137,20 @@ def service_action(runner: CommandRunner, action: str) -> CommandResult:
 
 def set_vnc_password(password: str) -> tuple[bool, str]:
     """
-    ตั้งรหัสผ่าน VNC ผ่าน `x11vnc -storepasswd - /etc/x11vnc.pass` โดยส่งรหัสผ่านทาง stdin
-    ("-" แทน path แรกบอก x11vnc ให้อ่านรหัสผ่านจาก stdin แทนพิมพ์ interactive)
+    ตั้งรหัสผ่าน VNC ผ่าน `x11vnc -storepasswd <password> /etc/x11vnc.pass`
 
-    หมายเหตุ: จงใจไม่ใช้ CommandRunner ตรงนี้ — CommandRunner.print_operation() จะพิมพ์ argv
-    ทั้งหมดออก log/terminal ซึ่งจะทำให้รหัสผ่านหลุดไปอยู่ใน log ได้ ในเมื่อรหัสผ่านถูกส่งทาง
-    stdin แทน argv จึงเรียก subprocess ตรงและไม่พิมพ์ค่า password ออกที่ใดเลย (pattern เดียวกับ
-    features.remote.anydesk.set_unattended_password)
+    แก้ไข 2026-08-06: เดิมเรียก `x11vnc -storepasswd - /etc/x11vnc.pass` โดยเข้าใจผิดว่า "-"
+    แปลว่าให้ x11vnc อ่านรหัสผ่านจาก stdin (เลียนแบบ pattern ของ
+    features.remote.anydesk.set_unattended_password) — แต่ `x11vnc -storepasswd` จริงๆ ไม่รองรับ
+    stdin เลย: ถ้าให้ 2 argument ตัวแรกจะถูกตีความเป็น**รหัสผ่านตัวอักษรตรงๆ** ไม่ใช่สัญลักษณ์พิเศษ
+    ผลคือรหัสผ่านที่ถูกเก็บจริงกลายเป็นอักขระ "-" ตัวเดียวเสมอ ไม่ว่าผู้ใช้จะพิมพ์อะไรมา (แต่
+    คำสั่ง exit 0 สำเร็จ หน้าเว็บเลยรายงานว่า "เรียบร้อย" ทั้งที่รหัสผ่านที่ใช้ login จริงผิด) —
+    ยืนยันจาก user จริงที่ตั้งรหัสผ่านผ่านหน้าเว็บแล้ว remote เข้าไม่ได้เลยบนเครื่องจริง
+
+    ทางแก้: ส่งรหัสผ่านเป็น argument ที่ 2 ตรงๆ — เป็นวิธีเดียวที่ x11vnc รองรับสำหรับตั้งรหัสผ่าน
+    แบบ non-interactive (ไม่มี stdin mode ให้ใช้จริง) แลกกับรหัสผ่านโผล่ใน process list (`ps aux`)
+    ช่วงสั้นๆ ระหว่างรันคำสั่ง — ยังคงไม่ใช้ CommandRunner ตรงนี้ (CommandRunner.print_operation()
+    จะพิมพ์ argv ออก log/terminal) จึงเรียก subprocess ตรงเพื่อไม่ให้รหัสผ่านหลุดไปอยู่ใน log ถาวร
     """
     if not password:
         return False, "กรุณากรอกรหัสผ่าน"
@@ -158,8 +165,7 @@ def set_vnc_password(password: str) -> tuple[bool, str]:
 
     try:
         result = subprocess.run(
-            [x11vnc_path, "-storepasswd", "-", str(PASSWORD_PATH)],
-            input=password,
+            [x11vnc_path, "-storepasswd", password, str(PASSWORD_PATH)],
             capture_output=True,
             text=True,
             timeout=10,

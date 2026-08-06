@@ -193,7 +193,9 @@ def test_set_vnc_password_real_mode_not_installed(monkeypatch: pytest.MonkeyPatc
     assert "ยังไม่ได้ติดตั้ง" in message
 
 
-def test_set_vnc_password_real_mode_success_does_not_leak_password_in_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_set_vnc_password_real_mode_success_passes_password_as_literal_arg(monkeypatch: pytest.MonkeyPatch) -> None:
+    """x11vnc -storepasswd ไม่รองรับ stdin จริง (แก้บั๊กเมื่อ 2026-08-06 — ของเดิมส่ง "-" แทนรหัสผ่าน
+    จริงทำให้รหัสที่เก็บกลายเป็น "-" เสมอ) ต้องส่งรหัสผ่านเป็น argument ที่ 2 ตรงๆ ถึงจะใช้งานได้จริง"""
     monkeypatch.delenv("VAS_DEV_FAKE_INSTALLED", raising=False)
     fake_completed = Mock(returncode=0, stdout="", stderr="")
     fake_path = Mock()
@@ -204,10 +206,9 @@ def test_set_vnc_password_real_mode_success_does_not_leak_password_in_argv(monke
         ok, _message = x11vnc.set_vnc_password("longenoughpw")
 
     assert ok is True
-    kwargs = mock_run.call_args.kwargs
     args = mock_run.call_args.args[0]
-    assert "longenoughpw" not in args  # รหัสผ่านต้องไม่อยู่ใน argv (ไม่งั้นหลุดไปอยู่ใน process list/log)
-    assert kwargs["input"] == "longenoughpw"
+    assert args == ["/usr/bin/x11vnc", "-storepasswd", "longenoughpw", str(fake_path)]
+    assert "input" not in mock_run.call_args.kwargs  # ไม่มี stdin mode ให้ใช้ ต้องไม่ส่ง input= อีกต่อไป
     fake_path.chmod.assert_called_once_with(0o644)
 
 
