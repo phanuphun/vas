@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -133,6 +134,27 @@ class OpenSshStatus:
 
 
 @dataclass(frozen=True)
+class X11vncConfig:
+    """ค่า config ปัจจุบันของ x11vnc.service — parse กลับมาจากไฟล์ unit บนดิสก์ตรงๆ
+    (ไม่มี DB table เก็บ ใช้ /etc/systemd/system/x11vnc.service เป็น single source of truth
+    เดียวกับแนวทางที่ vas_mcp/service.py ใช้กับ MCP server)"""
+    listen_ip: str
+    port: int
+    display: str
+    user: str
+
+
+@dataclass(frozen=True)
+class X11vncStatus:
+    installed: bool
+    version: str | None
+    service_enabled: str
+    service_active: str
+    config: "X11vncConfig | None"   # None = ยังไม่เคย apply setup (ไม่มี unit file บนเครื่องนี้)
+    password_set: bool
+
+
+@dataclass(frozen=True)
 class McpStatus:
     runtime_installed: bool  # fastmcp/uvicorn ติดตั้งแล้วหรือยัง (ดู vas_mcp.service.MCP_RUNTIME_PACKAGES)
     service_installed: bool  # มี systemd unit file แล้วหรือยัง (ยังไม่เคยกด "เปิดใช้งาน" = False)
@@ -253,6 +275,62 @@ def collect_openssh_status() -> OpenSshStatus:
         version=_read_version((ssh_path, "-V")) if ssh_path is not None else None,
         service_enabled=_read_command_first_line(("systemctl", "is-enabled", "ssh")),
         service_active=_read_command_first_line(("systemctl", "is-active", "ssh")),
+    )
+
+
+_X11VNC_SERVICE_PATH = Path("/etc/systemd/system/x11vnc.service")
+_X11VNC_PASSWORD_PATH = Path("/etc/x11vnc.pass")
+
+
+def _parse_x11vnc_unit() -> "X11vncConfig | None":
+    """อ่าน /etc/systemd/system/x11vnc.service กลับมาเป็น X11vncConfig — คืน None ถ้ายังไม่มี
+    ไฟล์ (ยังไม่เคย apply setup) หรือ parse ไม่ครบ (กันหน้าเว็บ crash ถ้ามีคนแก้ไฟล์เองด้วยมือ
+    แล้ว format ไม่ตรงที่คาด — แสดงฟอร์มว่างแทนแค่นั้น ไม่ error)"""
+    try:
+        raw = _X11VNC_SERVICE_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # ExecStart ต่อหลายบรรทัดด้วย "\" ท้ายบรรทัด (ดู render_service_file ใน
+    # features/remote/x11vnc.py) — join เป็นบรรทัดเดียวก่อนค่อย regex หาแต่ละ flag
+    joined = re.sub(r"\\\s*\n\s*", " ", raw)
+    user_match = re.search(r"^User=(\S+)", joined, re.MULTILINE)
+    display_match = re.search(r"-display\s+(\S+)", joined)
+    port_match = re.search(r"-rfbport\s+(\d+)", joined)
+    listen_match = re.search(r"-listen\s+(\S+)", joined)
+    if not (user_match and display_match and port_match and listen_match):
+        return None
+    try:
+        port = int(port_match.group(1))
+    except ValueError:
+        return None
+    return X11vncConfig(
+        listen_ip=listen_match.group(1),
+        port=port,
+        display=display_match.group(1),
+        user=user_match.group(1),
+    )
+
+
+def collect_x11vnc_status() -> X11vncStatus:
+    if dev_fake_installed():
+        return X11vncStatus(
+            installed=True,
+            version="x11vnc 0.9.16 (dev-mode)",
+            service_enabled="enabled",
+            service_active="active",
+            config=X11vncConfig(listen_ip="10.8.0.56", port=5900, display=":0", user="first"),
+            password_set=True,
+        )
+    x11vnc_path = shutil.which("x11vnc")
+    return X11vncStatus(
+        installed=x11vnc_path is not None,
+        # x11vnc -version พิมพ์เวอร์ชันออก stderr เสมอ (ไม่ใช่ stdout) — _read_version() ที่มีอยู่
+        # แล้ว fallback ไป stderr ให้เองถ้า stdout ว่าง จึงเรียกตรงๆ ได้โดยไม่ต้องเขียนใหม่
+        version=_read_version((x11vnc_path, "-version")) if x11vnc_path is not None else None,
+        service_enabled=_read_command_first_line(("systemctl", "is-enabled", "x11vnc")),
+        service_active=_read_command_first_line(("systemctl", "is-active", "x11vnc")),
+        config=_parse_x11vnc_unit(),
+        password_set=_X11VNC_PASSWORD_PATH.exists(),
     )
 
 

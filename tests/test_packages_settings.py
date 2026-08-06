@@ -92,6 +92,25 @@ def test_chromium_uninstall_removes_snap_not_just_apt_transitional_package() -> 
     assert ["snap", "remove", "--purge", "chromium"] in pkg["uninstall_cmds"]
 
 
+def test_x11vnc_package_registered() -> None:
+    """package x11vnc ต้องอยู่ใน PACKAGES หมวด remote พร้อม install/uninstall ผ่าน apt เหมือน
+    anydesk/openssh — ดู docs/plans/2026-08-06-x11vnc-remote-backend-spec.md"""
+    assert "x11vnc" in _PKG_MAP
+    pkg = _PKG_MAP["x11vnc"]
+    assert pkg["category"] == "remote"
+    assert pkg["depends"] == []
+    assert callable(pkg["check"])
+    assert pkg["install_cmds"][-1] == ["apt-get", "install", "-y", "x11vnc"]
+    assert ["systemctl", "disable", "--now", "x11vnc"] in pkg["uninstall_cmds"]
+    assert ["apt-get", "purge", "-y", "x11vnc"] in pkg["uninstall_cmds"]
+
+
+def test_x11vnc_check_false_when_not_installed() -> None:
+    """เครื่องทดสอบ/CI ไม่มี x11vnc ติดตั้งอยู่จริง — check() ต้องคืน False ไม่ throw"""
+    installed, _version = _PKG_MAP["x11vnc"]["check"]()
+    assert installed is False
+
+
 def test_chromium_install_uses_ppa_deb_instead_of_snap_transitional_package() -> None:
     """เปลี่ยนจาก apt-get install chromium-browser (transitional package ที่ดึง snap มาแทนเสมอบน
     Ubuntu 22.04 — snapd auto-refresh อาจรีสตาร์ท Chromium เองกลางที่ลูกค้ากำลังใช้ตู้) มาใช้ PPA

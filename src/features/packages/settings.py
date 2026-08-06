@@ -315,6 +315,25 @@ PACKAGES: list[dict[str, Any]] = [
         ],
         "uninstall_warning": "การถอน AnyDesk จะปิดการเข้าถึง remote desktop จากระยะไกล",
     },
+    {
+        "id":          "x11vnc",
+        "name":        "x11vnc",
+        "description": "VNC server — mirror หน้าจอจริงออกไปให้เครื่องอื่น remote เข้ามาใช้งาน",
+        "logo":        None,
+        "category":    "remote",
+        "depends":     [],
+        "children":    [],
+        "check":       _which_check("x11vnc", ("x11vnc", "-version")),
+        "install_cmds": [
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "x11vnc"],
+        ],
+        "uninstall_cmds": [
+            ["systemctl", "disable", "--now", "x11vnc"],
+            ["apt-get", "purge", "-y", "x11vnc"],
+        ],
+        "uninstall_warning": "การถอน x11vnc จะปิดการเข้าถึงหน้าจอเครื่องนี้ผ่าน VNC ทันที",
+    },
     # ── Kiosk Mode ────────────────────────────────────────────────
     {
         "id":          "openbox",

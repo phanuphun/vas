@@ -1,0 +1,481 @@
+{% extends base_template %}
+{% block page_title %}x11vnc — VAS{% endblock %}
+{% block header_title %}x11vnc{% endblock %}
+
+{% block content %}
+<style>
+  .tab-panel { display: none; }
+  .tab-panel.is-active { display: flex; flex-direction: column; animation: tabFade 0.15s ease forwards; }
+  @keyframes tabFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .msg { font-size: 0.82rem; min-height: 1.2rem; }
+  .msg-ok    { color: #0f766e; }
+  .msg-error { color: #b1453a; }
+</style>
+
+<div class="flex flex-col gap-4" data-installed="{{ 'true' if vnc.installed else 'false' }}">
+
+  <!-- ── 1. PAGE HEADER ── -->
+  <div class="border-b border-line/10 pb-4">
+    <p class="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-faint">VAS · เครือข่าย</p>
+    <h1 class="font-display text-[1.35rem] font-bold text-ink mt-1.5">x11vnc</h1>
+    <p class="text-[0.82rem] text-muted mt-1">Remote เข้าจอเครื่องนี้ผ่าน VNC (mirror หน้าจอจริง ไม่ใช่ session แยก)</p>
+  </div>
+
+  {% if not vnc.installed %}
+  <div class="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[0.82rem] border bg-caution/8 border-caution/25 text-[#92660b]">
+    <iconify-icon icon="lucide:triangle-alert" width="14" height="14" class="flex-shrink-0 mt-0.5"></iconify-icon>
+    <span>ยังไม่ได้ติดตั้ง x11vnc บนเครื่องนี้ — ไปที่
+      <a href="{{ url_for('apps_page') }}" class="nav-link text-accent underline underline-offset-2 font-semibold">ซอฟต์แวร์ระบบ</a>
+      เพื่อติดตั้งก่อนใช้งาน</span>
+  </div>
+  {% endif %}
+
+  <!-- ── 2. TAB NAV ── -->
+  <nav class="bg-card border border-line/10 rounded-xl overflow-hidden">
+    {% set vnc_tabs = [
+      ("status",   "lucide:shield",       "สถานะ"),
+      ("setup",    "lucide:settings-2",   "ตั้งค่า Service"),
+      ("password", "lucide:key-round",    "รหัสผ่าน VNC"),
+    ] %}
+    <div class="flex flex-row gap-0.5 px-2 py-2 overflow-x-auto">
+      {% for tid, icon, label in vnc_tabs %}
+      <button type="button" data-tab="{{ tid }}" onclick="vncTab('{{ tid }}')"
+              class="vnc-tab-btn flex items-center gap-2 px-3 py-2 rounded-[0.6rem] text-[0.82rem] font-medium transition-colors whitespace-nowrap flex-shrink-0
+                     {{ 'bg-accent/8 text-accent font-semibold' if loop.first else 'text-muted hover:bg-line/6 hover:text-ink' }}">
+        <iconify-icon icon="{{ icon }}" width="14" height="14" class="flex-shrink-0"></iconify-icon>
+        <span>{{ label }}</span>
+      </button>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <!-- ── 3. CONTENT ── -->
+  <div>
+
+    <!-- ════════ TAB: สถานะ ════════ -->
+    <div id="tab-status" class="tab-panel is-active flex flex-col gap-4">
+
+      <!-- Status strip -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:wrench" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Tool:</span>
+          <span class="text-[0.78rem] font-semibold {% if vnc.installed %}text-safe{% else %}text-danger{% endif %}">
+            {{ 'ติดตั้งแล้ว' if vnc.installed else 'ไม่มี' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:power" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Enabled:</span>
+          <span id="vnc-enabled-label" class="text-[0.78rem] font-semibold {% if vnc.service_enabled == 'enabled' %}text-safe{% else %}text-caution{% endif %}">
+            {{ vnc.service_enabled or 'unknown' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:activity" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Service Active:</span>
+          <span id="vnc-active-label" class="text-[0.78rem] font-semibold {% if vnc.service_active == 'active' %}text-safe{% else %}text-danger{% endif %}">
+            {{ vnc.service_active or 'unknown' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <iconify-icon icon="lucide:radio" width="14" height="14" class="text-faint"></iconify-icon>
+          <span class="text-[0.78rem] text-muted font-medium">Listen:</span>
+          <span id="vnc-listen-label" class="text-[0.78rem] font-semibold text-muted">
+            {{ vnc.listen_ip ~ ':' ~ vnc.port if vnc.listen_ip else '—' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- System info card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:info" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ข้อมูลระบบ</h2>
+        </div>
+        <div class="divide-y divide-line/7">
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Tool</span>
+            <span class="flex-1 flex items-center gap-1.5 flex-wrap min-w-0">
+              <span class="zone {% if vnc.installed %}zone-safe{% else %}zone-danger{% endif %}">
+                {{ 'OK' if vnc.installed else 'MISSING' }}
+              </span>
+              <span class="break-all text-faint text-[0.78rem]">{{ vnc.version or 'not installed' }}</span>
+            </span>
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Service</span>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span id="vnc-service-enabled-zone" class="zone {% if vnc.service_enabled == 'enabled' %}zone-safe{% else %}zone-mute{% endif %}">
+                {{ vnc.service_enabled or 'unknown' }}
+              </span>
+              <span class="text-faint text-[0.72rem]">/</span>
+              <span id="vnc-service-active-zone" class="zone {% if vnc.service_active == 'active' %}zone-safe{% else %}zone-mute{% endif %}">
+                {{ vnc.service_active or 'unknown' }}
+              </span>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Listen Address</span>
+            <code id="vnc-listen-address" class="flex-1 text-[0.82rem] text-ink font-mono break-all min-w-0">{{ (vnc.listen_ip ~ ':' ~ vnc.port) if vnc.listen_ip else 'ยังไม่ได้ตั้งค่า' }}</code>
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">Run as User</span>
+            <code id="vnc-run-user" class="flex-1 text-[0.82rem] text-ink font-mono break-all min-w-0">{{ vnc.run_user or '—' }}</code>
+          </div>
+
+          <div class="flex items-start gap-3 px-4 py-3">
+            <span class="text-[0.75rem] font-semibold text-muted w-28 min-w-[7rem] pt-0.5 flex-shrink-0">รหัสผ่าน VNC</span>
+            <span id="vnc-password-zone" class="zone {{ 'zone-safe' if vnc.password_set else 'zone-mute' }}">
+              {{ 'ตั้งแล้ว' if vnc.password_set else 'ยังไม่ได้ตั้ง' }}
+            </span>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Service control -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:zap" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ควบคุม Service</h2>
+        </div>
+        <div class="p-4 flex flex-col gap-3">
+          <div class="flex flex-wrap gap-2">
+            <button data-vnc-action="start" type="button" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-accent rounded-lg bg-accent text-white text-[0.8rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent">
+              <iconify-icon icon="lucide:play" width="13" height="13"></iconify-icon>Start
+            </button>
+            <button data-vnc-action="stop" type="button" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:square" width="13" height="13"></iconify-icon>Stop
+            </button>
+            <button data-vnc-action="restart" type="button" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:refresh-cw" width="13" height="13"></iconify-icon>Restart
+            </button>
+            <button data-vnc-action="enable" type="button" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:toggle-right" width="13" height="13"></iconify-icon>Enable
+            </button>
+            <button data-vnc-action="disable" type="button" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.8rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:toggle-left" width="13" height="13"></iconify-icon>Disable
+            </button>
+          </div>
+          <div class="msg" id="vnc-service-msg" aria-live="polite"></div>
+        </div>
+      </div>
+
+    </div><!-- /tab-status -->
+
+
+    <!-- ════════ TAB: ตั้งค่า Service ════════ -->
+    <div id="tab-setup" class="tab-panel flex flex-col gap-4">
+
+      <!-- Info banner -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+        <div class="text-[0.82rem] flex flex-col gap-1">
+          <span class="font-semibold text-ink">Service นี้คืออะไร</span>
+          <span class="text-muted leading-relaxed">
+            x11vnc จะรันเป็น systemd service ชื่อ <code class="font-mono text-[0.78rem] bg-surface px-1 py-0.5 rounded">x11vnc.service</code>
+            คอย mirror หน้าจอจริง ออกไปให้เครื่องอื่นเชื่อมต่อผ่าน VNC client — เลือก user ที่ต้องการให้ x11vnc
+            รันในนามของเจ้าของ session นั้น ระบบจะตั้งค่า
+            <code class="font-mono text-[0.78rem] bg-surface px-1 py-0.5 rounded">User=</code> และ
+            <code class="font-mono text-[0.78rem] bg-surface px-1 py-0.5 rounded">-auth</code> ให้อัตโนมัติ
+          </span>
+        </div>
+      </div>
+
+      <!-- Setup form -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:server-cog" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ตั้งค่า x11vnc.service</h2>
+        </div>
+        <form id="vnc-setup-form" class="p-4 flex flex-col gap-3.5" onsubmit="return submitVncSetup(event)">
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">Run as user <span class="text-faint font-normal">— กำหนด User= และ -auth ให้อัตโนมัติ</span></label>
+            <select id="vnc-user" oninput="updateUnitPreview()" {{ 'disabled' if not vnc.installed }}
+                    class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition disabled:bg-surface disabled:text-faint">
+              {% for u in vnc.users %}
+              <option value="{{ u.username }}" data-home="{{ u.home }}" {{ 'selected' if u.username == vnc.run_user else '' }}>
+                {{ u.username }} (uid {{ u.uid }}{{ ' · auto-login' if u.is_autologin else '' }})
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-ink">Listen IP <span class="text-faint font-normal">— ค่า -listen</span></label>
+              <input type="text" id="vnc-listen-ip" value="{{ vnc.listen_ip or '' }}" oninput="updateUnitPreview()"
+                     placeholder="เช่น 10.8.0.56 (IP วง Wireguard)" {{ 'disabled' if not vnc.installed }}
+                     class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition disabled:bg-surface disabled:text-faint">
+              <p class="text-[0.68rem] text-faint">แนะนำให้ใช้ IP ของ Wireguard VPN แทน 0.0.0.0 เพื่อไม่เปิดพอร์ตออกอินเทอร์เน็ตตรงๆ</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[0.75rem] font-semibold text-ink">RFB Port <span class="text-faint font-normal">— ค่า -rfbport</span></label>
+              <input type="number" id="vnc-port" value="{{ vnc.port or 5900 }}" oninput="updateUnitPreview()"
+                     {{ 'disabled' if not vnc.installed }}
+                     class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition disabled:bg-surface disabled:text-faint">
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">Display <span class="text-faint font-normal">— ค่า -display (ปกติไม่ต้องแก้)</span></label>
+            <input type="text" id="vnc-display" value="{{ vnc.display or ':0' }}" oninput="updateUnitPreview()"
+                   {{ 'disabled' if not vnc.installed }}
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-mono outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 transition disabled:bg-surface disabled:text-faint max-w-[140px]">
+          </div>
+
+          <div class="flex flex-col gap-1.5 pt-1">
+            <label class="text-[0.75rem] font-semibold text-ink flex items-center gap-1.5">
+              <iconify-icon icon="lucide:eye" width="12" height="12" class="text-faint"></iconify-icon>
+              ตัวอย่างไฟล์ /etc/systemd/system/x11vnc.service
+            </label>
+            <textarea id="vnc-unit-preview" readonly rows="14"
+                      class="w-full px-3 py-2.5 border border-line/15 rounded-lg bg-surface text-ink text-[0.75rem] font-mono leading-relaxed outline-none resize-y cursor-default select-all"></textarea>
+          </div>
+
+          <div class="flex flex-wrap gap-2 pt-1">
+            <button type="submit" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent">
+              <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>บันทึกและใช้งาน (Apply)
+            </button>
+            <button type="button" onclick="updateUnitPreview()" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 px-4 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] font-semibold hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <iconify-icon icon="lucide:rotate-ccw" width="13" height="13"></iconify-icon>รีเซ็ตพรีวิว
+            </button>
+          </div>
+          <p class="text-[0.72rem] text-faint">"บันทึกและใช้งาน" จะเขียนไฟล์ service, รัน daemon-reload และ enable --now ให้อัตโนมัติ</p>
+          <div class="msg" id="vnc-setup-msg" aria-live="polite"></div>
+        </form>
+      </div>
+
+    </div><!-- /tab-setup -->
+
+
+    <!-- ════════ TAB: รหัสผ่าน VNC ════════ -->
+    <div id="tab-password" class="tab-panel flex flex-col gap-4">
+
+      <!-- Info banner -->
+      <div class="bg-card border border-line/10 rounded-xl px-4 py-4 flex items-start gap-3">
+        <iconify-icon icon="lucide:info" width="15" height="15" class="text-accent flex-shrink-0 mt-0.5"></iconify-icon>
+        <div class="text-[0.82rem] flex flex-col gap-1">
+          <span class="font-semibold text-ink">รหัสผ่าน VNC คืออะไร</span>
+          <span class="text-muted leading-relaxed">
+            ใช้สำหรับยืนยันตัวตนตอนเชื่อมต่อผ่าน VNC client — เทียบเท่าคำสั่ง
+            <code class="font-mono text-[0.78rem] bg-surface px-1 py-0.5 rounded">x11vnc -storepasswd</code>
+            รหัสผ่านจะถูกเข้ารหัสและบันทึกไว้ที่ <code class="font-mono text-[0.78rem] bg-surface px-1 py-0.5 rounded">/etc/x11vnc.pass</code>
+            ไม่ถูกเก็บไว้ในระบบ VAS
+          </span>
+        </div>
+      </div>
+
+      <!-- Set password card -->
+      <div class="bg-card border border-line/10 rounded-xl">
+        <div class="px-4 py-4 border-b border-line/10 flex items-center gap-2">
+          <iconify-icon icon="lucide:key-round" width="15" height="15" class="text-faint flex-shrink-0"></iconify-icon>
+          <h2 class="text-[0.88rem] font-semibold text-ink">ตั้งรหัสผ่าน VNC</h2>
+        </div>
+        <form id="vnc-password-form" class="p-4 flex flex-col gap-3.5" onsubmit="return submitVncPassword(event)">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">รหัสผ่านใหม่</label>
+            <input type="password" id="vnc-pw-new" placeholder="อย่างน้อย 8 ตัวอักษร" required minlength="8"
+                   {{ 'disabled' if not vnc.installed }}
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition disabled:bg-surface disabled:text-faint">
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[0.75rem] font-semibold text-ink">ยืนยันรหัสผ่าน</label>
+            <input type="password" id="vnc-pw-confirm" placeholder="กรอกอีกครั้ง" required
+                   {{ 'disabled' if not vnc.installed }}
+                   class="px-3 py-2 border border-line/15 rounded-lg bg-card text-ink text-[0.82rem] outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/10 placeholder:text-faint transition disabled:bg-surface disabled:text-faint">
+          </div>
+          <div>
+            <button type="submit" {{ 'disabled' if not vnc.installed }}
+                    class="inline-flex items-center gap-1.5 px-4 py-2 border border-accent rounded-lg bg-accent text-white text-[0.82rem] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent">
+              <iconify-icon icon="lucide:save" width="13" height="13"></iconify-icon>ตั้งรหัสผ่าน
+            </button>
+          </div>
+          <div class="msg" id="vnc-password-msg" aria-live="polite"></div>
+        </form>
+      </div>
+
+    </div><!-- /tab-password -->
+
+  </div><!-- /content -->
+
+</div><!-- /root -->
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+
+  var installed = document.querySelector("[data-installed]").dataset.installed === "true";
+  var serviceMsgEl  = document.getElementById("vnc-service-msg");
+  var setupMsgEl    = document.getElementById("vnc-setup-msg");
+  var passwordMsgEl = document.getElementById("vnc-password-msg");
+
+  /* ── Tab switching ── */
+  window.vncTab = function (id) {
+    document.querySelectorAll(".tab-panel").forEach(function (el) { el.classList.remove("is-active"); });
+    var p = document.getElementById("tab-" + id);
+    if (p) p.classList.add("is-active");
+    document.querySelectorAll(".vnc-tab-btn").forEach(function (btn) {
+      var on = btn.dataset.tab === id;
+      btn.classList.toggle("bg-accent\/8", on);
+      btn.classList.toggle("text-accent", on);
+      btn.classList.toggle("font-semibold", on);
+      btn.classList.toggle("text-muted", !on);
+    });
+  };
+
+  function setMsg(el, text, type) {
+    if (!el) return;
+    el.className = "msg" + (type === "ok" ? " msg-ok" : type === "error" ? " msg-error" : "");
+    el.textContent = text;
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d.errors || ["Request failed"]).join(" "));
+        return d;
+      });
+    });
+  }
+
+  function setText(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  function setZoneText(id, text, ok) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("zone-safe", ok);
+    el.classList.toggle("zone-mute", !ok);
+  }
+
+  /* ── Refresh status fields without full page reload ── */
+  function refreshStatus() {
+    fetch("{{ url_for('x11vnc_status_api') }}")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status !== "ok") return;
+        setText("vnc-enabled-label", d.service_enabled || "unknown");
+        setText("vnc-active-label", d.service_active || "unknown");
+        setText("vnc-listen-label", d.listen_ip ? (d.listen_ip + ":" + d.port) : "—");
+        setText("vnc-listen-address", d.listen_ip ? (d.listen_ip + ":" + d.port) : "ยังไม่ได้ตั้งค่า");
+        setZoneText("vnc-service-enabled-zone", d.service_enabled || "unknown", d.service_enabled === "enabled");
+        setZoneText("vnc-service-active-zone", d.service_active || "unknown", d.service_active === "active");
+        setZoneText("vnc-password-zone", d.password_set ? "ตั้งแล้ว" : "ยังไม่ได้ตั้ง", !!d.password_set);
+      })
+      .catch(function () {});
+  }
+
+  /* ── systemd unit live preview (ฝั่ง frontend ล้วนๆ — สำหรับพรีวิวก่อนกด Apply เท่านั้น) ── */
+  window.updateUnitPreview = function () {
+    var userSel = document.getElementById("vnc-user");
+    var preview = document.getElementById("vnc-unit-preview");
+    if (!userSel || !preview) return;
+    var user = userSel.value || "-";
+    var home = (userSel.selectedOptions[0] && userSel.selectedOptions[0].dataset.home) || ("/home/" + user);
+    var ip = document.getElementById("vnc-listen-ip").value || "0.0.0.0";
+    var port = document.getElementById("vnc-port").value || "5900";
+    var display = document.getElementById("vnc-display").value || ":0";
+    preview.value =
+      "[Unit]\n" +
+      "Description=x11vnc mirror service\n" +
+      "After=multi-user.target\n\n" +
+      "[Service]\n" +
+      "Type=simple\n" +
+      "User=" + user + "\n" +
+      "ExecStart=/usr/bin/x11vnc -display " + display + " -auth " + home + "/.Xauthority \\\n" +
+      "  -forever -loop -noxdamage -repeat -shared \\\n" +
+      "  -rfbauth /etc/x11vnc.pass -rfbport " + port + " \\\n" +
+      "  -listen " + ip + "\n" +
+      "Restart=on-failure\n" +
+      "RestartSec=5\n\n" +
+      "[Install]\n" +
+      "WantedBy=multi-user.target\n";
+  };
+  if (installed) updateUnitPreview();
+
+  /* ── Service actions ── */
+  document.querySelectorAll("[data-vnc-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      var action = btn.dataset.vncAction;
+      setMsg(serviceMsgEl, action + " กำลังดำเนินการ...");
+      postJson("{{ url_for('x11vnc_action_api') }}", { action: action })
+        .then(function () {
+          setMsg(serviceMsgEl, action + " เสร็จสิ้น", "ok");
+          refreshStatus();
+        })
+        .catch(function (e) { setMsg(serviceMsgEl, e.message, "error"); });
+    });
+  });
+
+  /* ── Setup form ── */
+  window.submitVncSetup = function (e) {
+    e.preventDefault();
+    if (!installed) return false;
+    var body = {
+      listen_ip: document.getElementById("vnc-listen-ip").value,
+      port: document.getElementById("vnc-port").value,
+      display: document.getElementById("vnc-display").value,
+      user: document.getElementById("vnc-user").value,
+    };
+    setMsg(setupMsgEl, "กำลังบันทึก...");
+    postJson("{{ url_for('x11vnc_apply_api') }}", body)
+      .then(function (d) {
+        setMsg(setupMsgEl, d.message || "บันทึกเรียบร้อย", "ok");
+        setText("vnc-run-user", body.user);
+        refreshStatus();
+      })
+      .catch(function (e) { setMsg(setupMsgEl, e.message, "error"); });
+    return false;
+  };
+
+  /* ── Password form ── */
+  window.submitVncPassword = function (e) {
+    e.preventDefault();
+    if (!installed) return false;
+    var pw = document.getElementById("vnc-pw-new").value;
+    var confirm = document.getElementById("vnc-pw-confirm").value;
+    if (pw !== confirm) { setMsg(passwordMsgEl, "รหัสผ่านไม่ตรงกัน", "error"); return false; }
+    postJson("{{ url_for('x11vnc_password_api') }}", { password: pw })
+      .then(function (d) {
+        setMsg(passwordMsgEl, d.message || "ตั้งรหัสผ่านเรียบร้อย", "ok");
+        document.getElementById("vnc-pw-new").value = "";
+        document.getElementById("vnc-pw-confirm").value = "";
+        refreshStatus();
+      })
+      .catch(function (e) { setMsg(passwordMsgEl, e.message, "error"); });
+    return false;
+  };
+
+  /* ── SPA cleanup ── */
+  window.__vasCleanup = window.__vasCleanup || [];
+  window.__vasCleanup.push(function () { /* no intervals/SSE */ });
+
+})();
+</script>
+{% endblock %}

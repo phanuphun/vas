@@ -56,6 +56,7 @@ from system.status import (
     collect_openssh_status,
     collect_qr_reader_status,
     collect_remote_access_status,
+    collect_x11vnc_status,
     collect_screen_blank_config_status,
     collect_xorg_display_rotate_config_status,
     find_x11_session_owner,
@@ -69,6 +70,7 @@ from features.remote.anydesk import (
     set_unattended_password as anydesk_set_unattended_password,
 )
 from features.remote import openssh as openssh_manager
+from features.remote import x11vnc as x11vnc_manager
 from features.remote.openssh import (
     VALID_SERVICE_ACTIONS as OPENSSH_SERVICE_ACTIONS,
     SshdConfigValues as OpenSshConfigValues,
@@ -436,6 +438,107 @@ def create_app() -> Flask:
     @app.get("/anydesk")
     def anydesk_page() -> str:
         return render_template("anydesk.html", remote=collect_remote_access_status())
+
+    @app.get("/x11vnc")
+    def x11vnc_page() -> str:
+        status = collect_x11vnc_status()
+        users = list_kiosk_linux_users()
+        cfg = status.config
+        return render_template(
+            "x11vnc.html",
+            vnc={
+                "installed": status.installed,
+                "version": status.version,
+                "service_enabled": status.service_enabled,
+                "service_active": status.service_active,
+                "listen_ip": cfg.listen_ip if cfg else "",
+                "port": cfg.port if cfg else x11vnc_manager.DEFAULT_PORT,
+                "display": cfg.display if cfg else x11vnc_manager.DEFAULT_DISPLAY,
+                "run_user": cfg.user if cfg else (users[0].username if users else ""),
+                "password_set": status.password_set,
+                "users": [
+                    {"username": u.username, "home": str(u.home), "uid": u.uid, "is_autologin": u.is_autologin}
+                    for u in users
+                ],
+            },
+        )
+
+    @app.get("/api/x11vnc/status")
+    def x11vnc_status_api() -> dict[str, object]:
+        s = collect_x11vnc_status()
+        return {
+            "status": "ok",
+            "installed": s.installed,
+            "version": s.version,
+            "service_enabled": s.service_enabled,
+            "service_active": s.service_active,
+            "listen_ip": s.config.listen_ip if s.config else None,
+            "port": s.config.port if s.config else None,
+            "password_set": s.password_set,
+        }
+
+    @app.post("/api/x11vnc/action")
+    def x11vnc_action_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action", "")).strip()
+        if action not in x11vnc_manager.VALID_SERVICE_ACTIONS:
+            return {"status": "error", "errors": [f"Unknown x11vnc action: {action}"]}, 400
+        try:
+            result = x11vnc_manager.service_action(CommandRunner(), action)
+        except (CommandExecutionError, ValueError) as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip() or f"systemctl {action} x11vnc ล้มเหลว"
+            return {"status": "error", "errors": [detail]}, 500
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("x11vnc_service_action", {"action": action})
+        except Exception:
+            pass
+        return {"status": "ok", "action": action}
+
+    @app.post("/api/x11vnc/apply")
+    def x11vnc_apply_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        listen_ip = str(payload.get("listen_ip", "")).strip()
+        display = str(payload.get("display", "")).strip() or x11vnc_manager.DEFAULT_DISPLAY
+        user = str(payload.get("user", "")).strip()
+        try:
+            port = int(payload.get("port", x11vnc_manager.DEFAULT_PORT))
+        except (TypeError, ValueError):
+            return {"status": "error", "errors": ["Port ไม่ถูกต้อง"]}, 400
+        try:
+            ok, message = x11vnc_manager.apply_setup(CommandRunner(), listen_ip, port, display, user)
+        except CommandExecutionError as error:
+            return {"status": "error", "errors": [str(error)]}, 500
+        if not ok:
+            return {"status": "error", "errors": [message]}, 400
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("x11vnc_setup_applied", {"listen_ip": listen_ip, "port": port, "user": user})
+        except Exception:
+            pass
+        return {"status": "ok", "message": message}
+
+    @app.post("/api/x11vnc/password")
+    def x11vnc_password_api() -> tuple[dict[str, object], int] | dict[str, object]:
+        if _require_admin_user() is None:
+            return {"status": "error", "errors": ["ไม่มีสิทธิ์"]}, 403
+        payload = request.get_json(silent=True) or {}
+        password = str(payload.get("password", ""))
+        ok, message = x11vnc_manager.set_vnc_password(password)
+        if not ok:
+            return {"status": "error", "errors": [message]}, 400
+        try:
+            from core.database import log_audit as _db_audit
+            _db_audit("x11vnc_password_set", {})
+        except Exception:
+            pass
+        return {"status": "ok", "message": message}
 
     @app.get("/openssh")
     def openssh_page() -> str:
@@ -2956,6 +3059,7 @@ def create_app() -> Flask:
                 "wireguard": fake or _shutil.which("wg") is not None,
                 "anydesk":   fake or _shutil.which("anydesk") is not None,
                 "openssh":   fake or _shutil.which("sshd") is not None,
+                "x11vnc":    fake or _shutil.which("x11vnc") is not None,
                 "docker":    fake or _shutil.which("docker") is not None,
                 "pm2":       fake or _shutil.which("pm2") is not None,
             },
