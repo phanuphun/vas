@@ -6,8 +6,10 @@ payload.py — ประกอบ wire payload (JSON body) ที่ใช้ร
 Field ตั้งชื่อ/รูปแบบตรงกับ qr500_reader.payload.build_scan_body() (โปรเจกต์พี่น้องที่อ่าน
 QR500-BM ตัวเดียวกันแต่ deploy แยกจาก VAS -- ดู qr500-reader/src/qr500_reader/payload.py) ทุก
 field ยกเว้น 2 จุด:
-  1. "scan" (VAS) แทน "data" (qr500-reader) -- "scan" เป็นชื่อเดิมของ VAS เองมาตั้งแต่ SSE event/
-     DB schema อยู่แล้ว เปลี่ยนตอนนี้จะกระทบหลายจุดเกินจำเป็นโดยไม่ได้ประโยชน์อะไรเพิ่ม
+  1. มีทั้ง "scan" (ชื่อเดิมของ VAS เองมาตั้งแต่ SSE event/DB schema) และ "data" (ชื่อของ
+     qr500-reader) พร้อมกัน -- ค่าเดียวกันเป๊ะๆ เสมอ ("data" คือ alias ของ "scan") เพิ่ม "data"
+     เข้ามาเพื่อให้ downstream consumer ที่อ่านตาม qr500-reader schema ใช้ payload จาก VAS ได้
+     โดยไม่ต้องแก้ ไม่ลบ "scan" ออกเพราะ consumer เดิมของ VAS ยังอ้างอิง field นี้อยู่
   2. ไม่มี field "source" -- เดิม VAS เคยใส่ "source": "zkteco-qr500" เพิ่มเข้าไปเอง (ไม่มีใน
      qr500-reader) ตัดออกให้ตรงกับ qr500-reader เป๊ะๆ ตามที่ตกลงกันไว้
 
@@ -58,6 +60,7 @@ def build_scan_body(event: dict[str, Any]) -> dict[str, Any]:
         "mode": "full",
         "read_mode": read_mode if read_mode is not None else UNDEFINED,
         "scan": event.get("scan"),
+        "data": event.get("scan"),
         "raw_keycode": raw_keycode if raw_keycode is not None else UNDEFINED,
         "raw_report": raw_report,
         "raw_bytes": raw_bytes,

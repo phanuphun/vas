@@ -1,5 +1,14 @@
 # Changelog
 
+## [2026-08-10]
+
+### เพิ่ม field "data" ใน QR scan payload (webhook/MQTT) เป็น alias ของ "scan"
+- **ที่มา**: ผู้ใช้ขอให้ payload ที่ export ออก (webhook/MQTT) มี property `"data"` เพิ่มเข้ามาโดยส่งค่าเดียวกับ `"scan"` — ให้ review ตัวอย่าง payload ก่อน implement แล้ว approve
+- `src/features/qr/payload.py`: `build_scan_body()` เพิ่ม `"data": event.get("scan")` ต่อจาก `"scan"` เดิม (ค่าเดียวกันเป๊ะ ไม่ใช่ field ใหม่ที่มีความหมายต่างกัน) แก้ docstring ที่เคยบอกว่า "scan" (ไม่ใช่ "data") เป็นข้อยกเว้นเดียวที่ตกลงกันไว้ — ตอนนี้ส่งทั้งคู่พร้อมกันแทน ไม่ลบ "scan" ออกเพราะ consumer เดิมของ VAS ยังอ้างอิง field นี้อยู่
+- `tests/test_qr_payload.py`: แก้ `test_build_scan_body_uses_scan_not_data` (เดิม assert ว่าไม่มี "data") เป็น `test_build_scan_body_has_scan_and_data_alias` (assert ว่า "scan" และ "data" มีค่าเท่ากัน)
+- **ตรวจสอบ**: `python3 -m py_compile src/features/qr/payload.py` ผ่าน รัน `pytest tests/test_qr_payload.py` ผ่านทุกเคส — **ยังไม่ได้ commit**
+
+
 ## [2026-08-06]
 
 ### เพิ่มฟีเจอร์ x11vnc — remote เข้าจอเครื่องผ่าน VNC (หน้าใหม่ใต้ "เครือข่ายและรีโมท" + ติดตั้งได้จากหน้า "ซอฟต์แวร์ระบบ")

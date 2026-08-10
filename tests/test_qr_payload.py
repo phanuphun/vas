@@ -2,8 +2,8 @@
 both Webhook (features/qr/webhook.py) and MQTT (features/mqtt/client.py) so the two sinks no
 longer send two different shapes for the same scan (webhook used to use scan/ts/source, mqtt
 used data/timestamp with no source at all). Format matches qr500_reader.payload.build_scan_body()
-of the sibling qr500-reader project field-for-field, except "scan" (not "data") and no "source"
-field -- see CHANGELOG.md."""
+of the sibling qr500-reader project field-for-field, except VAS sends both "scan" and "data"
+(same value, "data" is an alias for "scan") and no "source" field -- see CHANGELOG.md."""
 from __future__ import annotations
 
 import sys
@@ -35,11 +35,12 @@ def test_build_scan_body_no_source_field() -> None:
     assert "source" not in body
 
 
-def test_build_scan_body_uses_scan_not_data() -> None:
-    """qr500-reader ใช้ "data" -- VAS คงชื่อเดิม "scan" ไว้ (ข้อยกเว้นเดียวที่ตกลงกันไว้)"""
+def test_build_scan_body_has_scan_and_data_alias() -> None:
+    """qr500-reader ใช้ "data" -- VAS คงชื่อเดิม "scan" ไว้ และเพิ่ม "data" เป็น alias ค่าเดียวกัน
+    เพื่อให้ downstream consumer ที่ยึด schema ของ qr500-reader ใช้งานได้ด้วยโดยไม่ต้องแก้"""
     body = build_scan_body(_base_event(scan="hello-world"))
     assert body["scan"] == "hello-world"
-    assert "data" not in body
+    assert body["data"] == "hello-world"
 
 
 def test_build_scan_body_hidraw_mode() -> None:
