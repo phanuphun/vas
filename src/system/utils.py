@@ -10,7 +10,7 @@ from core.runner import CommandRunner
 
 def require_linux() -> None:
     if platform.system().lower() != "linux":
-        raise RuntimeError("This installer is intended for Ubuntu Linux.")
+        raise RuntimeError("This installer is intended for Linux (Ubuntu/Debian).")
 
 
 def require_root() -> None:
@@ -19,19 +19,47 @@ def require_root() -> None:
         raise RuntimeError("Run this installer as root, for example: sudo vending-auto-setup install")
 
 
-def detect_ubuntu_codename() -> str:
-    os_release = Path("/etc/os-release")
+def read_os_release(path: Path | None = None) -> dict[str, str]:
+    os_release = path if path is not None else Path("/etc/os-release")
     if not os_release.exists():
-        return "jammy"
+        return {}
 
     values: dict[str, str] = {}
     for line in os_release.read_text(encoding="utf-8").splitlines():
-        if "=" not in line:
+        if not line or line.startswith("#") or "=" not in line:
             continue
         key, raw_value = line.split("=", 1)
         values[key] = raw_value.strip().strip('"')
 
-    return values.get("VERSION_CODENAME", "jammy")
+    return values
+
+
+def detect_os_id(path: Path | None = None) -> str:
+    """Return OS identifier (e.g. 'ubuntu', 'debian'). Defaults to 'ubuntu'."""
+    values = read_os_release(path)
+    os_id = values.get("ID", "").lower()
+    if os_id in ("ubuntu", "debian"):
+        return os_id
+    id_like = values.get("ID_LIKE", "").lower().split()
+    if "ubuntu" in id_like:
+        return "ubuntu"
+    if "debian" in id_like:
+        return "debian"
+    return os_id or "ubuntu"
+
+
+def detect_os_codename(path: Path | None = None) -> str:
+    """Return OS version codename (e.g. 'jammy', 'noble', 'bookworm', 'trixie')."""
+    values = read_os_release(path)
+    if "VERSION_CODENAME" in values and values["VERSION_CODENAME"]:
+        return values["VERSION_CODENAME"]
+    os_id = detect_os_id(path)
+    return "bookworm" if os_id == "debian" else "jammy"
+
+
+def detect_ubuntu_codename(path: Path | None = None) -> str:
+    """Backward-compatible alias for detect_os_codename."""
+    return detect_os_codename(path)
 
 
 def command_exists(runner: CommandRunner, command: str) -> bool:

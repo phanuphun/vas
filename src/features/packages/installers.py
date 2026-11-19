@@ -5,7 +5,7 @@ from pathlib import Path
 from system.clock import SystemClockPreflight
 from core.config import InstallConfig
 from core.runner import CommandRunner
-from system.utils import detect_ubuntu_codename
+from system.utils import detect_os_codename, detect_os_id, detect_ubuntu_codename
 
 
 APT_COMMON_PACKAGES = (
@@ -59,7 +59,24 @@ class PhaseOneInstaller:
                 raise ValueError(f"Unsupported install component: {component}")
         self.print_versions(components)
 
+    def _cleanup_mismatched_docker_repo(self) -> None:
+        if self.runner.dry_run:
+            return
+        docker_list = Path("/etc/apt/sources.list.d/docker.list")
+        if not docker_list.exists():
+            return
+        try:
+            content = docker_list.read_text(encoding="utf-8")
+            os_id = detect_os_id()
+            if os_id == "debian" and "download.docker.com/linux/ubuntu" in content:
+                docker_list.unlink(missing_ok=True)
+            elif os_id == "ubuntu" and "download.docker.com/linux/debian" in content:
+                docker_list.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def prepare_apt(self) -> None:
+        self._cleanup_mismatched_docker_repo()
         self.runner.run(["apt-get", "update"])
         self.runner.run(["apt-get", "install", "-y", *APT_COMMON_PACKAGES])
 
@@ -87,21 +104,23 @@ class PhaseOneInstaller:
     def install_docker(self) -> None:
         self.runner.run(["apt-get", "remove", "-y", *OLD_DOCKER_PACKAGES], check=False)
         self.runner.run(["install", "-m", "0755", "-d", "/etc/apt/keyrings"])
+        os_id = detect_os_id()
+        gpg_url = f"https://download.docker.com/linux/{os_id}/gpg"
         self.runner.run(
             [
                 "curl",
                 "-fsSL",
-                "https://download.docker.com/linux/ubuntu/gpg",
+                gpg_url,
                 "-o",
                 "/etc/apt/keyrings/docker.asc",
             ]
         )
         self.runner.run(["chmod", "a+r", "/etc/apt/keyrings/docker.asc"])
-        codename = detect_ubuntu_codename() or self.config.ubuntu_codename
+        codename = detect_os_codename() or self.config.ubuntu_codename
         architecture = self._detect_dpkg_architecture()
         docker_source = (
             f"deb [arch={architecture} signed-by=/etc/apt/keyrings/docker.asc] "
-            f"https://download.docker.com/linux/ubuntu {codename} stable"
+            f"https://download.docker.com/linux/{os_id} {codename} stable"
         )
         self._write_file("/etc/apt/sources.list.d/docker.list", docker_source + "\n")
         self.runner.run(["apt-get", "update"])

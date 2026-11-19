@@ -213,19 +213,21 @@ PACKAGES: list[dict[str, Any]] = [
         "children":    [],
         "check":       _which_check("docker", ("docker", "--version")),
         "install_cmds": [
+            ["rm", "-f", "/etc/apt/sources.list.d/docker.list"],
             ["apt-get", "update"],
             ["apt-get", "install", "-y", "ca-certificates", "curl"],
             ["install", "-m", "0755", "-d", "/etc/apt/keyrings"],
             [
                 "bash", "-lc",
-                "curl -fsSL https://download.docker.com/linux/ubuntu/gpg "
+                ". /etc/os-release && OS_ID=${ID:-ubuntu} && "
+                "curl -fsSL https://download.docker.com/linux/$OS_ID/gpg "
                 "-o /etc/apt/keyrings/docker.asc && chmod a+r /etc/apt/keyrings/docker.asc",
             ],
             [
                 "bash", "-lc",
-                ". /etc/os-release && echo "
+                ". /etc/os-release && OS_ID=${ID:-ubuntu} && echo "
                 "\"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] "
-                "https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable\" "
+                "https://download.docker.com/linux/$OS_ID $VERSION_CODENAME stable\" "
                 "| tee /etc/apt/sources.list.d/docker.list > /dev/null",
             ],
             ["apt-get", "update"],

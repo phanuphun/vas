@@ -120,3 +120,31 @@ def test_chromium_install_uses_ppa_deb_instead_of_snap_transitional_package() ->
     assert ["add-apt-repository", "-y", "ppa:xtradeb/apps"] in pkg["install_cmds"]
     assert ["apt-get", "install", "-y", "chromium"] in pkg["install_cmds"]
     assert ["apt-get", "install", "-y", "chromium-browser"] not in pkg["install_cmds"]
+
+
+def test_docker_install_cmds_supports_dynamic_distro() -> None:
+    """คำสั่งติดตั้ง docker ใน settings ต้องรองรับทั้ง Ubuntu และ Debian
+    โดยดึง $OS_ID จาก /etc/os-release ไม่ฮาร์ดโค้ด ubuntu อย่างเดียว"""
+    pkg = _PKG_MAP["docker"]
+    install_cmds_flat = " ".join(" ".join(cmd) for cmd in pkg["install_cmds"])
+    assert "$OS_ID" in install_cmds_flat
+    assert "${ID:-ubuntu}" in install_cmds_flat
+    assert ["rm", "-f", "/etc/apt/sources.list.d/docker.list"] in pkg["install_cmds"]
+
+
+def test_detect_os_id_and_codename(tmp_path: Any) -> None:
+    """ทดสอบการตรวจจับ OS ID และ Codename สำหรับ Debian และ Ubuntu"""
+    from system.utils import detect_os_codename, detect_os_id
+
+    # Debian 13 trixie
+    deb_file = tmp_path / "os-release-deb"
+    deb_file.write_text('ID=debian\nVERSION_CODENAME=trixie\n', encoding="utf-8")
+    assert detect_os_id(deb_file) == "debian"
+    assert detect_os_codename(deb_file) == "trixie"
+
+    # Ubuntu 22.04 jammy
+    ubu_file = tmp_path / "os-release-ubu"
+    ubu_file.write_text('ID=ubuntu\nVERSION_CODENAME=jammy\n', encoding="utf-8")
+    assert detect_os_id(ubu_file) == "ubuntu"
+    assert detect_os_codename(ubu_file) == "jammy"
+

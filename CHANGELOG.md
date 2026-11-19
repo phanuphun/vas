@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-11-19]
+
+### รองรับการติดตั้ง Docker บน Debian (Debian 13 trixie / Debian 12 bookworm) ควบคู่กับ Ubuntu (v0.1.21)
+- **ที่มา**: ผู้ใช้รัน `sudo vas install --component docker` บน Debian 13 (codename `trixie`) แล้วล้มเหลวด้วย `E: The repository 'https://download.docker.com/linux/ubuntu trixie Release' does not have a Release file.` เนื่องจากตัวติดตั้งเดิมฮาร์ดโค้ด URL ของ Docker repo เป็น Ubuntu ส่งผลให้การดึง repo ของ Debian 13 กลายเป็น `ubuntu trixie` ซึ่งไม่มีอยู่จริง
+- `src/system/utils.py`:
+  - ปรับปรุง `read_os_release()` ให้อ่าน `/etc/os-release` เป็น dictionary
+  - เพิ่ม `detect_os_id()` คืนค่า OS identifier (`ubuntu` หรือ `debian` โดยมี fallback ตาม `ID_LIKE`)
+  - เพิ่ม `detect_os_codename()` คืนค่า codename ตาม OS จริง (เช่น `trixie`, `bookworm`, `jammy`, `noble`)
+  - ปรับ `detect_ubuntu_codename()` ให้เป็น alias ของ `detect_os_codename()` เพื่อ backward compatibility
+  - ปรับ `require_linux()` ข้อความแจ้งเตือนรองรับ Linux (Ubuntu/Debian)
+- `src/features/packages/installers.py`:
+  - ใน `PhaseOneInstaller.install_docker`: เปลี่ยน GPG key URL และ APT repo URL จากที่ฮาร์ดโค้ด `ubuntu` เป็น `https://download.docker.com/linux/{os_id}/gpg` และ `https://download.docker.com/linux/{os_id} {codename} stable`
+  - ใน `PhaseOneInstaller.prepare_apt`: เพิ่ม `_cleanup_mismatched_docker_repo()` ตรวจสอบและลบไฟล์ `/etc/apt/sources.list.d/docker.list` ที่มี config ข้าม OS (เช่น เครื่อง Debian แต่มี repo Ubuntu ตกค้าง) ก่อนรัน `apt-get update` เพื่อป้องกัน error 100
+- `src/features/packages/settings.py`:
+  - ปรับ `install_cmds` ของ docker ให้ลบ `/etc/apt/sources.list.d/docker.list` เก่าออกก่อน `apt-get update`
+  - ปรับสคริปต์ shell ให้ดึง `$OS_ID` (`${ID:-ubuntu}`) จาก `/etc/os-release` อัตโนมัติสำหรับทั้ง GPG key และ APT source line
+- `tests/test_packages_settings.py`: เพิ่ม unit tests `test_docker_install_cmds_supports_dynamic_distro` และ `test_detect_os_id_and_codename`
+- **ตรวจสอบ**: รัน pytest ผ่านครบทุกเคส
+
 ## [2026-11-18]
 
 ### รองรับการติดตั้ง MCP runtime packages บน Ubuntu 24.04+ / 26.04 (PEP 668 externally-managed-environment และ --ignore-installed สำหรับ Debian packages) (v0.1.20)
