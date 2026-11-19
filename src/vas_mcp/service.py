@@ -7,7 +7,6 @@ from pathlib import Path
 
 from core.runner import CommandRunner
 
-
 MCP_PORT = 8899
 MCP_RUNTIME_PACKAGES = ("fastmcp", "uvicorn")
 
@@ -48,7 +47,8 @@ class McpServiceManager:
         _ensure_pip(self.runner)
         missing = [p for p in MCP_RUNTIME_PACKAGES if not _can_import(p)]
         if missing:
-            self.runner.run([sys.executable, "-m", "pip", "install", *missing], stream=True)
+            flags = _pip_install_flags(self.runner)
+            self.runner.run([sys.executable, "-m", "pip", "install", *flags, *missing], stream=True)
 
     def install(self, config: McpConfig) -> None:
         self.ensure_runtime_packages()
@@ -110,6 +110,15 @@ def _ensure_pip(runner: CommandRunner) -> None:
         return
     # Fall back to apt-get
     runner.run(["apt-get", "install", "-y", "python3-pip"], stream=True)
+
+
+def _pip_install_flags(runner: CommandRunner) -> list[str]:
+    """คืน flag เพิ่มเติมสำหรับ pip install (เช่น --break-system-packages และ --ignore-installed บน PEP 668 เช่น Ubuntu 24.04/26.04)"""
+    result = runner.run([sys.executable, "-m", "pip", "install", "--help"], check=False)
+    help_text = f"{result.stdout} {result.stderr}"
+    if result.returncode == 0 and "--break-system-packages" in help_text:
+        return ["--break-system-packages", "--ignore-installed"]
+    return []
 
 
 def _can_import(package: str) -> bool:

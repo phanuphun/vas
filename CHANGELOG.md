@@ -1,5 +1,14 @@
 # Changelog
 
+## [2026-11-18]
+
+### รองรับการติดตั้ง MCP runtime packages บน Ubuntu 24.04+ / 26.04 (PEP 668 externally-managed-environment และ --ignore-installed สำหรับ Debian packages) (v0.1.20)
+- **ที่มา**: ผู้ใช้รัน `sudo vas mcp start` บน Ubuntu 26.04 แล้วล้มเหลวด้วย `error: externally-managed-environment` จาก PEP 668 และเมื่อติดตั้ง pip จะพยายามถอนการติดตั้งแพ็กเกจเดิมของ Debian (เช่น `typing-extensions` จาก apt) แล้วล้มเหลวด้วย `error: uninstall-no-record-file`
+- `src/vas_mcp/service.py`: เพิ่ม `_pip_install_flags(runner)` ตรวจสอบว่า `pip install --help` รองรับ `--break-system-packages` หรือไม่ หากรองรับจะส่ง `["--break-system-packages", "--ignore-installed"]` เข้าไปอัตโนมัติ ทำให้ `ensure_runtime_packages()` ติดตั้ง `fastmcp` และ `uvicorn` ได้อย่างราบรื่นบนทั้ง Ubuntu 22.04, 24.04 และ 26.04+ โดยไม่ติดทั้ง PEP 668 และไม่ติด error การถอนการติดตั้ง Debian package ที่ไม่มีไฟล์ RECORD
+- `tests/test_mcp_admin.py`: เพิ่ม unit tests สำหรับ `_pip_install_flags()` ทั้งเคสที่มีและไม่มี flag รองรับ และทดสอบ `ensure_runtime_packages()` ว่าส่ง flags ครบถ้วนเข้าสู่ runner เมื่อตรวจพบ
+- **ตรวจสอบ**: รัน `pytest tests/test_mcp_admin.py` ผ่านครบ 18 เคส, `ruff check` และ `mypy` ผ่าน 0 error บนไฟล์ที่แก้ไข
+
+
 ## [2026-08-10]
 
 ### เพิ่ม field "data" ใน QR scan payload (webhook/MQTT) เป็น alias ของ "scan"

@@ -4,16 +4,17 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.runner import CommandRunner
+from core.runner import CommandResult, CommandRunner
+from system.status import MCP_TOOL_MODULES, McpStatus, collect_mcp_status
 from vas_mcp.service import (
     MCP_VALID_ACTIONS,
     McpConfig,
+    McpServiceManager,
+    _pip_install_flags,
     default_mcp_config,
     runtime_ready,
     service_action,
 )
-from system.status import MCP_TOOL_MODULES, McpStatus, collect_mcp_status
-
 
 # ---------------------------------------------------------------------------
 # collect_mcp_status() — dev-fake mode (VAS_DEV_FAKE_INSTALLED=1)
@@ -172,3 +173,49 @@ def test_service_action_dry_run_never_executes_real_subprocess() -> None:
         service_action(runner, "restart")
         service_action(runner, "disable")
     mock_run.assert_not_called()
+
+# ---------------------------------------------------------------------------
+# McpServiceManager.ensure_runtime_packages & PEP 668 (--break-system-packages)
+# ---------------------------------------------------------------------------
+
+def test_pip_install_flags_detects_break_system_packages() -> None:
+    runner = Mock(spec=CommandRunner)
+    runner.run.return_value = CommandResult(
+        args=("pip", "install", "--help"),
+        returncode=0,
+        stdout="--break-system-packages  Allow pip to modify an EXTERNALLY-MANAGED Python installation\n",
+        stderr="",
+    )
+    flags = _pip_install_flags(runner)
+    assert flags == ["--break-system-packages", "--ignore-installed"]
+
+
+def test_pip_install_flags_empty_when_flag_not_supported() -> None:
+    runner = Mock(spec=CommandRunner)
+    runner.run.return_value = CommandResult(
+        args=("pip", "install", "--help"),
+        returncode=0,
+        stdout="Install Options:\n  -r, --requirement <file>\n",
+        stderr="",
+    )
+    flags = _pip_install_flags(runner)
+    assert flags == []
+
+
+def test_ensure_runtime_packages_installs_with_break_system_packages() -> None:
+    runner = Mock(spec=CommandRunner)
+    runner.dry_run = False
+    manager = McpServiceManager(runner)
+
+    with patch("vas_mcp.service._ensure_pip"), \
+         patch("vas_mcp.service._can_import", return_value=False), \
+         patch("vas_mcp.service._pip_install_flags", return_value=["--break-system-packages"]):
+        manager.ensure_runtime_packages()
+
+    assert runner.run.call_count == 1
+    call_args, call_kwargs = runner.run.call_args
+    cmd = call_args[0]
+    assert "--break-system-packages" in cmd
+    assert "fastmcp" in cmd
+    assert "uvicorn" in cmd
+    assert call_kwargs.get("stream") is True
